@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: aceromax-pos-backend
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aceromax-pos-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: APP_SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FACTURAMA_USER
+        sync: false
+      - key: FACTURAMA_PASSWORD
+        sync: false
+      - key: FACTURAMA_RFC_EMISOR
+        sync: false
+      - key: FACTURAMA_LUGAR_EXPEDICION
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_VENTAS_FROM
+        sync: false
+      - key: TWILIO_COBRANZA_FROM
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://aceromax-pos-frontend.onrender.com
+
+  - type: web
+    name: aceromax-pos-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://aceromax-pos-backend.onrender.com
+
+databases:
+  - name: aceromax-pos-db
+    plan: starter
+    postgresMajorVersion: "16"
