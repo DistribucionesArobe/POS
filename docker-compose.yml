@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16
+    container_name: aceromax-db
+    environment:
+      POSTGRES_USER: aceromax
+      POSTGRES_PASSWORD: aceromax
+      POSTGRES_DB: aceromax
+    ports:
+      - "5432:5432"
+    volumes:
+      - aceromax_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aceromax"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: aceromax-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://aceromax:aceromax@db:5432/aceromax
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    container_name: aceromax-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  aceromax_db_data:
+    external: true
+    name: aceromax-db-data
