@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/corte-caja")
 def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
-    f = fecha or date.today()
+    f = fecha or datetime.utcnow().date()
     inicio = datetime.combine(f, datetime.min.time())
     fin = inicio + timedelta(days=1)
     rows = (
