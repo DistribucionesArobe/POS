@@ -14,14 +14,19 @@ type ProductoT = {
   variantes: Variante[];
 };
 
+const FORM_VACIO = {
+  nombre: "", categoria: "", marca: "", clave_prod_serv_sat: "",
+  sku: "", presentacion: "Default", unidad: "PZA", clave_unidad_sat: "H87",
+  precio_publico: 0, costo_promedio: 0, stock_minimo: 0,
+};
+
 export default function Productos() {
   const [productos, setProductos] = useState<ProductoT[]>([]);
   const [busqueda, setBusqueda] = useState("");
+  const [form, setForm] = useState(FORM_VACIO);
+  const [mostrarForm, setMostrarForm] = useState(false);
 
-  // Form nuevo producto
-  const [nuevoProd, setNuevoProd] = useState({ nombre: "", categoria: "", marca: "", clave_prod_serv_sat: "" });
-
-  // Form nueva variante
+  // Para agregar variante adicional a un producto existente
   const [varProductoId, setVarProductoId] = useState<number | null>(null);
   const [nuevaVar, setNuevaVar] = useState({
     sku: "", presentacion: "", unidad: "PZA", clave_unidad_sat: "H87",
@@ -36,10 +41,15 @@ export default function Productos() {
   useEffect(() => { cargar(); }, []);
 
   async function crearProducto() {
-    if (!nuevoProd.nombre) return alert("Falta nombre");
-    await api.post("/api/productos", nuevoProd);
-    setNuevoProd({ nombre: "", categoria: "", marca: "", clave_prod_serv_sat: "" });
-    cargar();
+    if (!form.nombre || !form.sku) return alert("Faltan: nombre y SKU son obligatorios");
+    try {
+      await api.post("/api/productos/simple", form);
+      setForm(FORM_VACIO);
+      setMostrarForm(false);
+      cargar();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || err.message);
+    }
   }
 
   async function crearVariante() {
@@ -79,32 +89,77 @@ export default function Productos() {
       </nav>
       <h1>Productos</h1>
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div className="row">
-          <input className="input" placeholder="Buscar..." value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
-          <button className="btn" onClick={cargar}>Filtrar</button>
-        </div>
+      <div className="card" style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
+        <input className="input" placeholder="Buscar..." value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
+        <button className="btn" onClick={cargar}>Filtrar</button>
+        <button className="btn" onClick={() => setMostrarForm(!mostrarForm)}>
+          {mostrarForm ? "Cancelar" : "+ Nuevo producto"}
+        </button>
       </div>
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <h3>Nuevo producto (familia)</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-          <input className="input" placeholder="Nombre *" value={nuevoProd.nombre}
-            onChange={(e) => setNuevoProd({ ...nuevoProd, nombre: e.target.value })} />
-          <input className="input" placeholder="Categoria" value={nuevoProd.categoria}
-            onChange={(e) => setNuevoProd({ ...nuevoProd, categoria: e.target.value })} />
-          <input className="input" placeholder="Marca" value={nuevoProd.marca}
-            onChange={(e) => setNuevoProd({ ...nuevoProd, marca: e.target.value })} />
-          <input className="input" placeholder="Clave SAT (8 digitos)" value={nuevoProd.clave_prod_serv_sat}
-            onChange={(e) => setNuevoProd({ ...nuevoProd, clave_prod_serv_sat: e.target.value })} />
+      {mostrarForm && (
+        <div className="card" style={{ marginBottom: 12, background: "#f9fafb" }}>
+          <h3>Nuevo producto</h3>
+          <p style={{ color: "#6b7280", fontSize: 13, marginTop: -8 }}>
+            Lo basico: nombre + SKU + precio. La familia (categoria) es opcional.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div>
+              <label>Nombre *</label>
+              <input className="input" placeholder="Ej. Tablaroca 1/2" value={form.nombre}
+                onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+            </div>
+            <div>
+              <label>SKU *</label>
+              <input className="input" placeholder="Ej. TBL-12-244" value={form.sku}
+                onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+            </div>
+            <div>
+              <label>Presentacion</label>
+              <input className="input" placeholder="Ej. Hoja 1.22x2.44m" value={form.presentacion}
+                onChange={(e) => setForm({ ...form, presentacion: e.target.value })} />
+            </div>
+            <div>
+              <label>Precio publico *</label>
+              <input className="input" type="number" value={form.precio_publico}
+                onChange={(e) => setForm({ ...form, precio_publico: +e.target.value })} />
+            </div>
+            <div>
+              <label>Costo</label>
+              <input className="input" type="number" value={form.costo_promedio}
+                onChange={(e) => setForm({ ...form, costo_promedio: +e.target.value })} />
+            </div>
+            <div>
+              <label>Unidad</label>
+              <input className="input" value={form.unidad}
+                onChange={(e) => setForm({ ...form, unidad: e.target.value })} />
+            </div>
+            <div>
+              <label>Familia (opcional)</label>
+              <input className="input" placeholder="Ej. Tablaroca" value={form.categoria}
+                onChange={(e) => setForm({ ...form, categoria: e.target.value })} />
+            </div>
+            <div>
+              <label>Marca (opcional)</label>
+              <input className="input" placeholder="Ej. USG" value={form.marca}
+                onChange={(e) => setForm({ ...form, marca: e.target.value })} />
+            </div>
+            <div>
+              <label>Clave SAT (opcional)</label>
+              <input className="input" placeholder="8 digitos" value={form.clave_prod_serv_sat}
+                onChange={(e) => setForm({ ...form, clave_prod_serv_sat: e.target.value })} />
+            </div>
+          </div>
+          <button className="btn" style={{ marginTop: 12 }} onClick={crearProducto}>
+            Guardar producto
+          </button>
         </div>
-        <button className="btn" style={{ marginTop: 8 }} onClick={crearProducto}>Crear producto</button>
-      </div>
+      )}
 
       {productos.map((p) => (
         <div key={p.id} className="card" style={{ marginBottom: 12 }}>
-          <h3>{p.nombre} <small style={{ color: "#6b7280", fontWeight: "normal" }}>
+          <h3>{p.nombre} <small style={{ color: "#6b7280", fontWeight: "normal", fontSize: 13 }}>
             #{p.id} {p.categoria && `· ${p.categoria}`} {p.marca && `· ${p.marca}`}
           </small></h3>
 
@@ -139,11 +194,7 @@ export default function Productos() {
                   onChange={(e) => setNuevaVar({ ...nuevaVar, sku: e.target.value })} />
                 <input className="input" placeholder="Presentacion *" value={nuevaVar.presentacion}
                   onChange={(e) => setNuevaVar({ ...nuevaVar, presentacion: e.target.value })} />
-                <input className="input" placeholder="Unidad" value={nuevaVar.unidad}
-                  onChange={(e) => setNuevaVar({ ...nuevaVar, unidad: e.target.value })} />
-                <input className="input" placeholder="Clave SAT" value={nuevaVar.clave_unidad_sat}
-                  onChange={(e) => setNuevaVar({ ...nuevaVar, clave_unidad_sat: e.target.value })} />
-                <input className="input" type="number" placeholder="Precio publico" value={nuevaVar.precio_publico}
+                <input className="input" type="number" placeholder="Precio" value={nuevaVar.precio_publico}
                   onChange={(e) => setNuevaVar({ ...nuevaVar, precio_publico: +e.target.value })} />
                 <input className="input" type="number" placeholder="Costo" value={nuevaVar.costo_promedio}
                   onChange={(e) => setNuevaVar({ ...nuevaVar, costo_promedio: +e.target.value })} />
@@ -151,7 +202,9 @@ export default function Productos() {
                 <button onClick={() => setVarProductoId(null)}>Cancelar</button>
               </div>
             ) : (
-              <button onClick={() => setVarProductoId(p.id)}>+ Agregar variante</button>
+              <button onClick={() => setVarProductoId(p.id)} style={{ fontSize: 13 }}>
+                + Agregar otra variante (solo si necesitas multiples presentaciones del mismo producto)
+              </button>
             )}
           </div>
         </div>

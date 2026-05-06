@@ -1,18 +1,18 @@
-"""Productos y variantes - CRUD completo."""
+"""Productos y variantes - CRUD."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.models import Producto, VarianteProducto
-from app.schemas.producto import ProductoIn, VarianteIn, PrecioUpdate
+from app.schemas.producto import ProductoIn, ProductoSimpleIn, VarianteIn, PrecioUpdate
 
 router = APIRouter()
 
 
 @router.get("")
 def listar_productos(
-    q: str | None = Query(None, description="Busqueda por nombre/categoria"),
+    q: str | None = Query(None),
     activo: bool = True,
     db: Session = Depends(get_db),
 ):
@@ -47,7 +47,7 @@ def listar_productos(
 
 @router.get("/buscar-variante")
 def buscar_variante(
-    q: str = Query(..., min_length=2, description="Busqueda por SKU o descripcion"),
+    q: str = Query(..., min_length=2),
     db: Session = Depends(get_db),
 ):
     like = f"%{q}%"
@@ -55,10 +55,7 @@ def buscar_variante(
         db.query(VarianteProducto)
         .join(Producto)
         .filter(VarianteProducto.activo == True)
-        .filter(or_(
-            VarianteProducto.sku.ilike(like),
-            Producto.nombre.ilike(like),
-        ))
+        .filter(or_(VarianteProducto.sku.ilike(like), Producto.nombre.ilike(like)))
         .limit(20)
         .all()
     )
@@ -74,8 +71,31 @@ def buscar_variante(
     ]
 
 
+@router.post("/simple")
+def crear_producto_simple(payload: ProductoSimpleIn, db: Session = Depends(get_db)):
+    """Crea producto + 1 variante de un solo golpe (caso comun)."""
+    if db.query(VarianteProducto).filter(VarianteProducto.sku == payload.sku).first():
+        raise HTTPException(400, f"SKU '{payload.sku}' ya existe")
+    p = Producto(
+        nombre=payload.nombre, categoria=payload.categoria, marca=payload.marca,
+        clave_prod_serv_sat=payload.clave_prod_serv_sat,
+    )
+    db.add(p)
+    db.flush()
+    v = VarianteProducto(
+        producto_id=p.id, sku=payload.sku, presentacion=payload.presentacion,
+        unidad=payload.unidad, clave_unidad_sat=payload.clave_unidad_sat,
+        precio_publico=payload.precio_publico, costo_promedio=payload.costo_promedio,
+        stock_minimo=payload.stock_minimo,
+    )
+    db.add(v)
+    db.commit()
+    return {"producto_id": p.id, "variante_id": v.id, "sku": v.sku}
+
+
 @router.post("")
 def crear_producto(payload: ProductoIn, db: Session = Depends(get_db)):
+    """Crear solo el producto (familia) sin variante. Para casos con multiples variantes."""
     p = Producto(**payload.model_dump())
     db.add(p)
     db.commit()
