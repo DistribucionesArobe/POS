@@ -6,11 +6,13 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
   const nav = useNavigate();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
+    setLoading(true);
     try {
       const fd = new FormData();
       fd.append("username", email);
@@ -21,18 +23,32 @@ export default function Login() {
       nav("/");
     } catch {
       setErr("Credenciales invalidas");
+      setLoading(false);
     }
   }
 
   return (
-    <div className="container" style={{ maxWidth: 360, marginTop: 80 }}>
-      <h1>Aceromax POS</h1>
-      <form onSubmit={submit} className="card" style={{ display: "grid", gap: 12 }}>
-        <input className="input" placeholder="Correo" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input className="input" type="password" placeholder="Contrasena" value={password} onChange={(e) => setPassword(e.target.value)} />
-        {err && <div style={{ color: "#dc2626" }}>{err}</div>}
-        <button className="btn" type="submit">Entrar</button>
-      </form>
+    <div className="login-bg">
+      <div className="login-card">
+        <h1 className="login-title">ACEROMAX</h1>
+        <p className="login-subtitle">Sistema POS y facturacion</p>
+        <form onSubmit={submit} className="login-form">
+          <div>
+            <label>Correo</label>
+            <input className="input" type="email" autoFocus value={email}
+              onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+          <div>
+            <label>Contrasena</label>
+            <input className="input" type="password" value={password}
+              onChange={(e) => setPassword(e.target.value)} required />
+          </div>
+          {err && <div className="error-msg">{err}</div>}
+          <button className="btn" type="submit" disabled={loading} style={{ justifyContent: "center" }}>
+            {loading ? "Entrando..." : "Entrar"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

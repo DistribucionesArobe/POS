@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import Layout from "../components/Layout";
 import { api } from "../api/client";
 
 type Variante = {
@@ -20,13 +20,14 @@ const FORM_VACIO = {
   precio_publico: 0, costo_promedio: 0, stock_minimo: 0,
 };
 
+const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export default function Productos() {
   const [productos, setProductos] = useState<ProductoT[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [form, setForm] = useState(FORM_VACIO);
   const [mostrarForm, setMostrarForm] = useState(false);
 
-  // Para agregar variante adicional a un producto existente
   const [varProductoId, setVarProductoId] = useState<number | null>(null);
   const [nuevaVar, setNuevaVar] = useState({
     sku: "", presentacion: "", unidad: "PZA", clave_unidad_sat: "H87",
@@ -41,7 +42,7 @@ export default function Productos() {
   useEffect(() => { cargar(); }, []);
 
   async function crearProducto() {
-    if (!form.nombre || !form.sku) return alert("Faltan: nombre y SKU son obligatorios");
+    if (!form.nombre || !form.sku) return alert("Nombre y SKU son obligatorios");
     try {
       await api.post("/api/productos/simple", form);
       setForm(FORM_VACIO);
@@ -80,31 +81,30 @@ export default function Productos() {
   }
 
   return (
-    <div className="container">
-      <nav>
-        <Link to="/">Inicio</Link>
-        <Link to="/venta">Nueva venta</Link>
-        <Link to="/productos">Productos</Link>
-        <Link to="/cartera">Cartera</Link>
-      </nav>
-      <h1>Productos</h1>
-
-      <div className="card" style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
-        <input className="input" placeholder="Buscar..." value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
-        <button className="btn" onClick={cargar}>Filtrar</button>
+    <Layout
+      title="Productos"
+      subtitle={`${productos.length} productos registrados`}
+      actions={
         <button className="btn" onClick={() => setMostrarForm(!mostrarForm)}>
           {mostrarForm ? "Cancelar" : "+ Nuevo producto"}
         </button>
+      }
+    >
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="toolbar" style={{ marginBottom: 0 }}>
+          <input className="input" placeholder="Buscar por nombre o categoria..." value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
+          <button className="btn-icon" onClick={cargar}>Filtrar</button>
+        </div>
       </div>
 
       {mostrarForm && (
-        <div className="card" style={{ marginBottom: 12, background: "#f9fafb" }}>
-          <h3>Nuevo producto</h3>
-          <p style={{ color: "#6b7280", fontSize: 13, marginTop: -8 }}>
-            Lo basico: nombre + SKU + precio. La familia (categoria) es opcional.
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="card-header">Nuevo producto</h3>
+          <p style={{ color: "var(--color-text-muted)", margin: "-12px 0 16px", fontSize: 13 }}>
+            Lo basico: nombre + SKU + precio. La familia y datos SAT son opcionales.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          <div className="form-grid">
             <div>
               <label>Nombre *</label>
               <input className="input" placeholder="Ej. Tablaroca 1/2" value={form.nombre}
@@ -121,7 +121,7 @@ export default function Productos() {
                 onChange={(e) => setForm({ ...form, presentacion: e.target.value })} />
             </div>
             <div>
-              <label>Precio publico *</label>
+              <label>Precio publico</label>
               <input className="input" type="number" value={form.precio_publico}
                 onChange={(e) => setForm({ ...form, precio_publico: +e.target.value })} />
             </div>
@@ -137,7 +137,7 @@ export default function Productos() {
             </div>
             <div>
               <label>Familia (opcional)</label>
-              <input className="input" placeholder="Ej. Tablaroca" value={form.categoria}
+              <input className="input" placeholder="Ej. Tablarocas" value={form.categoria}
                 onChange={(e) => setForm({ ...form, categoria: e.target.value })} />
             </div>
             <div>
@@ -151,45 +151,54 @@ export default function Productos() {
                 onChange={(e) => setForm({ ...form, clave_prod_serv_sat: e.target.value })} />
             </div>
           </div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={crearProducto}>
-            Guardar producto
-          </button>
+          <button className="btn" style={{ marginTop: 16 }} onClick={crearProducto}>Guardar producto</button>
         </div>
       )}
 
       {productos.map((p) => (
         <div key={p.id} className="card" style={{ marginBottom: 12 }}>
-          <h3>{p.nombre} <small style={{ color: "#6b7280", fontWeight: "normal", fontSize: 13 }}>
-            #{p.id} {p.categoria && `· ${p.categoria}`} {p.marca && `· ${p.marca}`}
-          </small></h3>
+          <h3 className="card-header">
+            <div>
+              {p.nombre}{" "}
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)", fontWeight: 400 }}>
+                #{p.id}{p.categoria && ` · ${p.categoria}`}{p.marca && ` · ${p.marca}`}
+              </span>
+            </div>
+          </h3>
 
           <table>
             <thead>
               <tr><th>SKU</th><th>Presentacion</th><th>Unidad</th>
-                  <th>Precio</th><th>Costo</th><th>Stock</th><th>Min</th><th></th></tr>
+                <th style={{ textAlign: "right" }}>Precio</th>
+                <th style={{ textAlign: "right" }}>Costo</th>
+                <th style={{ textAlign: "right" }}>Stock</th>
+                <th></th></tr>
             </thead>
             <tbody>
               {p.variantes.map((v) => (
                 <tr key={v.id} style={{ opacity: v.activo ? 1 : 0.4 }}>
-                  <td>{v.sku}</td>
+                  <td><code>{v.sku}</code></td>
                   <td>{v.presentacion}</td>
                   <td>{v.unidad}</td>
-                  <td>${v.precio_publico.toFixed(2)}</td>
-                  <td>${v.costo_promedio.toFixed(2)}</td>
-                  <td>{v.stock_actual}</td>
-                  <td>{v.stock_minimo}</td>
+                  <td style={{ textAlign: "right" }}>{fmt(v.precio_publico)}</td>
+                  <td style={{ textAlign: "right", color: "var(--color-text-muted)" }}>{fmt(v.costo_promedio)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <span className={`badge ${v.stock_actual <= v.stock_minimo ? "badge-warning" : "badge-success"}`}>
+                      {v.stock_actual}
+                    </span>
+                  </td>
                   <td>
-                    <button onClick={() => cambiarPrecio(v.id, v.precio_publico)} style={{ marginRight: 4 }}>Precio</button>
-                    {v.activo && <button onClick={() => desactivar(v.id)}>Desactivar</button>}
+                    <button className="btn-icon" onClick={() => cambiarPrecio(v.id, v.precio_publico)} style={{ marginRight: 4 }}>Precio</button>
+                    {v.activo && <button className="btn-icon" onClick={() => desactivar(v.id)}>Desactivar</button>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 12 }}>
             {varProductoId === p.id ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, alignItems: "end" }}>
+              <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", alignItems: "end" }}>
                 <input className="input" placeholder="SKU *" value={nuevaVar.sku}
                   onChange={(e) => setNuevaVar({ ...nuevaVar, sku: e.target.value })} />
                 <input className="input" placeholder="Presentacion *" value={nuevaVar.presentacion}
@@ -198,17 +207,17 @@ export default function Productos() {
                   onChange={(e) => setNuevaVar({ ...nuevaVar, precio_publico: +e.target.value })} />
                 <input className="input" type="number" placeholder="Costo" value={nuevaVar.costo_promedio}
                   onChange={(e) => setNuevaVar({ ...nuevaVar, costo_promedio: +e.target.value })} />
-                <button className="btn" onClick={crearVariante}>Guardar variante</button>
-                <button onClick={() => setVarProductoId(null)}>Cancelar</button>
+                <button className="btn btn-sm" onClick={crearVariante}>Guardar variante</button>
+                <button className="btn-icon" onClick={() => setVarProductoId(null)}>Cancelar</button>
               </div>
             ) : (
-              <button onClick={() => setVarProductoId(p.id)} style={{ fontSize: 13 }}>
-                + Agregar otra variante (solo si necesitas multiples presentaciones del mismo producto)
+              <button className="btn-icon" onClick={() => setVarProductoId(p.id)}>
+                + Agregar otra variante
               </button>
             )}
           </div>
         </div>
       ))}
-    </div>
+    </Layout>
   );
 }

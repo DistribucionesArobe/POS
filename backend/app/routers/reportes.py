@@ -5,10 +5,59 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import DocumentoVenta, CuentaPorCobrar
+from app.models import (
+    DocumentoVenta, CuentaPorCobrar, VarianteProducto, Cliente,
+)
 from app.models.venta import EstatusDocumento
 
 router = APIRouter()
+
+
+@router.get("/kpis")
+def kpis(db: Session = Depends(get_db)):
+    """KPIs del dashboard: stock, ventas hoy, cartera total, clientes."""
+    today = datetime.utcnow().date()
+    inicio = datetime.combine(today, datetime.min.time())
+    fin = inicio + timedelta(days=1)
+
+    productos_stock = (
+        db.query(VarianteProducto)
+        .filter(VarianteProducto.activo == True, VarianteProducto.stock_actual > 0)
+        .count()
+    )
+
+    ventas_hoy = db.query(
+        func.coalesce(func.sum(DocumentoVenta.total), 0)
+    ).filter(
+        DocumentoVenta.fecha >= inicio,
+        DocumentoVenta.fecha < fin,
+        DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
+    ).scalar()
+
+    docs_hoy = db.query(DocumentoVenta).filter(
+        DocumentoVenta.fecha >= inicio,
+        DocumentoVenta.fecha < fin,
+        DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
+    ).count()
+
+    cartera = db.query(
+        func.coalesce(func.sum(CuentaPorCobrar.saldo), 0)
+    ).filter(CuentaPorCobrar.pagado == False).scalar()
+
+    docs_pendientes = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.pagado == False
+    ).count()
+
+    clientes_activos = db.query(Cliente).filter(Cliente.activo == True).count()
+
+    return {
+        "productos_stock": productos_stock,
+        "ventas_hoy": float(ventas_hoy or 0),
+        "documentos_hoy": docs_hoy,
+        "cartera_total": float(cartera or 0),
+        "documentos_pendientes": docs_pendientes,
+        "clientes_activos": clientes_activos,
+    }
 
 
 @router.get("/corte-caja")
@@ -17,7 +66,11 @@ def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
     inicio = datetime.combine(f, datetime.min.time())
     fin = inicio + timedelta(days=1)
     rows = (
-        db.query(DocumentoVenta.tipo, func.count().label("n"), func.sum(DocumentoVenta.total).label("total"))
+        db.query(
+            DocumentoVenta.tipo,
+            func.count().label("n"),
+            func.sum(DocumentoVenta.total).label("total"),
+        )
         .filter(DocumentoVenta.fecha >= inicio, DocumentoVenta.fecha < fin)
         .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
         .group_by(DocumentoVenta.tipo)
@@ -25,13 +78,15 @@ def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
     )
     return {
         "fecha": f.isoformat(),
-        "por_tipo": [{"tipo": t, "n": n, "total": float(total or 0)} for t, n, total in rows],
+        "por_tipo": [
+            {"tipo": t, "n": n, "total": float(total or 0)}
+            for t, n, total in rows
+        ],
     }
 
 
 @router.get("/antiguedad-cartera")
 def antiguedad_cartera(db: Session = Depends(get_db)):
-    """CxC agrupada por buckets de antiguedad."""
     today = datetime.utcnow().date()
     buckets = {"0-15": 0.0, "16-30": 0.0, "31-60": 0.0, "61-90": 0.0, "91+": 0.0}
     for cxc in db.query(CuentaPorCobrar).filter(CuentaPorCobrar.pagado == False).all():
@@ -43,6 +98,3 @@ def antiguedad_cartera(db: Session = Depends(get_db)):
         elif d <= 90: buckets["61-90"] += saldo
         else: buckets["91+"] += saldo
     return buckets
-
-
-# TODO: ventas-por-vendedor, IVA-causado-vs-cobrado (PPD), kardex-valorizado, utilidad-por-producto

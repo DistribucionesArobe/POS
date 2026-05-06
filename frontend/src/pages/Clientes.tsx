@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import Layout from "../components/Layout";
 import { api } from "../api/client";
 
 type ClienteT = {
@@ -94,28 +94,24 @@ export default function Clientes() {
   }
 
   return (
-    <div className="container">
-      <nav>
-        <Link to="/">Inicio</Link>
-        <Link to="/venta">Nueva venta</Link>
-        <Link to="/productos">Productos</Link>
-        <Link to="/clientes">Clientes</Link>
-        <Link to="/cartera">Cartera</Link>
-      </nav>
-      <h1>Clientes</h1>
-
-      <div className="card" style={{ marginBottom: 12, display: "flex", gap: 8 }}>
-        <input className="input" placeholder="Buscar por nombre, RFC, WhatsApp..." value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
-        <button className="btn" onClick={cargar}>Filtrar</button>
-        <button className="btn" onClick={abrirNuevo}>+ Nuevo cliente</button>
+    <Layout
+      title="Clientes"
+      subtitle={`${clientes.length} clientes registrados`}
+      actions={<button className="btn" onClick={abrirNuevo}>+ Nuevo cliente</button>}
+    >
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="toolbar" style={{ marginBottom: 0 }}>
+          <input className="input" placeholder="Buscar por nombre, RFC, WhatsApp..." value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar()} />
+          <button className="btn-icon" onClick={cargar}>Filtrar</button>
+        </div>
       </div>
 
       {mostrarForm && (
-        <div className="card" style={{ marginBottom: 12, background: "#f9fafb" }}>
-          <h3>{editId ? `Editar cliente #${editId}` : "Nuevo cliente"}</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-            <div style={{ gridColumn: "span 2" }}>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="card-header">{editId ? `Editar cliente #${editId}` : "Nuevo cliente"}</h3>
+          <div className="form-grid">
+            <div className="form-grid-full" style={{ gridColumn: "span 2" }}>
               <label>Razon social / Nombre completo *</label>
               <input className="input" placeholder="Como aparece en su Constancia SAT"
                 value={form.razon_social}
@@ -171,20 +167,20 @@ export default function Clientes() {
               <input className="input" type="number" value={form.limite_credito}
                 onChange={(e) => setForm({ ...form, limite_credito: +e.target.value })} />
             </div>
-            <div style={{ gridColumn: "span 3" }}>
+            <div className="form-grid-full">
               <label>Direccion</label>
               <input className="input" value={form.direccion}
                 onChange={(e) => setForm({ ...form, direccion: e.target.value })} />
             </div>
-            <div style={{ gridColumn: "span 3" }}>
+            <div className="form-grid-full">
               <label>Notas</label>
               <input className="input" value={form.notas}
                 onChange={(e) => setForm({ ...form, notas: e.target.value })} />
             </div>
           </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
             <button className="btn" onClick={guardar}>Guardar</button>
-            <button onClick={() => { setMostrarForm(false); setEditId(null); }}>Cancelar</button>
+            <button className="btn-icon" onClick={() => { setMostrarForm(false); setEditId(null); }}>Cancelar</button>
           </div>
         </div>
       )}
@@ -200,21 +196,21 @@ export default function Clientes() {
           <tbody>
             {clientes.map((c) => (
               <tr key={c.id} style={{ opacity: c.activo ? 1 : 0.4 }}>
-                <td>{c.id}</td>
+                <td><code>#{c.id}</code></td>
                 <td>{c.razon_social || c.nombre}</td>
                 <td>{c.rfc || "-"}</td>
-                <td>{c.regimen_fiscal || "-"}</td>
+                <td>{c.regimen_fiscal && <span className="badge badge-info">{c.regimen_fiscal}</span>}</td>
                 <td>{c.whatsapp || "-"}</td>
                 <td>{c.dias_credito}</td>
                 <td>
-                  <button onClick={() => abrirEditar(c.id)} style={{ marginRight: 4 }}>Editar</button>
-                  {c.activo && <button onClick={() => desactivar(c.id)}>Desactivar</button>}
+                  <button className="btn-icon" onClick={() => abrirEditar(c.id)} style={{ marginRight: 4 }}>Editar</button>
+                  {c.activo && <button className="btn-icon" onClick={() => desactivar(c.id)}>Desactivar</button>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </div>
+    </Layout>
   );
 }
