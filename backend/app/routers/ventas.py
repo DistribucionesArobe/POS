@@ -72,3 +72,55 @@ def consolidar_remisiones_en_factura(
 ):
     """Toma N remisiones y emite UNA factura CFDI 4.0 que las consolida."""
     return venta_service.consolidar_remisiones(db, cliente_id, remision_ids)
+
+
+# ---------- PDF ----------
+from fastapi import HTTPException
+from fastapi.responses import Response
+from app.models import Cliente
+from app.services import pdf_service
+
+
+@router.get("/{documento_id}/pdf")
+def descargar_pdf(documento_id: int, db: Session = Depends(get_db)):
+    doc = (
+        db.query(DocumentoVenta)
+        .options(joinedload(DocumentoVenta.conceptos))
+        .filter(DocumentoVenta.id == documento_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(404, "Documento no existe")
+    cliente = db.get(Cliente, doc.cliente_id)
+    pdf_bytes = pdf_service.generar_pdf_documento(doc, cliente)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={doc.folio}.pdf"},
+    )
+
+
+# ---------- PDF ----------
+from fastapi import HTTPException
+from fastapi.responses import Response
+from app.models import Cliente
+from app.services import pdf_service
+
+
+@router.get("/{documento_id}/pdf")
+def descargar_pdf(documento_id: int, db: Session = Depends(get_db)):
+    doc = (
+        db.query(DocumentoVenta)
+        .options(joinedload(DocumentoVenta.conceptos))
+        .filter(DocumentoVenta.id == documento_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(404, "Documento no existe")
+    cliente = db.get(Cliente, doc.cliente_id)
+    pdf_bytes = pdf_service.generar_pdf_documento(doc, cliente)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={doc.folio}.pdf"},
+    )
