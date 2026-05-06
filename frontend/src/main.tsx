@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import VentaNueva from "./pages/VentaNueva";
 import Cartera from "./pages/Cartera";
+import Productos from "./pages/Productos";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -15,6 +16,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Dashboard />} />
         <Route path="/venta" element={<VentaNueva />} />
+        <Route path="/productos" element={<Productos />} />
         <Route path="/cartera" element={<Cartera />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,17 +1,18 @@
-"""Productos y variantes."""
+"""Productos y variantes - CRUD completo."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.models import Producto, VarianteProducto
+from app.schemas.producto import ProductoIn, VarianteIn, PrecioUpdate
 
 router = APIRouter()
 
 
 @router.get("")
 def listar_productos(
-    q: str | None = Query(None, description="Busqueda por nombre/sku/categoria"),
+    q: str | None = Query(None, description="Busqueda por nombre/categoria"),
     activo: bool = True,
     db: Session = Depends(get_db),
 ):
@@ -23,20 +24,24 @@ def listar_productos(
         query = query.filter(or_(Producto.nombre.ilike(like), Producto.categoria.ilike(like)))
     return [
         {
-            "id": p.id,
-            "nombre": p.nombre,
-            "categoria": p.categoria,
-            "marca": p.marca,
+            "id": p.id, "nombre": p.nombre, "categoria": p.categoria, "marca": p.marca,
+            "descripcion": p.descripcion, "clave_prod_serv_sat": p.clave_prod_serv_sat,
             "variantes": [
                 {
                     "id": v.id, "sku": v.sku, "presentacion": v.presentacion,
-                    "unidad": v.unidad, "precio_publico": float(v.precio_publico),
+                    "unidad": v.unidad, "clave_unidad_sat": v.clave_unidad_sat,
+                    "precio_publico": float(v.precio_publico),
+                    "precio_mayoreo": float(v.precio_mayoreo) if v.precio_mayoreo else None,
+                    "cantidad_mayoreo": v.cantidad_mayoreo,
+                    "costo_promedio": float(v.costo_promedio),
                     "stock_actual": float(v.stock_actual),
+                    "stock_minimo": float(v.stock_minimo),
+                    "activo": v.activo,
                 }
-                for v in p.variantes if v.activo
+                for v in p.variantes
             ],
         }
-        for p in query.limit(200).all()
+        for p in query.order_by(Producto.nombre).all()
     ]
 
 
@@ -45,7 +50,6 @@ def buscar_variante(
     q: str = Query(..., min_length=2, description="Busqueda por SKU o descripcion"),
     db: Session = Depends(get_db),
 ):
-    """Endpoint para autocomplete del cajero."""
     like = f"%{q}%"
     rows = (
         db.query(VarianteProducto)
@@ -70,4 +74,44 @@ def buscar_variante(
     ]
 
 
-# TODO: POST /productos, PUT /productos/{id}, POST /variantes, etc.
+@router.post("")
+def crear_producto(payload: ProductoIn, db: Session = Depends(get_db)):
+    p = Producto(**payload.model_dump())
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return {"id": p.id, "nombre": p.nombre}
+
+
+@router.post("/variantes")
+def crear_variante(payload: VarianteIn, db: Session = Depends(get_db)):
+    if not db.get(Producto, payload.producto_id):
+        raise HTTPException(404, "Producto no existe")
+    if db.query(VarianteProducto).filter(VarianteProducto.sku == payload.sku).first():
+        raise HTTPException(400, f"SKU '{payload.sku}' ya existe")
+    v = VarianteProducto(**payload.model_dump())
+    db.add(v)
+    db.commit()
+    db.refresh(v)
+    return {"id": v.id, "sku": v.sku}
+
+
+@router.patch("/variantes/{variante_id}/precio")
+def actualizar_precio(variante_id: int, payload: PrecioUpdate, db: Session = Depends(get_db)):
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    v.precio_publico = payload.precio_publico
+    v.precio_mayoreo = payload.precio_mayoreo
+    db.commit()
+    return {"ok": True, "precio_publico": float(v.precio_publico)}
+
+
+@router.delete("/variantes/{variante_id}")
+def desactivar_variante(variante_id: int, db: Session = Depends(get_db)):
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    v.activo = False
+    db.commit()
+    return {"ok": True}
