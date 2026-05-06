@@ -14,7 +14,10 @@ router = APIRouter()
 
 @router.post("", response_model=DocumentoVentaOut)
 def crear_venta(payload: DocumentoVentaIn, db: Session = Depends(get_db)):
-    return venta_service.crear_documento(db, payload)
+    try:
+        return venta_service.crear_documento(db, payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("")
