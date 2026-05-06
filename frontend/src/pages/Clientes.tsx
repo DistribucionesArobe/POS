@@ -10,7 +10,7 @@ type ClienteT = {
 };
 
 const FORM_VACIO = {
-  nombre: "", rfc: "", razon_social: "", regimen_fiscal: "",
+  razon_social: "", rfc: "", regimen_fiscal: "",
   codigo_postal: "", uso_cfdi_default: "G03",
   correo: "", telefono: "", whatsapp: "",
   direccion: "", dias_credito: 0, limite_credito: 0, notas: "",
@@ -58,15 +58,21 @@ export default function Clientes() {
 
   async function abrirEditar(id: number) {
     const r = await api.get(`/api/clientes/${id}`);
-    setForm({ ...FORM_VACIO, ...r.data, dias_credito: r.data.dias_credito || 0, limite_credito: r.data.limite_credito || 0 });
+    setForm({
+      ...FORM_VACIO,
+      ...r.data,
+      razon_social: r.data.razon_social || r.data.nombre || "",
+      dias_credito: r.data.dias_credito || 0,
+      limite_credito: r.data.limite_credito || 0,
+    });
     setEditId(id);
     setMostrarForm(true);
   }
 
   async function guardar() {
-    if (!form.nombre) return alert("El nombre es obligatorio");
-    const payload = { ...form };
-    if (!payload.limite_credito) (payload as any).limite_credito = null;
+    if (!form.razon_social) return alert("Razon social es obligatoria");
+    const payload: any = { ...form, nombre: form.razon_social };
+    if (!payload.limite_credito) payload.limite_credito = null;
     try {
       if (editId) {
         await api.patch(`/api/clientes/${editId}`, payload);
@@ -109,10 +115,16 @@ export default function Clientes() {
         <div className="card" style={{ marginBottom: 12, background: "#f9fafb" }}>
           <h3>{editId ? `Editar cliente #${editId}` : "Nuevo cliente"}</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div style={{ gridColumn: "span 2" }}>
+              <label>Razon social / Nombre completo *</label>
+              <input className="input" placeholder="Como aparece en su Constancia SAT"
+                value={form.razon_social}
+                onChange={(e) => setForm({ ...form, razon_social: e.target.value.toUpperCase() })} />
+            </div>
             <div>
-              <label>Nombre *</label>
-              <input className="input" value={form.nombre}
-                onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+              <label>RFC</label>
+              <input className="input" placeholder="13 caracteres" value={form.rfc}
+                onChange={(e) => setForm({ ...form, rfc: e.target.value.toUpperCase() })} />
             </div>
             <div>
               <label>WhatsApp</label>
@@ -125,14 +137,9 @@ export default function Clientes() {
                 onChange={(e) => setForm({ ...form, correo: e.target.value })} />
             </div>
             <div>
-              <label>RFC</label>
-              <input className="input" placeholder="13 caracteres" value={form.rfc}
-                onChange={(e) => setForm({ ...form, rfc: e.target.value.toUpperCase() })} />
-            </div>
-            <div>
-              <label>Razon social</label>
-              <input className="input" placeholder="MAYUSCULAS" value={form.razon_social}
-                onChange={(e) => setForm({ ...form, razon_social: e.target.value.toUpperCase() })} />
+              <label>Telefono</label>
+              <input className="input" value={form.telefono}
+                onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
             </div>
             <div>
               <label>CP fiscal</label>
@@ -153,11 +160,6 @@ export default function Clientes() {
                 onChange={(e) => setForm({ ...form, uso_cfdi_default: e.target.value })}>
                 {USOS_CFDI.map((u) => <option key={u.v} value={u.v}>{u.t}</option>)}
               </select>
-            </div>
-            <div>
-              <label>Telefono</label>
-              <input className="input" value={form.telefono}
-                onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
             </div>
             <div>
               <label>Dias credito</label>
@@ -191,7 +193,7 @@ export default function Clientes() {
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Nombre</th><th>RFC</th><th>Regimen</th>
+              <th>ID</th><th>Razon social / Nombre</th><th>RFC</th><th>Regimen</th>
               <th>WhatsApp</th><th>Dias cred.</th><th></th>
             </tr>
           </thead>
@@ -199,7 +201,7 @@ export default function Clientes() {
             {clientes.map((c) => (
               <tr key={c.id} style={{ opacity: c.activo ? 1 : 0.4 }}>
                 <td>{c.id}</td>
-                <td>{c.nombre}</td>
+                <td>{c.razon_social || c.nombre}</td>
                 <td>{c.rfc || "-"}</td>
                 <td>{c.regimen_fiscal || "-"}</td>
                 <td>{c.whatsapp || "-"}</td>
