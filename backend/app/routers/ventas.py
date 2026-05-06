@@ -1,23 +1,19 @@
-"""Ventas: ticket, remision, factura.
-
-Endpoint principal POST /ventas para crear documentos. Toda la logica de
-inventario, CxC y CFDI esta en services/.
-"""
+"""Ventas: ticket, remision, factura."""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
-from app.models import DocumentoVenta
+from app.models import DocumentoVenta, Cliente
 from app.models.venta import TipoDocumento, EstatusDocumento
 from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut
-from app.services import venta_service
+from app.services import venta_service, pdf_service
 
 router = APIRouter()
 
 
 @router.post("", response_model=DocumentoVentaOut)
 def crear_venta(payload: DocumentoVentaIn, db: Session = Depends(get_db)):
-    """Crea ticket | remision | factura. Descuenta inventario y arma CxC si aplica."""
     return venta_service.crear_documento(db, payload)
 
 
@@ -45,10 +41,6 @@ def listar_ventas(
 
 @router.get("/remisiones-pendientes/{cliente_id}")
 def remisiones_pendientes_facturar(cliente_id: int, db: Session = Depends(get_db)):
-    """Lista remisiones de un cliente que aun no se consolidan en factura.
-
-    Esto alimenta el modelo B (factura global por consolidacion).
-    """
     rows = (
         db.query(DocumentoVenta)
         .filter(DocumentoVenta.cliente_id == cliente_id)
@@ -70,41 +62,7 @@ def consolidar_remisiones_en_factura(
     remision_ids: list[int],
     db: Session = Depends(get_db),
 ):
-    """Toma N remisiones y emite UNA factura CFDI 4.0 que las consolida."""
     return venta_service.consolidar_remisiones(db, cliente_id, remision_ids)
-
-
-# ---------- PDF ----------
-from fastapi import HTTPException
-from fastapi.responses import Response
-from app.models import Cliente
-from app.services import pdf_service
-
-
-@router.get("/{documento_id}/pdf")
-def descargar_pdf(documento_id: int, db: Session = Depends(get_db)):
-    doc = (
-        db.query(DocumentoVenta)
-        .options(joinedload(DocumentoVenta.conceptos))
-        .filter(DocumentoVenta.id == documento_id)
-        .first()
-    )
-    if not doc:
-        raise HTTPException(404, "Documento no existe")
-    cliente = db.get(Cliente, doc.cliente_id)
-    pdf_bytes = pdf_service.generar_pdf_documento(doc, cliente)
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename={doc.folio}.pdf"},
-    )
-
-
-# ---------- PDF ----------
-from fastapi import HTTPException
-from fastapi.responses import Response
-from app.models import Cliente
-from app.services import pdf_service
 
 
 @router.get("/{documento_id}/pdf")

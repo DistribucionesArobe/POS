@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 
 type Item = { variante_id: number; sku: string; nombre: string; cantidad: number; precio: number };
 
 export default function VentaNueva() {
   const [tipo, setTipo] = useState<"TICKET" | "REMISION" | "FACTURA">("TICKET");
-  const [clienteId, setClienteId] = useState<number>(1); // placeholder
+  const [clienteId, setClienteId] = useState<number>(1);
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -34,13 +35,26 @@ export default function VentaNueva() {
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
     };
-    const r = await api.post("/api/ventas", payload);
-    alert(`Documento creado: ${r.data.folio}`);
-    setItems([]);
+    try {
+      const r = await api.post("/api/ventas", payload);
+      const base = api.defaults.baseURL || "";
+      const pdfUrl = `${base}/api/ventas/${r.data.id}/pdf`;
+      if (confirm(`Documento creado: ${r.data.folio}\n\nTotal: $${r.data.total}\n\n¿Abrir PDF?`)) {
+        window.open(pdfUrl, "_blank");
+      }
+      setItems([]);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
   }
 
   return (
     <div className="container">
+      <nav>
+        <Link to="/">Inicio</Link>
+        <Link to="/venta">Nueva venta</Link>
+        <Link to="/cartera">Cartera</Link>
+      </nav>
       <h1>Nueva venta</h1>
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row">
