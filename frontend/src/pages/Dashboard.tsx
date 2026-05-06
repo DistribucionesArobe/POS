@@ -17,6 +17,7 @@ export default function Dashboard() {
         <Link to="/">Inicio</Link>
         <Link to="/venta">Nueva venta</Link>
         <Link to="/productos">Productos</Link>
+        <Link to="/clientes">Clientes</Link>
         <Link to="/cartera">Cartera</Link>
       </nav>
       <h1>Dashboard</h1>
