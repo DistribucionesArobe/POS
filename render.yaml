@@ -19,11 +19,15 @@ services:
         generateValue: true
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: FACTURAMA_API_URL
+        sync: false
       - key: FACTURAMA_USER
         sync: false
       - key: FACTURAMA_PASSWORD
         sync: false
       - key: FACTURAMA_RFC_EMISOR
+        sync: false
+      - key: FACTURAMA_REGIMEN_FISCAL
         sync: false
       - key: FACTURAMA_LUGAR_EXPEDICION
         sync: false
@@ -50,5 +54,5 @@ services:
 
 databases:
   - name: aceromax-pos-db
-    plan: starter
+    plan: basic_256mb
     postgresMajorVersion: "16"
