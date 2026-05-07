@@ -19,18 +19,6 @@ services:
         generateValue: true
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: FACTURAMA_API_URL
-        sync: false
-      - key: FACTURAMA_USER
-        sync: false
-      - key: FACTURAMA_PASSWORD
-        sync: false
-      - key: FACTURAMA_RFC_EMISOR
-        sync: false
-      - key: FACTURAMA_REGIMEN_FISCAL
-        sync: false
-      - key: FACTURAMA_LUGAR_EXPEDICION
-        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
@@ -51,8 +39,3 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://aceromax-pos-backend.onrender.com
-
-databases:
-  - name: aceromax-pos-db
-    plan: free
-    postgresMajorVersion: "16"
