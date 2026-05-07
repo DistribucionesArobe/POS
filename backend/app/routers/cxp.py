@@ -1,16 +1,26 @@
-"""Cuentas por Pagar y compras."""
+"""Cuentas por Pagar y compras - filtrado por empresa."""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import CuentaPorPagar, Compra
+from app.services.security import get_active_empresa_id
 
 router = APIRouter()
 
 
 @router.get("/cartera")
-def cartera_proveedores(db: Session = Depends(get_db)):
-    rows = db.query(CuentaPorPagar).filter(CuentaPorPagar.pagado == False).all()
+def cartera_proveedores(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(CuentaPorPagar)
+        .join(Compra, Compra.id == CuentaPorPagar.compra_id)
+        .filter(Compra.empresa_id == empresa_id)
+        .filter(CuentaPorPagar.pagado == False)
+        .all()
+    )
     return [
         {
             "cxp_id": c.id, "proveedor_id": c.proveedor_id,
@@ -22,8 +32,17 @@ def cartera_proveedores(db: Session = Depends(get_db)):
 
 
 @router.get("/compras")
-def listar_compras(db: Session = Depends(get_db)):
-    rows = db.query(Compra).order_by(Compra.fecha_recepcion.desc()).limit(100).all()
+def listar_compras(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(Compra)
+        .filter(Compra.empresa_id == empresa_id)
+        .order_by(Compra.fecha_recepcion.desc())
+        .limit(100)
+        .all()
+    )
     return [
         {
             "id": c.id, "folio": c.folio_interno, "proveedor_id": c.proveedor_id,
@@ -31,7 +50,3 @@ def listar_compras(db: Session = Depends(get_db)):
         }
         for c in rows
     ]
-
-
-# TODO: POST /compras (recepcion mercancia con descarga XML proveedor),
-#       POST /abono-cxp, etc.

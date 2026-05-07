@@ -1,40 +1,63 @@
 """Cliente HTTP para Facturama (PAC para CFDI 4.0).
 
-Doc oficial: https://apisandbox.facturama.com.mx/docs/api
-Endpoints clave:
-  POST /3/cfdis              -> emitir comprobante (Ingreso, Egreso, Pago)
-  DELETE /cfdi/{id}?motive=  -> cancelar
-  GET  /cfdi/{id}            -> consultar estatus
-  GET  /cfdi/xml/issued/{id} -> bajar XML
-  GET  /cfdi/pdf/issued/{id} -> bajar PDF
+Las credenciales viven en la tabla `empresas`. El cliente recibe la empresa
+y usa sus datos de Facturama.
 """
 import base64
 import httpx
 
-from app.config import get_settings
+from app.models import Empresa
+
+
+class FacturamaError(Exception):
+    pass
 
 
 class FacturamaClient:
-    def __init__(self):
-        s = get_settings()
-        self.base = s.facturama_api_url
-        self.user = s.facturama_user
-        self.password = s.facturama_password
-        self.rfc_emisor = s.facturama_rfc_emisor
-        self.regimen = s.facturama_regimen_fiscal
-        self.lugar_expedicion = s.facturama_lugar_expedicion
+    def __init__(self, empresa: Empresa):
+        if not empresa.facturama_user or not empresa.facturama_password:
+            raise FacturamaError(
+                f"Empresa {empresa.nombre} sin credenciales Facturama configuradas"
+            )
+        self.base = empresa.facturama_api_url.rstrip("/")
+        self.user = empresa.facturama_user
+        self.password = empresa.facturama_password
+        self.rfc_emisor = empresa.rfc
+        self.regimen = empresa.regimen_fiscal
+        self.lugar_expedicion = empresa.codigo_postal
+        self.razon_social_emisor = empresa.razon_social
 
     @property
     def auth(self) -> tuple[str, str]:
         return (self.user, self.password)
 
-    def emitir_ingreso(self, documento, cliente) -> dict:
-        """Emite CFDI tipo I (ingreso).
+    def _post(self, path: str, payload: dict) -> dict:
+        with httpx.Client(timeout=30) as c:
+            r = c.post(f"{self.base}{path}", json=payload, auth=self.auth)
+            if r.status_code >= 400:
+                raise FacturamaError(f"HTTP {r.status_code}: {r.text}")
+            return r.json()
 
-        Construye el JSON segun esquema Facturama 3.x.
-        """
+    def _get(self, path: str) -> dict:
+        with httpx.Client(timeout=60) as c:
+            r = c.get(f"{self.base}{path}", auth=self.auth)
+            if r.status_code >= 400:
+                raise FacturamaError(f"HTTP {r.status_code}: {r.text}")
+            return r.json()
+
+    def _delete(self, path: str, params: dict | None = None) -> dict:
+        with httpx.Client(timeout=30) as c:
+            r = c.delete(f"{self.base}{path}", params=params, auth=self.auth)
+            if r.status_code >= 400:
+                raise FacturamaError(f"HTTP {r.status_code}: {r.text}")
+            return r.json() if r.text else {}
+
+    def emitir_ingreso(self, documento, cliente) -> dict:
         items = []
         for c in documento.conceptos:
+            importe = float(c.importe)
+            tasa = float(c.tasa_iva)
+            iva_calc = round(importe * tasa, 2)
             items.append({
                 "ProductCode": c.clave_prod_serv_sat or "01010101",
                 "IdentificationNumber": str(c.variante_id),
@@ -43,20 +66,17 @@ class FacturamaClient:
                 "UnitCode": c.clave_unidad_sat or "H87",
                 "UnitPrice": float(c.precio_unitario),
                 "Quantity": float(c.cantidad),
-                "Subtotal": float(c.importe),
+                "Subtotal": importe,
                 "TaxObject": "02",
                 "Taxes": [{
-                    "Total": round(float(c.importe) * float(c.tasa_iva), 2),
-                    "Name": "IVA",
-                    "Base": float(c.importe),
-                    "Rate": float(c.tasa_iva),
-                    "IsRetention": False,
+                    "Total": iva_calc, "Name": "IVA", "Base": importe,
+                    "Rate": tasa, "IsRetention": False,
                 }],
-                "Total": float(c.importe) * (1 + float(c.tasa_iva)),
+                "Total": importe + iva_calc,
             })
 
         payload = {
-            "NameId": "1",  # Factura
+            "NameId": "1",
             "CfdiType": "I",
             "PaymentForm": documento.forma_pago_sat,
             "PaymentMethod": documento.metodo_pago_sat,
@@ -65,51 +85,29 @@ class FacturamaClient:
             "Issuer": {
                 "FiscalRegime": self.regimen,
                 "Rfc": self.rfc_emisor,
-                "Name": "ACEROMAX",  # razon social del emisor
+                "Name": (self.razon_social_emisor or "EMISOR").upper(),
             },
             "Receiver": {
                 "Rfc": cliente.rfc,
-                "Name": cliente.razon_social or cliente.nombre,
+                "Name": (cliente.razon_social or cliente.nombre).upper(),
                 "FiscalRegime": cliente.regimen_fiscal or "616",
-                "TaxZipCode": cliente.codigo_postal or "00000",
+                "TaxZipCode": cliente.codigo_postal or self.lugar_expedicion,
                 "CfdiUse": documento.uso_cfdi or "G03",
             },
             "Items": items,
         }
+        return self._post("/3/cfdis", payload)
 
-        with httpx.Client(timeout=30) as client:
-            r = client.post(f"{self.base}/3/cfdis", json=payload, auth=self.auth)
-            r.raise_for_status()
-            return r.json()
-
-    def cancelar(self, cfdi_id_facturama: str, motivo: str, uuid_sustituye: str | None = None):
-        """motivo: 01 | 02 | 03 | 04 (CFDI 4.0).
-        Si motivo == 01, uuid_sustituye es obligatorio.
-        """
+    def cancelar(self, cfdi_id: str, motivo: str, uuid_sustituye: str | None = None) -> dict:
         params = {"motive": motivo}
         if uuid_sustituye:
             params["uuidReplacement"] = uuid_sustituye
-        with httpx.Client(timeout=30) as client:
-            r = client.delete(
-                f"{self.base}/cfdi/{cfdi_id_facturama}", params=params, auth=self.auth
-            )
-            r.raise_for_status()
-            return r.json()
+        return self._delete(f"/cfdi/{cfdi_id}", params=params)
 
-    def descargar_pdf(self, cfdi_id_facturama: str) -> bytes:
-        with httpx.Client(timeout=60) as client:
-            r = client.get(
-                f"{self.base}/cfdi/pdf/issued/{cfdi_id_facturama}", auth=self.auth
-            )
-            r.raise_for_status()
-            data = r.json()
-            return base64.b64decode(data["Content"])
+    def descargar_pdf(self, cfdi_id: str) -> bytes:
+        data = self._get(f"/cfdi/pdf/issued/{cfdi_id}")
+        return base64.b64decode(data["Content"])
 
-    def descargar_xml(self, cfdi_id_facturama: str) -> bytes:
-        with httpx.Client(timeout=60) as client:
-            r = client.get(
-                f"{self.base}/cfdi/xml/issued/{cfdi_id_facturama}", auth=self.auth
-            )
-            r.raise_for_status()
-            data = r.json()
-            return base64.b64decode(data["Content"])
+    def descargar_xml(self, cfdi_id: str) -> bytes:
+        data = self._get(f"/cfdi/xml/issued/{cfdi_id}")
+        return base64.b64decode(data["Content"])

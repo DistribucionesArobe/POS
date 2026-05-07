@@ -1,4 +1,4 @@
-"""Productos y variantes - CRUD."""
+"""Productos y variantes - filtrado por empresa."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import Producto, VarianteProducto
 from app.schemas.producto import ProductoIn, ProductoSimpleIn, VarianteIn, PrecioUpdate
+from app.services.security import get_active_empresa_id
 
 router = APIRouter()
 
@@ -14,9 +15,10 @@ router = APIRouter()
 def listar_productos(
     q: str | None = Query(None),
     activo: bool = True,
+    empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Producto).options(joinedload(Producto.variantes))
+    query = db.query(Producto).filter(Producto.empresa_id == empresa_id).options(joinedload(Producto.variantes))
     if activo:
         query = query.filter(Producto.activo == True)
     if q:
@@ -48,12 +50,14 @@ def listar_productos(
 @router.get("/buscar-variante")
 def buscar_variante(
     q: str = Query(..., min_length=2),
+    empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
     like = f"%{q}%"
     rows = (
         db.query(VarianteProducto)
         .join(Producto)
+        .filter(Producto.empresa_id == empresa_id)
         .filter(VarianteProducto.activo == True)
         .filter(or_(VarianteProducto.sku.ilike(like), Producto.nombre.ilike(like)))
         .limit(20)
@@ -72,11 +76,15 @@ def buscar_variante(
 
 
 @router.post("/simple")
-def crear_producto_simple(payload: ProductoSimpleIn, db: Session = Depends(get_db)):
-    """Crea producto + 1 variante de un solo golpe (caso comun)."""
+def crear_producto_simple(
+    payload: ProductoSimpleIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     if db.query(VarianteProducto).filter(VarianteProducto.sku == payload.sku).first():
         raise HTTPException(400, f"SKU '{payload.sku}' ya existe")
     p = Producto(
+        empresa_id=empresa_id,
         nombre=payload.nombre, categoria=payload.categoria, marca=payload.marca,
         clave_prod_serv_sat=payload.clave_prod_serv_sat,
     )
@@ -94,9 +102,12 @@ def crear_producto_simple(payload: ProductoSimpleIn, db: Session = Depends(get_d
 
 
 @router.post("")
-def crear_producto(payload: ProductoIn, db: Session = Depends(get_db)):
-    """Crear solo el producto (familia) sin variante. Para casos con multiples variantes."""
-    p = Producto(**payload.model_dump())
+def crear_producto(
+    payload: ProductoIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    p = Producto(empresa_id=empresa_id, **payload.model_dump())
     db.add(p)
     db.commit()
     db.refresh(p)
@@ -104,23 +115,36 @@ def crear_producto(payload: ProductoIn, db: Session = Depends(get_db)):
 
 
 @router.post("/variantes")
-def crear_variante(payload: VarianteIn, db: Session = Depends(get_db)):
-    if not db.get(Producto, payload.producto_id):
+def crear_variante(
+    payload: VarianteIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    producto = db.get(Producto, payload.producto_id)
+    if not producto:
         raise HTTPException(404, "Producto no existe")
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Producto pertenece a otra empresa")
     if db.query(VarianteProducto).filter(VarianteProducto.sku == payload.sku).first():
         raise HTTPException(400, f"SKU '{payload.sku}' ya existe")
     v = VarianteProducto(**payload.model_dump())
     db.add(v)
     db.commit()
-    db.refresh(v)
     return {"id": v.id, "sku": v.sku}
 
 
 @router.patch("/variantes/{variante_id}/precio")
-def actualizar_precio(variante_id: int, payload: PrecioUpdate, db: Session = Depends(get_db)):
+def actualizar_precio(
+    variante_id: int, payload: PrecioUpdate,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     v = db.get(VarianteProducto, variante_id)
     if not v:
         raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
     v.precio_publico = payload.precio_publico
     v.precio_mayoreo = payload.precio_mayoreo
     db.commit()
@@ -128,10 +152,17 @@ def actualizar_precio(variante_id: int, payload: PrecioUpdate, db: Session = Dep
 
 
 @router.delete("/variantes/{variante_id}")
-def desactivar_variante(variante_id: int, db: Session = Depends(get_db)):
+def desactivar_variante(
+    variante_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     v = db.get(VarianteProducto, variante_id)
     if not v:
         raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
     v.activo = False
     db.commit()
     return {"ok": True}

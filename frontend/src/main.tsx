@@ -6,8 +6,9 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import VentaNueva from "./pages/VentaNueva";
 import Cartera from "./pages/Cartera";
-import Clientes from "./pages/Clientes";
 import Productos from "./pages/Productos";
+import Clientes from "./pages/Clientes";
+import Empresas from "./pages/Empresas";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/venta" element={<VentaNueva />} />
         <Route path="/productos" element={<Productos />} />
         <Route path="/clientes" element={<Clientes />} />
+        <Route path="/empresas" element={<Empresas />} />
         <Route path="/cartera" element={<Cartera />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

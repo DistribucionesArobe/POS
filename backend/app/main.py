@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routers import (
     auth,
+    empresas,
     productos,
     clientes,
     proveedores,
@@ -23,15 +24,13 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup hooks (ej. validar conexiones, calentar caches)
     yield
-    # Shutdown hooks
 
 
 app = FastAPI(
     title="Aceromax POS",
-    description="Sistema POS, facturacion CFDI 4.0 y asistente Claude para Aceromax",
-    version="0.1.0",
+    description="Sistema POS multi-empresa, facturacion CFDI 4.0 y asistente Claude",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -49,8 +48,8 @@ def health():
     return {"status": "ok", "env": settings.app_env}
 
 
-# Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(empresas.router, prefix="/api/empresas", tags=["empresas"])
 app.include_router(productos.router, prefix="/api/productos", tags=["productos"])
 app.include_router(clientes.router, prefix="/api/clientes", tags=["clientes"])
 app.include_router(proveedores.router, prefix="/api/proveedores", tags=["proveedores"])

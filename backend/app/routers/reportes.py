@@ -1,4 +1,4 @@
-"""Reportes operativos y financieros."""
+"""Reportes - filtrados por empresa."""
 from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -6,22 +6,27 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import (
-    DocumentoVenta, CuentaPorCobrar, VarianteProducto, Cliente,
+    DocumentoVenta, CuentaPorCobrar, VarianteProducto, Cliente, Producto,
 )
 from app.models.venta import EstatusDocumento
+from app.services.security import get_active_empresa_id
 
 router = APIRouter()
 
 
 @router.get("/kpis")
-def kpis(db: Session = Depends(get_db)):
-    """KPIs del dashboard: stock, ventas hoy, cartera total, clientes."""
+def kpis(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     today = datetime.utcnow().date()
     inicio = datetime.combine(today, datetime.min.time())
     fin = inicio + timedelta(days=1)
 
     productos_stock = (
         db.query(VarianteProducto)
+        .join(Producto)
+        .filter(Producto.empresa_id == empresa_id)
         .filter(VarianteProducto.activo == True, VarianteProducto.stock_actual > 0)
         .count()
     )
@@ -29,26 +34,38 @@ def kpis(db: Session = Depends(get_db)):
     ventas_hoy = db.query(
         func.coalesce(func.sum(DocumentoVenta.total), 0)
     ).filter(
+        DocumentoVenta.empresa_id == empresa_id,
         DocumentoVenta.fecha >= inicio,
         DocumentoVenta.fecha < fin,
         DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
     ).scalar()
 
     docs_hoy = db.query(DocumentoVenta).filter(
+        DocumentoVenta.empresa_id == empresa_id,
         DocumentoVenta.fecha >= inicio,
         DocumentoVenta.fecha < fin,
         DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
     ).count()
 
-    cartera = db.query(
-        func.coalesce(func.sum(CuentaPorCobrar.saldo), 0)
-    ).filter(CuentaPorCobrar.pagado == False).scalar()
+    cartera = (
+        db.query(func.coalesce(func.sum(CuentaPorCobrar.saldo), 0))
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.pagado == False)
+        .scalar()
+    )
 
-    docs_pendientes = db.query(CuentaPorCobrar).filter(
-        CuentaPorCobrar.pagado == False
+    docs_pendientes = (
+        db.query(CuentaPorCobrar)
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.pagado == False)
+        .count()
+    )
+
+    clientes_activos = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id, Cliente.activo == True
     ).count()
-
-    clientes_activos = db.query(Cliente).filter(Cliente.activo == True).count()
 
     return {
         "productos_stock": productos_stock,
@@ -61,7 +78,11 @@ def kpis(db: Session = Depends(get_db)):
 
 
 @router.get("/corte-caja")
-def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
+def corte_caja(
+    fecha: date | None = None,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     f = fecha or datetime.utcnow().date()
     inicio = datetime.combine(f, datetime.min.time())
     fin = inicio + timedelta(days=1)
@@ -71,6 +92,7 @@ def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
             func.count().label("n"),
             func.sum(DocumentoVenta.total).label("total"),
         )
+        .filter(DocumentoVenta.empresa_id == empresa_id)
         .filter(DocumentoVenta.fecha >= inicio, DocumentoVenta.fecha < fin)
         .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
         .group_by(DocumentoVenta.tipo)
@@ -86,10 +108,20 @@ def corte_caja(fecha: date | None = None, db: Session = Depends(get_db)):
 
 
 @router.get("/antiguedad-cartera")
-def antiguedad_cartera(db: Session = Depends(get_db)):
+def antiguedad_cartera(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     today = datetime.utcnow().date()
     buckets = {"0-15": 0.0, "16-30": 0.0, "31-60": 0.0, "61-90": 0.0, "91+": 0.0}
-    for cxc in db.query(CuentaPorCobrar).filter(CuentaPorCobrar.pagado == False).all():
+    rows = (
+        db.query(CuentaPorCobrar)
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.pagado == False)
+        .all()
+    )
+    for cxc in rows:
         d = (today - cxc.fecha_emision.date()).days
         saldo = float(cxc.saldo)
         if d <= 15: buckets["0-15"] += saldo

@@ -1,4 +1,4 @@
-"""Generador de PDFs para tickets y remisiones (las facturas vienen del PAC)."""
+"""Generador de PDFs para tickets y remisiones - usa nombre de empresa."""
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
@@ -7,22 +7,27 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
-from app.models import DocumentoVenta, Cliente
+from app.models import DocumentoVenta, Cliente, Empresa
 
 
-def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente) -> bytes:
+def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente, empresa: Empresa | None = None) -> bytes:
     buf = BytesIO()
     pdf = SimpleDocTemplate(
         buf, pagesize=letter,
         leftMargin=2*cm, rightMargin=2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm,
     )
     styles = getSampleStyleSheet()
-    title = ParagraphStyle('t', parent=styles['Heading1'], fontSize=18, alignment=TA_CENTER, spaceAfter=10)
-    subt = ParagraphStyle('s', parent=styles['Heading2'], fontSize=14, alignment=TA_CENTER, spaceAfter=6)
+    title = ParagraphStyle('t', parent=styles['Heading1'], fontSize=18, alignment=TA_CENTER, spaceAfter=6)
+    subt = ParagraphStyle('s', parent=styles['Heading2'], fontSize=14, alignment=TA_CENTER, spaceAfter=4)
+    sub2 = ParagraphStyle('s2', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER, spaceAfter=8, textColor=colors.HexColor('#6b7280'))
     norm = ParagraphStyle('n', parent=styles['Normal'], fontSize=10, alignment=TA_LEFT)
 
+    nombre_emisor = (empresa.nombre if empresa else "EMISOR").upper()
+    rfc_emisor = empresa.rfc if empresa else ""
+
     elements = [
-        Paragraph("<b>ACEROMAX</b>", title),
+        Paragraph(f"<b>{nombre_emisor}</b>", title),
+        Paragraph(f"RFC {rfc_emisor}", sub2) if rfc_emisor else Spacer(1, 4),
         Paragraph(f"{doc.tipo} {doc.folio}", subt),
         Spacer(1, 12),
     ]
@@ -81,7 +86,7 @@ def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente) -> bytes:
         aviso_style = ParagraphStyle('av', parent=styles['Normal'], fontSize=9,
                                      alignment=TA_CENTER, textColor=colors.HexColor('#dc2626'))
         elements.append(Paragraph(
-            "<i>Este documento NO es factura. Para facturar contacte a Aceromax.</i>",
+            "<i>Este documento NO es factura. Para facturar contacte al emisor.</i>",
             aviso_style,
         ))
 

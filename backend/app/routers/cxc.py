@@ -1,23 +1,29 @@
-"""Cuentas por Cobrar."""
+"""Cuentas por Cobrar - filtrado por empresa."""
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import CuentaPorCobrar, AbonoCxC, Cliente
+from app.models import CuentaPorCobrar, Cliente, DocumentoVenta
 from app.schemas.cxc import AbonoCxCIn
 from app.services import pago_service
+from app.services.security import get_active_empresa_id
 
 router = APIRouter()
 
 
 @router.get("/cartera")
-def cartera(dias_minimos: int = 0, db: Session = Depends(get_db)):
-    """Cartera total con antigüedad. Usado por el cobrador automatico."""
+def cartera(
+    dias_minimos: int = 0,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     rows = (
         db.query(CuentaPorCobrar, Cliente)
         .join(Cliente, Cliente.id == CuentaPorCobrar.cliente_id)
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
         .filter(CuentaPorCobrar.pagado == False)
         .all()
     )
@@ -37,14 +43,29 @@ def cartera(dias_minimos: int = 0, db: Session = Depends(get_db)):
 
 
 @router.get("/cliente/{cliente_id}")
-def saldo_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    total = db.query(func.coalesce(func.sum(CuentaPorCobrar.saldo), 0)).filter(
-        CuentaPorCobrar.cliente_id == cliente_id,
-        CuentaPorCobrar.pagado == False,
-    ).scalar()
-    return {"cliente_id": cliente_id, "saldo_total": float(total)}
+def saldo_cliente(
+    cliente_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    total = (
+        db.query(func.coalesce(func.sum(CuentaPorCobrar.saldo), 0))
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.cliente_id == cliente_id)
+        .filter(CuentaPorCobrar.pagado == False)
+        .scalar()
+    )
+    return {"cliente_id": cliente_id, "saldo_total": float(total or 0)}
 
 
 @router.post("/abono")
-def registrar_abono(payload: AbonoCxCIn, db: Session = Depends(get_db)):
-    return pago_service.aplicar_abono_cxc(db, payload)
+def registrar_abono(
+    payload: AbonoCxCIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        return pago_service.aplicar_abono_cxc(db, payload, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))

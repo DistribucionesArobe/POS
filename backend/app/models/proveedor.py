@@ -1,6 +1,6 @@
 """Proveedores para compras y CxP."""
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy import String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -10,6 +10,8 @@ class Proveedor(Base):
     __tablename__ = "proveedores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+
     nombre: Mapped[str] = mapped_column(String(255), index=True)
     rfc: Mapped[str | None] = mapped_column(String(13), nullable=True)
     razon_social: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -1,4 +1,5 @@
 """Modelos de dominio - importarlos aqui para que alembic los descubra."""
+from app.models.empresa import Empresa  # noqa
 from app.models.usuario import Usuario  # noqa
 from app.models.cliente import Cliente  # noqa
 from app.models.proveedor import Proveedor  # noqa

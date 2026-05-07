@@ -1,12 +1,13 @@
-"""Clientes - CRUD completo con datos fiscales."""
+"""Clientes - CRUD filtrado por empresa."""
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Cliente, CuentaPorCobrar
+from app.models import Cliente, CuentaPorCobrar, DocumentoVenta
 from app.schemas.cliente import ClienteIn, ClienteUpdate
+from app.services.security import get_active_empresa_id
 
 router = APIRouter()
 
@@ -15,9 +16,10 @@ router = APIRouter()
 def listar_clientes(
     q: str | None = Query(None),
     activo: bool = True,
+    empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Cliente)
+    query = db.query(Cliente).filter(Cliente.empresa_id == empresa_id)
     if activo:
         query = query.filter(Cliente.activo == True)
     if q:
@@ -43,13 +45,20 @@ def listar_clientes(
 
 
 @router.get("/{cliente_id}")
-def obtener_cliente(cliente_id: int, db: Session = Depends(get_db)):
+def obtener_cliente(
+    cliente_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     c = db.get(Cliente, cliente_id)
-    if not c:
+    if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Cliente no existe")
     saldo = (
         db.query(CuentaPorCobrar)
-        .filter(CuentaPorCobrar.cliente_id == cliente_id, CuentaPorCobrar.pagado == False)
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(CuentaPorCobrar.cliente_id == cliente_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.pagado == False)
         .all()
     )
     return {
@@ -67,15 +76,22 @@ def obtener_cliente(cliente_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("")
-def crear_cliente(payload: ClienteIn, db: Session = Depends(get_db)):
+def crear_cliente(
+    payload: ClienteIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     data = payload.model_dump()
     if not data.get("nombre"):
         data["nombre"] = data.get("razon_social") or "Cliente sin nombre"
     if data.get("rfc"):
-        existe = db.query(Cliente).filter(Cliente.rfc == data["rfc"]).first()
+        existe = db.query(Cliente).filter(
+            Cliente.rfc == data["rfc"],
+            Cliente.empresa_id == empresa_id,
+        ).first()
         if existe:
-            raise HTTPException(400, f"Ya existe cliente con RFC {data['rfc']}")
-    c = Cliente(**data, creado_en=datetime.utcnow())
+            raise HTTPException(400, f"Ya existe cliente con RFC {data['rfc']} en esta empresa")
+    c = Cliente(empresa_id=empresa_id, creado_en=datetime.utcnow(), **data)
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -83,9 +99,13 @@ def crear_cliente(payload: ClienteIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{cliente_id}")
-def actualizar_cliente(cliente_id: int, payload: ClienteUpdate, db: Session = Depends(get_db)):
+def actualizar_cliente(
+    cliente_id: int, payload: ClienteUpdate,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     c = db.get(Cliente, cliente_id)
-    if not c:
+    if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Cliente no existe")
     data = payload.model_dump(exclude_unset=True)
     if "razon_social" in data and "nombre" not in data:
@@ -97,9 +117,13 @@ def actualizar_cliente(cliente_id: int, payload: ClienteUpdate, db: Session = De
 
 
 @router.delete("/{cliente_id}")
-def desactivar_cliente(cliente_id: int, db: Session = Depends(get_db)):
+def desactivar_cliente(
+    cliente_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
     c = db.get(Cliente, cliente_id)
-    if not c:
+    if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Cliente no existe")
     c.activo = False
     db.commit()

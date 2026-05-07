@@ -20,6 +20,10 @@ export default function Login() {
       const r = await api.post("/api/auth/login", fd);
       localStorage.setItem("token", r.data.access_token);
       localStorage.setItem("nombre", r.data.nombre);
+      localStorage.setItem("rol", r.data.rol);
+      localStorage.setItem("super_admin", String(!!r.data.super_admin));
+      localStorage.setItem("empresa_activa", JSON.stringify(r.data.empresa_activa));
+      localStorage.setItem("empresas", JSON.stringify(r.data.empresas));
       nav("/");
     } catch {
       setErr("Credenciales invalidas");
@@ -30,8 +34,8 @@ export default function Login() {
   return (
     <div className="login-bg">
       <div className="login-card">
-        <h1 className="login-title">ACEROMAX</h1>
-        <p className="login-subtitle">Sistema POS y facturacion</p>
+        <h1 className="login-title">ACEROMAX POS</h1>
+        <p className="login-subtitle">Multi-empresa · CFDI 4.0</p>
         <form onSubmit={submit} className="login-form">
           <div>
             <label>Correo</label>

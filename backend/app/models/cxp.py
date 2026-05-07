@@ -11,10 +11,11 @@ class Compra(Base):
     __tablename__ = "compras"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+
     folio_interno: Mapped[str] = mapped_column(String(32), unique=True)
     proveedor_id: Mapped[int] = mapped_column(ForeignKey("proveedores.id"), index=True)
 
-    # Datos del CFDI recibido del proveedor
     uuid_cfdi: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
     folio_factura_proveedor: Mapped[str | None] = mapped_column(String(40), nullable=True)
     fecha_factura: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -25,7 +26,7 @@ class Compra(Base):
     iva: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 
-    estatus: Mapped[str] = mapped_column(String(16), default="RECIBIDA")  # RECIBIDA | PAGADA | CANCELADA
+    estatus: Mapped[str] = mapped_column(String(16), default="RECIBIDA")
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
