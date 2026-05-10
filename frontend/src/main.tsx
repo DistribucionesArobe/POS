@@ -10,6 +10,8 @@ import Ventas from "./pages/Ventas";
 import Cartera from "./pages/Cartera";
 import Productos from "./pages/Productos";
 import Clientes from "./pages/Clientes";
+import Proveedores from "./pages/Proveedores";
+import Compras from "./pages/Compras";
 import Empresas from "./pages/Empresas";
 import "./index.css";
 
@@ -24,6 +26,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/ventas" element={<Ventas />} />
         <Route path="/productos" element={<Productos />} />
         <Route path="/clientes" element={<Clientes />} />
+        <Route path="/proveedores" element={<Proveedores />} />
+        <Route path="/compras" element={<Compras />} />
         <Route path="/empresas" element={<Empresas />} />
         <Route path="/cartera" element={<Cartera />} />
         <Route path="*" element={<Navigate to="/" replace />} />

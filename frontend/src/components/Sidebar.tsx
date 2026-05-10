@@ -21,6 +21,8 @@ const items = [
   { to: "/ventas", label: "Mis ventas", icon: Icon.list },
   { to: "/productos", label: "Productos", icon: Icon.package },
   { to: "/clientes", label: "Clientes", icon: Icon.users },
+  { to: "/proveedores", label: "Proveedores", icon: Icon.users },
+  { to: "/compras", label: "Compras y CxP", icon: Icon.package },
   { to: "/cartera", label: "Cartera", icon: Icon.dollar },
 ];
 
