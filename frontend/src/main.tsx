@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Caja from "./pages/Caja";
 import VentaNueva from "./pages/VentaNueva";
 import Ventas from "./pages/Ventas";
 import Cartera from "./pages/Cartera";
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Dashboard />} />
+        <Route path="/caja" element={<Caja />} />
         <Route path="/venta" element={<VentaNueva />} />
         <Route path="/ventas" element={<Ventas />} />
         <Route path="/productos" element={<Productos />} />

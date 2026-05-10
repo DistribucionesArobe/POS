@@ -75,6 +75,32 @@ def buscar_variante(
     ]
 
 
+@router.get("/sku/{sku}")
+def obtener_por_sku(
+    sku: str,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Lookup exacto por SKU - para scanner de barcode en caja."""
+    v = (
+        db.query(VarianteProducto)
+        .join(Producto)
+        .filter(Producto.empresa_id == empresa_id)
+        .filter(VarianteProducto.sku == sku)
+        .filter(VarianteProducto.activo == True)
+        .first()
+    )
+    if not v:
+        raise HTTPException(404, "SKU no encontrado")
+    return {
+        "id": v.id, "sku": v.sku,
+        "nombre": f"{v.producto.nombre} - {v.presentacion}",
+        "precio": float(v.precio_publico),
+        "stock": float(v.stock_actual),
+        "unidad": v.unidad,
+    }
+
+
 @router.post("/simple")
 def crear_producto_simple(
     payload: ProductoSimpleIn,
