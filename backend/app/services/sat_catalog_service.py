@@ -167,12 +167,11 @@ def _load_full() -> list[dict]:
 
 
 def buscar_candidatos(query: str, categoria: str | None = None, limit: int = 15) -> list[dict]:
-    """Busca claves SAT relevantes para una query de producto.
+    """Busca claves SAT en el catalogo oficial por keywords.
 
-    Estrategia:
-    1. Match en lista curada de ferreteria (alta precision)
-    2. Si no hay match, busqueda por keywords en catalogo SAT completo (si existe)
-    3. Devuelve top N candidatos
+    Si el catalogo completo NO esta cargado, fallback a lista curada (que puede
+    tener imprecisiones porque viene de memoria). Por eso lo correcto es siempre
+    cargar el catalogo SAT oficial.
     """
     q = (query or "").lower().strip()
     if categoria:
@@ -180,7 +179,32 @@ def buscar_candidatos(query: str, categoria: str | None = None, limit: int = 15)
     if not q:
         return []
 
-    # 1. Lista curada
+    catalog = _load_full()
+    if catalog:
+        # Solo usar catalogo oficial - mas confiable
+        words = [w for w in q.split() if len(w) >= 3]
+        if not words:
+            return []
+        scored: list[tuple[int, dict]] = []
+        for item in catalog:
+            desc_lower = item["descripcion"].lower()
+            desc_words = desc_lower.split()
+            score = 0
+            for word in words:
+                # exact word match vale mas que substring
+                if word in desc_words:
+                    score += 5
+                elif any(word in w for w in desc_words):
+                    score += 2
+            if score > 0:
+                scored.append((score, item))
+        scored.sort(key=lambda x: -x[0])
+        return [
+            {"clave": it["clave"], "descripcion": it["descripcion"], "fuente": "catalogo_sat"}
+            for _, it in scored[:limit]
+        ]
+
+    # Fallback - lista curada (puede tener errores, mejor cargar catalogo oficial)
     embedded_matches: list[dict] = []
     seen_claves: set[str] = set()
     for item in EMBEDDED_FERRETERIA:
@@ -189,32 +213,10 @@ def buscar_candidatos(query: str, categoria: str | None = None, limit: int = 15)
                 embedded_matches.append({
                     "clave": item["clave"],
                     "descripcion": item["descripcion"],
-                    "fuente": "ferreteria_curada",
+                    "fuente": "ferreteria_curada_fallback",
                 })
                 seen_claves.add(item["clave"])
                 break
-
-    # 2. Catalogo completo (si esta cargado)
-    catalog = _load_full()
-    if catalog:
-        words = [w for w in q.split() if len(w) >= 3]
-        if words:
-            scored: list[tuple[int, dict]] = []
-            for item in catalog:
-                desc_lower = item["descripcion"].lower()
-                score = sum(2 if w == word else 1 for word in words for w in desc_lower.split() if word in w)
-                if score > 0:
-                    scored.append((score, item))
-            scored.sort(key=lambda x: -x[0])
-            for _, item in scored[:limit]:
-                if item["clave"] not in seen_claves:
-                    embedded_matches.append({
-                        "clave": item["clave"],
-                        "descripcion": item["descripcion"],
-                        "fuente": "catalogo_sat",
-                    })
-                    seen_claves.add(item["clave"])
-
     return embedded_matches[:limit]
 
 
