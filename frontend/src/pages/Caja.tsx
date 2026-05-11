@@ -140,8 +140,9 @@ export default function Caja() {
     if (procesando) return;
     // Validar pagos para TICKET y FACTURA PUE; REMISION es a credito (sin pagos)
     if (tipo !== "REMISION") {
-      if (Math.abs(sumaPagos - total) > 0.01) {
-        alert(`La suma de pagos (${fmt(sumaPagos)}) no coincide con el total (${fmt(total)})`);
+      // Se permite pagar MAS del total (la diferencia es cambio); solo falla si paga menos.
+      if (sumaPagos < total - 0.01) {
+        alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
         return;
       }
       if (pagos.some((p) => p.monto <= 0)) {
@@ -451,7 +452,7 @@ export default function Caja() {
                     <input ref={idx === 0 ? recibidoRef : undefined} className="input" type="number" step="0.01"
                       value={p.monto}
                       onChange={(e) => setPago(idx, { monto: +e.target.value })}
-                      onKeyDown={(e) => e.key === "Enter" && Math.abs(sumaPagos - total) < 0.01 && cobrar()}
+                      onKeyDown={(e) => e.key === "Enter" && sumaPagos >= total - 0.01 && cobrar()}
                       style={{ fontSize: 16, padding: 10, textAlign: "right", fontWeight: 600 }} />
                     {pagos.length > 1 && (
                       <button onClick={() => quitarPago(idx)}
@@ -465,16 +466,23 @@ export default function Caja() {
                   </span>
                   <span>{fmt(sumaPagos)}</span>
                 </div>
-                {tipo === "TICKET" && !usaSplit && (
+                {!usaSplit && (
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 800,
                     color: faltante > 0.01 ? "var(--color-danger)" : "var(--color-success)" }}>
                     <span>{faltante > 0.01 ? "Falta" : "Cambio"}</span>
                     <span>{fmt(Math.abs(faltante))}</span>
                   </div>
                 )}
-                {usaSplit && Math.abs(faltante) > 0.01 && (
+                {usaSplit && faltante > 0.01 && (
                   <div style={{ fontSize: 13, color: "var(--color-danger)", marginTop: 4 }}>
-                    Diferencia: {fmt(faltante)} — ajusta los montos
+                    Falta: {fmt(faltante)} — ajusta los montos
+                  </div>
+                )}
+                {usaSplit && faltante < -0.01 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700,
+                    color: "var(--color-success)", marginTop: 4 }}>
+                    <span>Cambio</span>
+                    <span>{fmt(-faltante)}</span>
                   </div>
                 )}
                 {usaSplit && (
@@ -486,7 +494,7 @@ export default function Caja() {
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
               <button onClick={cobrar}
-                disabled={procesando || (tipo !== "REMISION" && Math.abs(sumaPagos - total) > 0.01)}
+                disabled={procesando || (tipo !== "REMISION" && sumaPagos < total - 0.01)}
                 style={{
                   flex: 1, padding: 18, fontSize: 18, fontWeight: 700, color: "white",
                   background: procesando ? "#94a3b8" : "var(--color-primary)",

@@ -61,8 +61,8 @@ export default function VentaNueva() {
 
   async function guardar() {
     if (tipo !== "REMISION") {
-      if (Math.abs(sumaPagos - total) > 0.01) {
-        alert(`La suma de pagos (${fmt(sumaPagos)}) no coincide con el total (${fmt(total)})`);
+      if (sumaPagos < total - 0.01) {
+        alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
         return;
       }
     }
@@ -221,8 +221,10 @@ export default function VentaNueva() {
                   ))}
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 6 }}>
                     <span style={{ color: "var(--color-text-secondary)" }}>Suma pagos</span>
-                    <span style={{ color: Math.abs(sumaPagos - total) > 0.01 ? "var(--color-danger)" : "var(--color-success)", fontWeight: 600 }}>
-                      {fmt(sumaPagos)} {Math.abs(sumaPagos - total) > 0.01 && `(falta ${fmt(total - sumaPagos)})`}
+                    <span style={{ color: sumaPagos < total - 0.01 ? "var(--color-danger)" : "var(--color-success)", fontWeight: 600 }}>
+                      {fmt(sumaPagos)}
+                      {sumaPagos < total - 0.01 && ` (falta ${fmt(total - sumaPagos)})`}
+                      {sumaPagos > total + 0.01 && ` (cambio ${fmt(sumaPagos - total)})`}
                     </span>
                   </div>
                   {usaSplit && (

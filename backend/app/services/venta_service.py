@@ -52,10 +52,11 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
     pagos_validados: list = []
     if payload.pagos:
         suma = round(sum(p.monto for p in payload.pagos), 2)
-        # tolerancia de 1 centavo por redondeo
-        if abs(suma - total) > 0.01:
+        # Se permite suma >= total (la diferencia es cambio en efectivo).
+        # Solo falla si paga MENOS del total.
+        if suma < total - 0.01:
             raise ValueError(
-                f"La suma de pagos ({suma:.2f}) no coincide con el total ({total:.2f})"
+                f"La suma de pagos ({suma:.2f}) es menor al total ({total:.2f})"
             )
         pagos_validados = list(payload.pagos)
         if len(pagos_validados) == 1:
