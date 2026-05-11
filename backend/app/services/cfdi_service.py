@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.facturama import FacturamaClient, FacturamaError
 from app.models import DocumentoVenta, Cfdi, Cliente, Empresa
+from app.services import email_service
 
 
 def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
@@ -52,19 +53,33 @@ def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
         pdf_url=f"facturama://{facturama_id}/pdf" if facturama_id else None,
     )
 
-    # Envio automatico de XML+PDF por correo via Facturama (best-effort)
-    if facturama_id and cliente.correo:
-        try:
-            ok = client.enviar_por_correo(facturama_id, cliente.correo)
-            if ok:
-                cfdi.correo_enviado_a = cliente.correo
-                cfdi.correo_enviado_en = datetime.utcnow()
-        except Exception:
-            pass  # no rompemos el timbrado por fallo de mail
-
     db.add(cfdi)
     db.commit()
     db.refresh(cfdi)
+
+    # Envio automatico via SMTP propio (descarga XML+PDF de Facturama y los adjunta)
+    if facturama_id and cliente.correo and email_service.smtp_configurado():
+        try:
+            xml_bytes = client.descargar_xml(facturama_id)
+            pdf_bytes = client.descargar_pdf(facturama_id)
+            ok, err = email_service.enviar_cfdi(
+                destinatario=cliente.correo,
+                nombre_destinatario=cliente.razon_social or cliente.nombre,
+                uuid=cfdi.uuid,
+                serie=cfdi.serie,
+                folio=cfdi.folio,
+                rfc_emisor=empresa.rfc,
+                razon_social_emisor=empresa.razon_social or empresa.nombre,
+                xml_bytes=xml_bytes,
+                pdf_bytes=pdf_bytes,
+            )
+            if ok:
+                cfdi.correo_enviado_a = cliente.correo
+                cfdi.correo_enviado_en = datetime.utcnow()
+                db.commit()
+        except Exception:
+            pass  # no rompemos el timbrado por fallo de mail
+
     return {
         "cfdi_id": cfdi.id, "uuid": cfdi.uuid, "serie": cfdi.serie, "folio": cfdi.folio,
         "rfc_emisor": cfdi.rfc_emisor, "rfc_receptor": cfdi.rfc_receptor,
@@ -205,16 +220,28 @@ def emitir_nota_credito_cfdi(db: Session, nc_id: int, empresa_id: int) -> dict:
         pdf_url=f"facturama://{facturama_id}/pdf" if facturama_id else None,
     )
 
-    if facturama_id and cliente.correo:
+    db.add(cfdi_nc)
+    db.commit()
+
+    if facturama_id and cliente.correo and email_service.smtp_configurado():
         try:
-            if client.enviar_por_correo(facturama_id, cliente.correo):
+            xml_bytes = client.descargar_xml(facturama_id)
+            pdf_bytes = client.descargar_pdf(facturama_id)
+            ok, _ = email_service.enviar_cfdi(
+                destinatario=cliente.correo,
+                nombre_destinatario=cliente.razon_social or cliente.nombre,
+                uuid=cfdi_nc.uuid, serie=cfdi_nc.serie, folio=cfdi_nc.folio,
+                rfc_emisor=empresa.rfc,
+                razon_social_emisor=empresa.razon_social or empresa.nombre,
+                xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+            )
+            if ok:
                 cfdi_nc.correo_enviado_a = cliente.correo
                 cfdi_nc.correo_enviado_en = datetime.utcnow()
+                db.commit()
         except Exception:
             pass
 
-    db.add(cfdi_nc)
-    db.commit()
     return {
         "cfdi_id": cfdi_nc.id, "uuid": uuid,
         "serie": cfdi_nc.serie, "folio": cfdi_nc.folio,
@@ -223,7 +250,7 @@ def emitir_nota_credito_cfdi(db: Session, nc_id: int, empresa_id: int) -> dict:
 
 
 def reenviar_correo(db: Session, cfdi_id: int, email: str | None, empresa_id: int) -> dict:
-    """Re-envia un CFDI ya timbrado al correo dado (o al del cliente)."""
+    """Re-envia un CFDI ya timbrado al correo dado (o al del cliente) via SMTP propio."""
     cfdi = db.get(Cfdi, cfdi_id)
     if not cfdi:
         raise ValueError("CFDI no existe")
@@ -235,14 +262,33 @@ def reenviar_correo(db: Session, cfdi_id: int, email: str | None, empresa_id: in
     if not destino:
         raise ValueError("No hay correo en el cliente y no se especifico uno")
 
+    if not email_service.smtp_configurado():
+        raise ValueError(
+            "SMTP no configurado. Define SMTP_HOST, SMTP_USER y SMTP_PASSWORD en el backend."
+        )
+
     empresa = db.get(Empresa, empresa_id)
     facturama_id = (cfdi.xml_url or "").replace("facturama://", "").split("/")[0]
     if not facturama_id:
         raise ValueError("CFDI sin id Facturama")
 
-    ok = FacturamaClient(empresa).enviar_por_correo(facturama_id, destino)
+    client = FacturamaClient(empresa)
+    try:
+        xml_bytes = client.descargar_xml(facturama_id)
+        pdf_bytes = client.descargar_pdf(facturama_id)
+    except Exception as e:
+        raise ValueError(f"No se pudo bajar XML/PDF de Facturama: {e}")
+
+    ok, err = email_service.enviar_cfdi(
+        destinatario=destino,
+        nombre_destinatario=(cliente.razon_social if cliente else "") or (cliente.nombre if cliente else ""),
+        uuid=cfdi.uuid, serie=cfdi.serie, folio=cfdi.folio,
+        rfc_emisor=empresa.rfc,
+        razon_social_emisor=empresa.razon_social or empresa.nombre,
+        xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+    )
     if not ok:
-        raise ValueError("Facturama no acepto el envio; verifica el correo y reintenta")
+        raise ValueError(f"SMTP rechazo el envio: {err}")
 
     cfdi.correo_enviado_a = destino
     cfdi.correo_enviado_en = datetime.utcnow()
