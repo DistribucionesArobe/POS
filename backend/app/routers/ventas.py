@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
-from app.models import DocumentoVenta, Cliente, Empresa
+from app.models import DocumentoVenta, Cliente, Empresa, Pago
 from app.models.venta import TipoDocumento, EstatusDocumento
 from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut, DevolucionIn
 from app.services import venta_service, pdf_service
@@ -107,6 +107,30 @@ def conceptos_de_documento(
             "importe": float(c.importe),
         }
         for c in doc.conceptos
+    ]
+
+
+@router.get("/{documento_id}/pagos")
+def pagos_de_documento(
+    documento_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    doc = (
+        db.query(DocumentoVenta)
+        .filter(DocumentoVenta.id == documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(404, "Documento no existe")
+    pagos = db.query(Pago).filter(Pago.documento_venta_id == documento_id).order_by(Pago.id).all()
+    return [
+        {
+            "id": p.id, "forma_pago_sat": p.forma_pago_sat,
+            "monto": float(p.monto), "referencia": p.referencia,
+        }
+        for p in pagos
     ]
 
 

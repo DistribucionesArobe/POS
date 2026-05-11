@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     DocumentoVenta, ConceptoVenta, VarianteProducto, Cliente,
-    CuentaPorCobrar, Producto,
+    CuentaPorCobrar, Producto, Pago,
 )
 from app.models.venta import TipoDocumento, EstatusDocumento, MetodoPagoSAT
 from app.schemas.venta import DocumentoVentaIn
@@ -47,6 +47,23 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
     iva = round(subtotal * IVA_TASA, 2)
     total = round(subtotal + iva, 2)
 
+    # Resolver forma_pago_sat a partir de pagos[] si se mandaron
+    forma_pago_resuelta = payload.forma_pago_sat
+    pagos_validados: list = []
+    if payload.pagos:
+        suma = round(sum(p.monto for p in payload.pagos), 2)
+        # tolerancia de 1 centavo por redondeo
+        if abs(suma - total) > 0.01:
+            raise ValueError(
+                f"La suma de pagos ({suma:.2f}) no coincide con el total ({total:.2f})"
+            )
+        pagos_validados = list(payload.pagos)
+        if len(pagos_validados) == 1:
+            forma_pago_resuelta = pagos_validados[0].forma_pago_sat
+        else:
+            # SAT 4.0: multiples formas de pago -> "99" Por definir
+            forma_pago_resuelta = "99"
+
     doc = DocumentoVenta(
         empresa_id=empresa_id,
         folio=siguiente_folio(db, payload.tipo, empresa_id),
@@ -58,7 +75,7 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         subtotal=subtotal,
         iva=iva,
         total=total,
-        forma_pago_sat=payload.forma_pago_sat,
+        forma_pago_sat=forma_pago_resuelta,
         metodo_pago_sat=payload.metodo_pago_sat,
         uso_cfdi=payload.uso_cfdi,
         notas=payload.notas,
@@ -68,6 +85,15 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
     doc.conceptos = conceptos_creados
     db.add(doc)
     db.flush()
+
+    # Registrar pagos (si se mandaron)
+    for p in pagos_validados:
+        db.add(Pago(
+            documento_venta_id=doc.id,
+            forma_pago_sat=p.forma_pago_sat,
+            monto=p.monto,
+            referencia=p.referencia,
+        ))
 
     if payload.tipo in (TipoDocumento.TICKET.value, TipoDocumento.REMISION.value, TipoDocumento.FACTURA.value):
         for c in conceptos_creados:

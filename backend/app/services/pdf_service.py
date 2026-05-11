@@ -80,7 +80,31 @@ def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente, empresa: Empres
         ('TOPPADDING', (0,-1), (-1,-1), 8),
     ]))
     elements.append(tt)
-    elements.append(Spacer(1, 24))
+    elements.append(Spacer(1, 12))
+
+    # Forma(s) de pago si las hay
+    pagos = getattr(doc, "pagos", None) or []
+    if pagos:
+        forma_label = {
+            "01": "Efectivo", "02": "Cheque", "03": "Transferencia",
+            "04": "T. Crédito", "28": "T. Débito", "99": "Por definir",
+        }
+        rows = [[forma_label.get(p.forma_pago_sat, p.forma_pago_sat), f"${float(p.monto):,.2f}"]
+                for p in pagos]
+        if len(rows) > 1 or (len(rows) == 1 and rows[0][0] != "Efectivo"):
+            pago_t = Table([["Forma de pago", "Monto"]] + rows, colWidths=[6*cm, 3*cm], hAlign='RIGHT')
+            pago_t.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e5e7eb')),
+                ('FONTSIZE', (0,0), (-1,-1), 9),
+                ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ]))
+            elements.append(pago_t)
+            elements.append(Spacer(1, 12))
+
+    elements.append(Spacer(1, 12))
 
     if doc.tipo == "REMISION":
         aviso_style = ParagraphStyle('av', parent=styles['Normal'], fontSize=9,
@@ -89,6 +113,18 @@ def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente, empresa: Empres
             "<i>Este documento NO es factura. Para facturar contacte al emisor.</i>",
             aviso_style,
         ))
+
+    if doc.tipo == "TICKET":
+        import os
+        portal_base = os.environ.get("PORTAL_FACTURACION_URL", "")
+        if portal_base:
+            facturar_style = ParagraphStyle('fac', parent=styles['Normal'], fontSize=9,
+                                            alignment=TA_CENTER, textColor=colors.HexColor('#2563eb'))
+            elements.append(Paragraph(
+                f"<b>¿Necesitas factura?</b> Captura tu RFC en: {portal_base}/facturar<br/>"
+                f"Folio: <b>{doc.folio}</b> · Total: <b>${float(doc.total):,.2f}</b>",
+                facturar_style,
+            ))
 
     pdf.build(elements)
     pdf_bytes = buf.getvalue()

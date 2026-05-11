@@ -13,6 +13,7 @@ import Clientes from "./pages/Clientes";
 import Proveedores from "./pages/Proveedores";
 import Compras from "./pages/Compras";
 import Empresas from "./pages/Empresas";
+import AutoFactura from "./pages/AutoFactura";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -20,6 +21,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/facturar" element={<AutoFactura />} />
         <Route path="/" element={<Dashboard />} />
         <Route path="/caja" element={<Caja />} />
         <Route path="/venta" element={<VentaNueva />} />

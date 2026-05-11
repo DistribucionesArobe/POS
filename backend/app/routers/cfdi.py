@@ -37,6 +37,19 @@ def cancelar_cfdi(
         raise HTTPException(400, str(e))
 
 
+@router.post("/{cfdi_id}/enviar-correo")
+def reenviar_correo(
+    cfdi_id: int,
+    email: str | None = None,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        return cfdi_service.reenviar_correo(db, cfdi_id, email, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/{cfdi_id}/xml")
 def descargar_xml(
     cfdi_id: int,
@@ -91,4 +104,6 @@ def cfdi_de_documento(
         "rfc_emisor": cfdi.rfc_emisor, "rfc_receptor": cfdi.rfc_receptor,
         "total": float(cfdi.total), "cancelado": cfdi.cancelado,
         "fecha_timbrado": cfdi.fecha_timbrado.isoformat(),
+        "correo_enviado_a": cfdi.correo_enviado_a,
+        "correo_enviado_en": cfdi.correo_enviado_en.isoformat() if cfdi.correo_enviado_en else None,
     }

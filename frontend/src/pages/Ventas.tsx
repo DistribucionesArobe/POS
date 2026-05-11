@@ -5,6 +5,8 @@ import { api } from "../api/client";
 type CfdiInfo = {
   cfdi_id: number; uuid: string; serie: string; folio: string;
   cancelado: boolean;
+  correo_enviado_a?: string | null;
+  correo_enviado_en?: string | null;
 };
 type VentaT = {
   id: number; folio: string; tipo: string; estatus: string;
@@ -65,10 +67,29 @@ export default function Ventas() {
     setBusy(documento_id);
     try {
       const r = await api.post(`/api/cfdi/timbrar/${documento_id}`);
-      alert(`Timbrado OK\nUUID: ${r.data.uuid}\nFolio fiscal: ${r.data.serie}-${r.data.folio}`);
+      let msg = `Timbrado OK\nUUID: ${r.data.uuid}\nFolio fiscal: ${r.data.serie}-${r.data.folio}`;
+      if (r.data.correo_enviado_a) {
+        msg += `\n\nXML+PDF enviado a: ${r.data.correo_enviado_a}`;
+      }
+      alert(msg);
       cargar();
     } catch (err: any) {
       alert("Error al timbrar: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function enviarCorreo(cfdiId: number, sugerido: string | null | undefined) {
+    const dest = prompt("Enviar XML+PDF al correo:", sugerido || "");
+    if (!dest) return;
+    setBusy(cfdiId);
+    try {
+      await api.post(`/api/cfdi/${cfdiId}/enviar-correo`, null, { params: { email: dest } });
+      alert("Enviado a " + dest);
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
     } finally {
       setBusy(null);
     }
@@ -268,6 +289,12 @@ export default function Ventas() {
                       <>
                         <button className="btn-icon" onClick={() => descargarXml(v.cfdi!.cfdi_id, v.cfdi!.uuid)}>XML</button>
                         <button className="btn-icon" onClick={() => descargarPdfSat(v.cfdi!.cfdi_id, v.cfdi!.uuid)}>PDF SAT</button>
+                        <button className="btn-icon"
+                          title={v.cfdi!.correo_enviado_a ? `Ya enviado a ${v.cfdi!.correo_enviado_a}. Click para reenviar.` : "Enviar XML+PDF por correo"}
+                          disabled={busy === v.cfdi!.cfdi_id}
+                          onClick={() => enviarCorreo(v.cfdi!.cfdi_id, v.cfdi!.correo_enviado_a)}>
+                          {v.cfdi!.correo_enviado_a ? "📧✓" : "📧"}
+                        </button>
                         <button className="btn-icon" style={{ color: "var(--color-danger)" }}
                           onClick={() => abrirCancelar(v.cfdi!)}>Cancelar</button>
                       </>

@@ -41,6 +41,10 @@ class Cfdi(Base):
     # Respuesta cruda de Facturama (debug / auditoria)
     respuesta_pac: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Envio por correo (Facturama lo manda automaticamente al timbrar si hay correo)
+    correo_enviado_a: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    correo_enviado_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     complementos: Mapped[list["ComplementoPago"]] = relationship(

@@ -104,6 +104,30 @@ class FacturamaClient:
             params["uuidReplacement"] = uuid_sustituye
         return self._delete(f"/cfdi/{cfdi_id}", params=params)
 
+    def enviar_por_correo(self, cfdi_id: str, email: str) -> bool:
+        """Envia XML + PDF del CFDI al correo dado. Devuelve True si ok."""
+        if not cfdi_id or not email:
+            return False
+        # Facturama acepta varios formatos del endpoint segun version; probamos
+        # los mas comunes en orden. Cualquier 2xx se considera ok.
+        candidatos = [
+            ("GET",  f"/cfdi/{cfdi_id}/email", {"email": email}),
+            ("POST", f"/cfdi/{cfdi_id}/email", {"email": email}),
+            ("GET",  "/api/Email/Send", {"cfdiId": cfdi_id, "email": email}),
+        ]
+        with httpx.Client(timeout=30) as c:
+            for method, path, params in candidatos:
+                try:
+                    r = c.request(
+                        method, f"{self.base}{path}",
+                        params=params, auth=self.auth,
+                    )
+                    if 200 <= r.status_code < 300:
+                        return True
+                except Exception:
+                    continue
+        return False
+
     def descargar_pdf(self, cfdi_id: str) -> bytes:
         data = self._get(f"/cfdi/pdf/issued/{cfdi_id}")
         return base64.b64decode(data["Content"])

@@ -10,6 +10,12 @@ class ConceptoVentaIn(BaseModel):
     descuento: float = 0
 
 
+class PagoIn(BaseModel):
+    forma_pago_sat: str  # "01" efectivo, "03" transf, "04" cred, "28" debito
+    monto: float = Field(gt=0)
+    referencia: str | None = None
+
+
 class DocumentoVentaIn(BaseModel):
     tipo: str  # TICKET | REMISION | FACTURA
     cliente_id: int
@@ -19,6 +25,10 @@ class DocumentoVentaIn(BaseModel):
     uso_cfdi: str | None = None
     notas: str | None = None
     conceptos: list[ConceptoVentaIn]
+    # Si se mandan pagos, sustituyen al campo forma_pago_sat:
+    # - 1 pago: usa esa forma_pago_sat
+    # - 2+ pagos: forma_pago_sat = "99" en CFDI (Por definir)
+    pagos: list[PagoIn] | None = None
     timbrar_inmediatamente: bool = False  # solo aplica si tipo == FACTURA
 
 

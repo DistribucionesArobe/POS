@@ -13,6 +13,15 @@ type Item = {
 
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const FORMAS_PAGO_SAT = [
+  { v: "01", t: "Efectivo" },
+  { v: "03", t: "Transferencia" },
+  { v: "04", t: "Tarjeta crédito" },
+  { v: "28", t: "Tarjeta débito" },
+];
+
+type PagoRow = { forma_pago_sat: string; monto: number };
+
 export default function Caja() {
   const nav = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
@@ -21,7 +30,7 @@ export default function Caja() {
   const [showCobrar, setShowCobrar] = useState(false);
   const [tipo, setTipo] = useState<"TICKET" | "REMISION" | "FACTURA">("TICKET");
   const [clienteId, setClienteId] = useState<number>(1);
-  const [recibido, setRecibido] = useState<number>(0);
+  const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [procesando, setProcesando] = useState(false);
   const [empresaActiva, setEmpresaActiva] = useState<{ id: number; nombre: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,7 +51,6 @@ export default function Caja() {
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
   const iva = subtotal * 0.16;
   const total = +(subtotal + iva).toFixed(2);
-  const cambio = +(recibido - total).toFixed(2);
 
   async function buscarOAgregar() {
     const q = busqueda.trim();
@@ -100,22 +108,55 @@ export default function Caja() {
 
   function abrirCobrar() {
     if (items.length === 0) return;
-    setRecibido(total);
+    setPagos([{ forma_pago_sat: tipo === "FACTURA" ? "03" : "01", monto: total }]);
     setShowCobrar(true);
     setTimeout(() => recibidoRef.current?.select(), 100);
   }
 
+  const sumaPagos = +pagos.reduce((a, p) => a + (p.monto || 0), 0).toFixed(2);
+  const faltante = +(total - sumaPagos).toFixed(2);
+  const usaSplit = pagos.length > 1;
+
+  function setPago(idx: number, patch: Partial<PagoRow>) {
+    setPagos(pagos.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  }
+  function agregarPago() {
+    if (pagos.length >= 2) return;
+    setPagos([...pagos, { forma_pago_sat: "03", monto: Math.max(0, faltante) }]);
+  }
+  function quitarPago(idx: number) {
+    const nuevos = pagos.filter((_, i) => i !== idx);
+    if (nuevos.length === 1) nuevos[0].monto = total;
+    setPagos(nuevos.length ? nuevos : [{ forma_pago_sat: "01", monto: total }]);
+  }
+
   async function cobrar() {
     if (procesando) return;
+    // Validar pagos para TICKET y FACTURA PUE; REMISION es a credito (sin pagos)
+    if (tipo !== "REMISION") {
+      if (Math.abs(sumaPagos - total) > 0.01) {
+        alert(`La suma de pagos (${fmt(sumaPagos)}) no coincide con el total (${fmt(total)})`);
+        return;
+      }
+      if (pagos.some((p) => p.monto <= 0)) {
+        alert("Cada método de pago debe ser mayor a $0");
+        return;
+      }
+    }
     setProcesando(true);
-    const payload = {
+    const payload: any = {
       tipo, cliente_id: clienteId,
-      forma_pago_sat: tipo === "FACTURA" ? "03" : "01",
+      forma_pago_sat: tipo === "FACTURA" ? (pagos[0]?.forma_pago_sat || "03") : "01",
       metodo_pago_sat: tipo === "REMISION" ? "PPD" : "PUE",
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
     };
+    if (tipo !== "REMISION") {
+      payload.pagos = pagos.map((p) => ({
+        forma_pago_sat: p.forma_pago_sat, monto: +p.monto,
+      }));
+    }
     try {
       const r = await api.post("/api/ventas", payload);
       // Imprimir PDF: descarga blob con auth y abre/imprime
@@ -135,7 +176,7 @@ export default function Caja() {
       setShowCobrar(false);
       setBusqueda("");
       setSugerencias([]);
-      setRecibido(0);
+      setPagos([{ forma_pago_sat: "01", monto: 0 }]);
       setTipo("TICKET");
       focus();
     } catch (err: any) {
@@ -345,35 +386,64 @@ export default function Caja() {
                 <input className="input" type="number" value={clienteId}
                   onChange={(e) => setClienteId(+e.target.value)} style={{ fontSize: 16, padding: 10 }} />
               </div>
-              {tipo === "TICKET" && (
-                <>
-                  <div>
-                    <label>Recibido</label>
-                    <input ref={recibidoRef} className="input" type="number" step="0.01" value={recibido}
-                      onChange={(e) => setRecibido(+e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && cambio >= 0 && cobrar()}
-                      style={{ fontSize: 22, padding: 12, fontWeight: 600 }} />
-                  </div>
-                  <div>
-                    <label>Cambio</label>
-                    <div style={{
-                      padding: 12, fontSize: 28, fontWeight: 800,
-                      color: cambio < 0 ? "var(--color-danger)" : "var(--color-success)",
-                    }}>
-                      {fmt(cambio)}
-                    </div>
-                  </div>
-                </>
-              )}
-              {tipo === "FACTURA" && (
-                <div className="form-grid-full" style={{ fontSize: 13, color: "var(--color-text-secondary)", padding: 12, background: "var(--color-bg)", borderRadius: 6 }}>
-                  El CFDI se generará al guardar. Después podrás timbrarlo desde "Mis ventas".
-                </div>
-              )}
             </div>
+            {tipo !== "REMISION" && (
+              <div style={{ marginTop: 16, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <strong style={{ fontSize: 14 }}>Forma(s) de pago</strong>
+                  {pagos.length < 2 && (
+                    <button onClick={agregarPago}
+                      style={{ fontSize: 12, padding: "4px 10px", border: "1px dashed var(--color-border)",
+                        background: "white", borderRadius: 4, cursor: "pointer" }}>
+                      + 2do método
+                    </button>
+                  )}
+                </div>
+                {pagos.map((p, idx) => (
+                  <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 140px auto", gap: 8, marginBottom: 6 }}>
+                    <select className="input" value={p.forma_pago_sat}
+                      onChange={(e) => setPago(idx, { forma_pago_sat: e.target.value })}>
+                      {FORMAS_PAGO_SAT.map((f) => <option key={f.v} value={f.v}>{f.t}</option>)}
+                    </select>
+                    <input ref={idx === 0 ? recibidoRef : undefined} className="input" type="number" step="0.01"
+                      value={p.monto}
+                      onChange={(e) => setPago(idx, { monto: +e.target.value })}
+                      onKeyDown={(e) => e.key === "Enter" && Math.abs(sumaPagos - total) < 0.01 && cobrar()}
+                      style={{ fontSize: 16, padding: 10, textAlign: "right", fontWeight: 600 }} />
+                    {pagos.length > 1 && (
+                      <button onClick={() => quitarPago(idx)}
+                        style={{ background: "transparent", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0 10px" }}>×</button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13, fontWeight: 600 }}>
+                  <span style={{ color: "var(--color-text-secondary)" }}>
+                    {usaSplit ? "Suma pagos" : (tipo === "TICKET" ? "Recibido" : "Pago")}
+                  </span>
+                  <span>{fmt(sumaPagos)}</span>
+                </div>
+                {tipo === "TICKET" && !usaSplit && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 800,
+                    color: faltante > 0.01 ? "var(--color-danger)" : "var(--color-success)" }}>
+                    <span>{faltante > 0.01 ? "Falta" : "Cambio"}</span>
+                    <span>{fmt(Math.abs(faltante))}</span>
+                  </div>
+                )}
+                {usaSplit && Math.abs(faltante) > 0.01 && (
+                  <div style={{ fontSize: 13, color: "var(--color-danger)", marginTop: 4 }}>
+                    Diferencia: {fmt(faltante)} — ajusta los montos
+                  </div>
+                )}
+                {usaSplit && (
+                  <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "8px 0 0" }}>
+                    Pago combinado: el CFDI usará Forma de pago "99 — Por definir" según SAT 4.0
+                  </p>
+                )}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
               <button onClick={cobrar}
-                disabled={procesando || (tipo === "TICKET" && cambio < 0)}
+                disabled={procesando || (tipo !== "REMISION" && Math.abs(sumaPagos - total) > 0.01)}
                 style={{
                   flex: 1, padding: 18, fontSize: 18, fontWeight: 700, color: "white",
                   background: procesando ? "#94a3b8" : "var(--color-primary)",

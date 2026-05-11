@@ -6,6 +6,7 @@ from app.models.proveedor import Proveedor  # noqa
 from app.models.producto import Producto, VarianteProducto  # noqa
 from app.models.kardex import MovimientoInventario  # noqa
 from app.models.venta import DocumentoVenta, ConceptoVenta  # noqa
+from app.models.pago import Pago  # noqa
 from app.models.cxc import CuentaPorCobrar, AbonoCxC  # noqa
 from app.models.cxp import CuentaPorPagar, AbonoCxP, Compra, ConceptoCompra  # noqa
 from app.models.cfdi import Cfdi, ComplementoPago  # noqa

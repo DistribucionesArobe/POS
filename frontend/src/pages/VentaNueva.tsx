@@ -3,8 +3,16 @@ import Layout from "../components/Layout";
 import { api } from "../api/client";
 
 type Item = { variante_id: number; sku: string; nombre: string; cantidad: number; precio: number };
+type PagoRow = { forma_pago_sat: string; monto: number };
 
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const FORMAS_PAGO_SAT = [
+  { v: "01", t: "Efectivo" },
+  { v: "03", t: "Transferencia" },
+  { v: "04", t: "Tarjeta crédito" },
+  { v: "28", t: "Tarjeta débito" },
+];
 
 export default function VentaNueva() {
   const [tipo, setTipo] = useState<"TICKET" | "REMISION" | "FACTURA">("TICKET");
@@ -12,6 +20,7 @@ export default function VentaNueva() {
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
 
   async function buscar() {
     if (busqueda.length < 2) return;
@@ -30,17 +39,44 @@ export default function VentaNueva() {
 
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
   const iva = subtotal * 0.16;
-  const total = subtotal + iva;
+  const total = +(subtotal + iva).toFixed(2);
+  const sumaPagos = +pagos.reduce((a, p) => a + (p.monto || 0), 0).toFixed(2);
+  const usaSplit = pagos.length > 1;
+
+  function setPago(idx: number, patch: Partial<PagoRow>) {
+    setPagos(pagos.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  }
+  function agregarPago() {
+    if (pagos.length >= 2) return;
+    setPagos([...pagos, { forma_pago_sat: "03", monto: Math.max(0, total - sumaPagos) }]);
+  }
+  function quitarPago(idx: number) {
+    const nuevos = pagos.filter((_, i) => i !== idx);
+    if (nuevos.length === 1) nuevos[0].monto = total;
+    setPagos(nuevos.length ? nuevos : [{ forma_pago_sat: "01", monto: total }]);
+  }
+  function autoPago() {
+    setPagos([{ forma_pago_sat: tipo === "FACTURA" ? "03" : "01", monto: total }]);
+  }
 
   async function guardar() {
-    const payload = {
+    if (tipo !== "REMISION") {
+      if (Math.abs(sumaPagos - total) > 0.01) {
+        alert(`La suma de pagos (${fmt(sumaPagos)}) no coincide con el total (${fmt(total)})`);
+        return;
+      }
+    }
+    const payload: any = {
       tipo, cliente_id: clienteId,
-      forma_pago_sat: tipo === "FACTURA" ? "03" : "01",
+      forma_pago_sat: tipo === "FACTURA" ? (pagos[0]?.forma_pago_sat || "03") : "01",
       metodo_pago_sat: tipo === "REMISION" ? "PPD" : "PUE",
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
     };
+    if (tipo !== "REMISION") {
+      payload.pagos = pagos.map((p) => ({ forma_pago_sat: p.forma_pago_sat, monto: +p.monto }));
+    }
     try {
       const r = await api.post("/api/ventas", payload);
       const base = api.defaults.baseURL || "";
@@ -49,6 +85,7 @@ export default function VentaNueva() {
         window.open(pdfUrl, "_blank");
       }
       setItems([]);
+      setPagos([{ forma_pago_sat: "01", monto: 0 }]);
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
     }
@@ -133,7 +170,7 @@ export default function VentaNueva() {
 
         {items.length > 0 && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-            <div style={{ minWidth: 280, display: "grid", gap: 4 }}>
+            <div style={{ minWidth: 360, display: "grid", gap: 4 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--color-text-secondary)" }}>Subtotal</span>
                 <span>{fmt(subtotal)}</span>
@@ -146,6 +183,56 @@ export default function VentaNueva() {
                 <strong>Total</strong>
                 <strong style={{ fontSize: 18 }}>{fmt(total)}</strong>
               </div>
+
+              {tipo !== "REMISION" && (
+                <div style={{ marginTop: 12, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <strong style={{ fontSize: 13 }}>Forma(s) de pago</strong>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={autoPago} type="button"
+                        style={{ fontSize: 11, padding: "3px 8px", border: "1px solid var(--color-border)",
+                          background: "white", borderRadius: 4, cursor: "pointer" }}>
+                        Auto
+                      </button>
+                      {pagos.length < 2 && (
+                        <button onClick={agregarPago} type="button"
+                          style={{ fontSize: 11, padding: "3px 8px", border: "1px dashed var(--color-border)",
+                            background: "white", borderRadius: 4, cursor: "pointer" }}>
+                          + 2do método
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {pagos.map((p, idx) => (
+                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 110px auto", gap: 6, marginBottom: 4 }}>
+                      <select className="input" value={p.forma_pago_sat}
+                        onChange={(e) => setPago(idx, { forma_pago_sat: e.target.value })}
+                        style={{ fontSize: 13 }}>
+                        {FORMAS_PAGO_SAT.map((f) => <option key={f.v} value={f.v}>{f.t}</option>)}
+                      </select>
+                      <input className="input" type="number" step="0.01" value={p.monto}
+                        onChange={(e) => setPago(idx, { monto: +e.target.value })}
+                        style={{ fontSize: 13, textAlign: "right" }} />
+                      {pagos.length > 1 && (
+                        <button onClick={() => quitarPago(idx)} type="button"
+                          style={{ background: "transparent", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0 8px" }}>×</button>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 6 }}>
+                    <span style={{ color: "var(--color-text-secondary)" }}>Suma pagos</span>
+                    <span style={{ color: Math.abs(sumaPagos - total) > 0.01 ? "var(--color-danger)" : "var(--color-success)", fontWeight: 600 }}>
+                      {fmt(sumaPagos)} {Math.abs(sumaPagos - total) > 0.01 && `(falta ${fmt(total - sumaPagos)})`}
+                    </span>
+                  </div>
+                  {usaSplit && (
+                    <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "6px 0 0" }}>
+                      Pago combinado: CFDI usará Forma "99 — Por definir"
+                    </p>
+                  )}
+                </div>
+              )}
+
               <button className="btn" onClick={guardar} style={{ marginTop: 12, justifyContent: "center" }}>
                 Guardar {tipo}
               </button>
