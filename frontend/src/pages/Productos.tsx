@@ -28,6 +28,7 @@ export default function Productos() {
   const [form, setForm] = useState(FORM_VACIO);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [familiasAbiertas, setFamiliasAbiertas] = useState<Record<string, boolean>>({});
+  const [ocultarInactivos, setOcultarInactivos] = useState(true);
   const [importando, setImportando] = useState(false);
   const [resultadoImport, setResultadoImport] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -51,16 +52,27 @@ export default function Productos() {
 
   useEffect(() => { cargar(); }, []);
 
-  // Agrupar por familia
+  // Conteo total de variantes inactivas (antes de filtrar) para mostrarlo en el toggle
+  const inactivasCount = useMemo(
+    () => productos.reduce((acc, p) => acc + p.variantes.filter((v) => !v.activo).length, 0),
+    [productos],
+  );
+
+  // Agrupar por familia (aplicando filtro de inactivos si aplica)
   const familias = useMemo(() => {
     const grupos: Record<string, ProductoT[]> = {};
     for (const p of productos) {
+      const variantesVisibles = ocultarInactivos
+        ? p.variantes.filter((v) => v.activo)
+        : p.variantes;
+      if (variantesVisibles.length === 0) continue;
+      const prodFiltrado: ProductoT = { ...p, variantes: variantesVisibles };
       const key = p.categoria || "Sin familia";
       if (!grupos[key]) grupos[key] = [];
-      grupos[key].push(p);
+      grupos[key].push(prodFiltrado);
     }
     return Object.entries(grupos).sort(([a], [b]) => a.localeCompare(b));
-  }, [productos]);
+  }, [productos, ocultarInactivos]);
 
   function toggleFamilia(nombre: string) {
     setFamiliasAbiertas({ ...familiasAbiertas, [nombre]: !familiasAbiertas[nombre] });
@@ -281,6 +293,15 @@ export default function Productos() {
           <button className="btn-icon" onClick={cargar}>Filtrar</button>
           <button className="btn-icon" onClick={expandirTodas}>Expandir todas</button>
           <button className="btn-icon" onClick={colapsarTodas}>Colapsar todas</button>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginLeft: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+            title="Oculta variantes desactivadas (siguen en DB para trazabilidad fiscal)">
+            <input type="checkbox" checked={ocultarInactivos}
+              onChange={(e) => setOcultarInactivos(e.target.checked)} />
+            Ocultar inactivos
+            {inactivasCount > 0 && (
+              <span className="badge" style={{ fontSize: 11 }}>{inactivasCount}</span>
+            )}
+          </label>
         </div>
       </div>
 
