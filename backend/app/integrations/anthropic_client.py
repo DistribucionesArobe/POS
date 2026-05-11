@@ -49,31 +49,40 @@ Documentos pendientes: {json.dumps(documentos, ensure_ascii=False)}
         )
         return msg.content[0].text.strip()
 
-    def sugerir_clave_sat(self, nombre: str, categoria: str | None = None, marca: str | None = None) -> dict:
-        """Sugiere clave SAT de 8 digitos para un producto."""
-        prompt = f"""Eres experto en el catalogo SAT CFDI 4.0 c_ClaveProdServ para Mexico.
+    def sugerir_clave_sat(
+        self, nombre: str, categoria: str | None = None,
+        marca: str | None = None, candidatos: list[dict] | None = None,
+    ) -> dict:
+        """Sugiere clave SAT eligiendo entre candidatos del catalogo real."""
+        if not candidatos:
+            return {"clave": "01010101", "descripcion": "Sin candidatos en catalogo", "confianza": "baja"}
 
-Para este producto, dame la clave de 8 digitos mas apropiada.
+        cand_text = "\n".join(
+            f'{i+1}. {c["clave"]} — {c["descripcion"]}'
+            for i, c in enumerate(candidatos)
+        )
+        prompt = f"""Eres experto fiscal mexicano. Para el siguiente producto, ELIGE la clave SAT mas apropiada de los candidatos.
 
 Producto: {nombre}
 Categoria: {categoria or "no especificada"}
-Marca: {marca or "no especificada"}
+Marca: {marca or "n/a"}
 
-Responde SOLO en JSON sin markdown ni texto extra:
-{{"clave": "12345678", "descripcion": "Descripcion oficial del catalogo SAT", "confianza": "alta|media|baja"}}
+Candidatos (todos del catalogo oficial SAT c_ClaveProdServ):
+{cand_text}
 
-Reglas:
-- Solo claves de 8 digitos del catalogo oficial SAT
-- Confianza "alta" si reconoces exactamente el producto
-- Confianza "media" si es similar pero no exacto
-- Confianza "baja" si tienes que adivinar
-- Si no puedes determinar nada, usa "01010101" (no encontrado)
-- Para construccion/ferreteria/aceros usa rango 30100000-30199999
-- Para herramientas usa rango 27110000-27119999
+Responde SOLO JSON sin markdown:
+{{"clave": "12345678", "descripcion": "...", "confianza": "alta|media|baja", "razon": "breve explicacion"}}
+
+REGLAS:
+- DEBES elegir UNA de las claves listadas arriba (no inventes otras)
+- "alta" solo si tienes certeza fuerte
+- "media" si es buen match pero podria ser otro
+- "baja" si ningun candidato encaja bien (en ese caso elige el menos malo y marca baja)
+- Si NINGUN candidato sirve, devuelve clave "01010101" con confianza "baja"
 """
         msg = self.client.messages.create(
             model=self.model,
-            max_tokens=200,
+            max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text.strip()
@@ -81,37 +90,46 @@ Reglas:
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
 
-    def sugerir_claves_sat_lote(self, productos: list[dict]) -> list[dict]:
-        """Sugiere claves SAT para varios productos en una sola llamada (mas eficiente)."""
+    def sugerir_claves_sat_lote(
+        self, productos: list[dict], candidatos_por_producto: dict,
+    ) -> list[dict]:
+        """Sugiere claves SAT por lote, cada uno con sus propios candidatos."""
         if not productos:
             return []
-        items_text = "\n".join(
-            f'{p["id"]}. "{p["nombre"]}" (categoria: {p.get("categoria") or "n/a"})'
-            for p in productos
-        )
-        prompt = f"""Eres experto en el catalogo SAT CFDI 4.0 c_ClaveProdServ para Mexico.
+        bloques = []
+        for p in productos:
+            cands = candidatos_por_producto.get(p["id"], [])
+            cand_text = "\n  ".join(
+                f'{c["clave"]} - {c["descripcion"]}'
+                for c in cands[:8]
+            ) if cands else "(sin candidatos)"
+            bloques.append(
+                f'PRODUCTO_ID {p["id"]}: "{p["nombre"]}" '
+                f'[familia: {p.get("categoria") or "n/a"}]\n  Opciones:\n  {cand_text}'
+            )
+        items_text = "\n\n".join(bloques)
 
-Para cada producto a continuacion, asigna la clave SAT de 8 digitos mas apropiada.
+        prompt = f"""Eres experto fiscal mexicano (catalogo SAT c_ClaveProdServ).
 
-Productos:
+Para CADA producto, ELIGE la clave SAT mas apropiada de SUS opciones listadas (no de otras).
+
 {items_text}
 
-Responde SOLO un JSON array sin markdown ni texto extra:
+Responde SOLO un JSON array sin markdown, un objeto por producto:
 [
   {{"id": 1, "clave": "12345678", "descripcion": "...", "confianza": "alta|media|baja"}},
   ...
 ]
 
-Reglas:
-- Devuelve EXACTAMENTE un objeto por cada producto recibido (mismo id)
-- Usa claves del catalogo SAT real, 8 digitos
-- Para construccion/ferreteria/aceros: rango 30100000-30199999
-- Para herramientas: rango 27110000-27119999
-- Si dudas, usa "01010101" y confianza "baja"
+REGLAS:
+- DEBES devolver UN objeto por cada PRODUCTO_ID recibido (mismo id)
+- La clave DEBE ser una de las opciones listadas para ese producto
+- Si ninguna opcion encaja, usa "01010101" con confianza "baja"
+- "alta" si reconoces claramente el producto en la descripcion del SAT
 """
         msg = self.client.messages.create(
             model=self.model,
-            max_tokens=4000,
+            max_tokens=6000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text.strip()

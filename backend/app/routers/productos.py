@@ -18,17 +18,30 @@ def sugerir_clave_sat(
     payload: dict,
     empresa_id: int = Depends(get_active_empresa_id),
 ):
-    """Sugiere clave SAT con IA para un producto individual."""
+    """RAG: busca candidatos en catalogo SAT, Claude elige el mejor."""
     from app.integrations.anthropic_client import ClaudeClient
+    from app.services import sat_catalog_service
+    nombre = payload.get("nombre", "")
+    categoria = payload.get("categoria")
+    candidatos = sat_catalog_service.buscar_candidatos(nombre, categoria, limit=12)
     try:
         client = ClaudeClient()
-        return client.sugerir_clave_sat(
-            nombre=payload.get("nombre", ""),
-            categoria=payload.get("categoria"),
+        result = client.sugerir_clave_sat(
+            nombre=nombre, categoria=categoria,
             marca=payload.get("marca"),
+            candidatos=candidatos,
         )
+        result["candidatos_evaluados"] = len(candidatos)
+        return result
     except Exception as e:
         raise HTTPException(500, f"Error con IA: {e}")
+
+
+@router.get("/sat-stats")
+def sat_stats():
+    """Reporta cuantas claves SAT estan disponibles para sugerencias."""
+    from app.services import sat_catalog_service
+    return sat_catalog_service.estadisticas()
 
 
 @router.post("/asignar-claves-sat-bulk")
@@ -37,12 +50,9 @@ def asignar_claves_sat_bulk(
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    """Procesa todos los productos sin clave SAT en la empresa.
-
-    Por default (aplicar=False) solo devuelve propuestas para revisar.
-    Con aplicar=True, guarda las claves sugeridas.
-    """
+    """RAG bulk: para cada producto sin clave, busca candidatos y Claude elige."""
     from app.integrations.anthropic_client import ClaudeClient
+    from app.services import sat_catalog_service
 
     sin_clave = (
         db.query(Producto)
@@ -53,18 +63,20 @@ def asignar_claves_sat_bulk(
     if not sin_clave:
         return {"propuestas": [], "mensaje": "Todos los productos ya tienen clave SAT"}
 
-    productos_input = [
-        {"id": p.id, "nombre": p.nombre, "categoria": p.categoria}
-        for p in sin_clave
-    ]
+    productos_input = []
+    candidatos_por_id: dict[int, list[dict]] = {}
+    for p in sin_clave:
+        cands = sat_catalog_service.buscar_candidatos(p.nombre, p.categoria, limit=8)
+        productos_input.append({"id": p.id, "nombre": p.nombre, "categoria": p.categoria})
+        candidatos_por_id[p.id] = cands
 
     try:
         client = ClaudeClient()
-        # Procesar en lotes de 30 para no agotar tokens
         propuestas = []
-        for i in range(0, len(productos_input), 30):
-            lote = productos_input[i:i + 30]
-            sugerencias = client.sugerir_claves_sat_lote(lote)
+        for i in range(0, len(productos_input), 20):
+            lote = productos_input[i:i + 20]
+            cands_lote = {p["id"]: candidatos_por_id[p["id"]] for p in lote}
+            sugerencias = client.sugerir_claves_sat_lote(lote, cands_lote)
             for s in sugerencias:
                 p = next((x for x in sin_clave if x.id == s.get("id")), None)
                 if not p:
@@ -76,6 +88,7 @@ def asignar_claves_sat_bulk(
                     "clave_sugerida": s.get("clave"),
                     "descripcion_sat": s.get("descripcion"),
                     "confianza": s.get("confianza"),
+                    "candidatos_evaluados": len(candidatos_por_id[p.id]),
                 })
     except Exception as e:
         raise HTTPException(500, f"Error con IA: {e}")
