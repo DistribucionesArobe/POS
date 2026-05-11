@@ -1,14 +1,42 @@
 """Productos y variantes - filtrado por empresa."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.models import Producto, VarianteProducto
 from app.schemas.producto import ProductoIn, ProductoSimpleIn, VarianteIn, PrecioUpdate
+from app.services import import_service
 from app.services.security import get_active_empresa_id
 
 router = APIRouter()
+
+
+@router.get("/import/plantilla")
+def descargar_plantilla():
+    """Devuelve XLSX con headers para importacion masiva."""
+    xlsx = import_service.generar_plantilla()
+    return Response(
+        content=xlsx,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_productos.xlsx"},
+    )
+
+
+@router.post("/import")
+async def importar_excel(
+    file: UploadFile = File(...),
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    if not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(400, "Sube un archivo .xlsx")
+    file_bytes = await file.read()
+    try:
+        return import_service.importar_productos(db, file_bytes, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("")
