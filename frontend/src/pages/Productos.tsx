@@ -114,6 +114,28 @@ export default function Productos() {
     cargar();
   }
 
+  async function borrarPermanente(varianteId: number, sku: string) {
+    const ok = confirm(
+      `BORRAR PERMANENTEMENTE la variante "${sku}"?\n\n` +
+      `Esto elimina el registro del DB de forma DEFINITIVA.\n` +
+      `Solo funciona si NUNCA se ha usado en ventas, compras ni kardex.\n` +
+      `Si tiene historial, usa "Desactivar" (×) en su lugar.\n\n` +
+      `Continuar?`
+    );
+    if (!ok) return;
+    try {
+      const r = await api.delete(`/api/productos/variantes/${varianteId}/permanente`);
+      if (r.data?.producto_borrado_tambien) {
+        alert("Variante y producto borrados (era la unica variante).");
+      } else {
+        alert("Variante borrada permanentemente.");
+      }
+      cargar();
+    } catch (err: any) {
+      alert("No se pudo borrar: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   async function descargarPlantilla() {
     try {
       const r = await api.get("/api/productos/import/plantilla", { responseType: "blob" });
@@ -428,7 +450,8 @@ export default function Productos() {
                               </td>
                               <td>
                                 <button className="btn-icon" onClick={() => cambiarPrecio(v.id, v.precio_publico)} style={{ marginRight: 2 }}>$</button>
-                                {v.activo && <button className="btn-icon" onClick={() => desactivar(v.id)}>×</button>}
+                                {v.activo && <button className="btn-icon" onClick={() => desactivar(v.id)} title="Desactivar (mantiene historial)" style={{ marginRight: 2 }}>×</button>}
+                                <button className="btn-icon" onClick={() => borrarPermanente(v.id, v.sku)} title="Borrar permanente (solo sin historial)" style={{ color: "var(--color-danger)" }}>🗑</button>
                               </td>
                             </tr>
                           )),

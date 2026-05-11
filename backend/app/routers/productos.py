@@ -325,3 +325,79 @@ def desactivar_variante(
     v.activo = False
     db.commit()
     return {"ok": True}
+
+
+@router.delete("/variantes/{variante_id}/permanente")
+def borrar_variante_permanente(
+    variante_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Borra la variante del DB. Solo permitido si NO tiene historial."""
+    from app.models import ConceptoVenta, ConceptoCompra, MovimientoInventario
+
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+
+    ventas = db.query(ConceptoVenta).filter(ConceptoVenta.variante_id == variante_id).count()
+    compras = db.query(ConceptoCompra).filter(ConceptoCompra.variante_id == variante_id).count()
+    movs = db.query(MovimientoInventario).filter(MovimientoInventario.variante_id == variante_id).count()
+    if ventas + compras + movs > 0:
+        raise HTTPException(
+            400,
+            f"No se puede borrar: tiene historial ({ventas} venta(s), {compras} compra(s), "
+            f"{movs} movimiento(s) de inventario). Solo se puede desactivar.",
+        )
+
+    # Si esta apuntada como derivada por otra variante, romper esa relacion
+    derivadas = db.query(VarianteProducto).filter(VarianteProducto.derivada_id == variante_id).all()
+    for d in derivadas:
+        d.derivada_id = None
+
+    producto_id = v.producto_id
+    db.delete(v)
+    db.flush()
+
+    # Si el producto no tiene mas variantes, borrarlo tambien
+    remaining = db.query(VarianteProducto).filter(VarianteProducto.producto_id == producto_id).count()
+    if remaining == 0:
+        prod = db.get(Producto, producto_id)
+        if prod:
+            db.delete(prod)
+    db.commit()
+    return {"ok": True, "producto_borrado_tambien": remaining == 0}
+
+
+@router.delete("/{producto_id}/permanente")
+def borrar_producto_permanente(
+    producto_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Borra producto y todas sus variantes. Solo si ninguna tiene historial."""
+    from app.models import ConceptoVenta, ConceptoCompra, MovimientoInventario
+
+    p = db.get(Producto, producto_id)
+    if not p or p.empresa_id != empresa_id:
+        raise HTTPException(404, "Producto no existe")
+
+    variantes = db.query(VarianteProducto).filter(VarianteProducto.producto_id == producto_id).all()
+    for v in variantes:
+        ventas = db.query(ConceptoVenta).filter(ConceptoVenta.variante_id == v.id).count()
+        compras = db.query(ConceptoCompra).filter(ConceptoCompra.variante_id == v.id).count()
+        movs = db.query(MovimientoInventario).filter(MovimientoInventario.variante_id == v.id).count()
+        if ventas + compras + movs > 0:
+            raise HTTPException(
+                400,
+                f"No se puede borrar: la variante {v.sku} tiene historial. Desactiva el producto en su lugar.",
+            )
+
+    for v in variantes:
+        db.delete(v)
+    db.delete(p)
+    db.commit()
+    return {"ok": True}
