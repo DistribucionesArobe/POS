@@ -1,94 +1,175 @@
-"""Genera sat_catalog.json a partir del XLS oficial del SAT.
+"""Descarga el catalogo SAT c_ClaveProdServ y genera sat_catalog.json.
 
 USO (corre una sola vez):
 
-  1. Descarga el catalogo c_ClaveProdServ desde:
-     http://omawww.sat.gob.mx/tramitesyservicios/Paginas/catalogos_emision_cfdi_complemento_ce.htm
-     (Busca "Catalogo de Productos y Servicios" o "c_ClaveProdServ")
+  cd backend
+  python scripts/build_sat_catalog.py
 
-  2. Guarda el archivo .xls o .xlsx aqui:
-     backend/scripts/sat_input.xlsx
-     (renombrarlo a ese nombre exacto)
+  Esto:
+  1. Descarga catCFDI_V_4_23032023.xls del SAT (~10MB)
+  2. Extrae la hoja c_ClaveProdServ (~58k entradas)
+  3. Guarda app/data/sat_catalog.json (~5MB)
+  4. Commit el JSON al repo para que Render lo tenga al desplegar
 
-  3. Corre:
-     cd backend
-     python scripts/build_sat_catalog.py
-
-  4. Genera:
-     backend/app/data/sat_catalog.json (~5MB, ~58000 entradas)
-
-  5. Commit y push:
-     git add backend/app/data/sat_catalog.json
-     git commit -m "data: catalogo SAT c_ClaveProdServ"
-     git push
+Si la URL del SAT cambia, edita SAT_URL abajo o pasa la ruta local:
+  python scripts/build_sat_catalog.py --local archivo.xls
 """
+import argparse
 import json
 import sys
+from io import BytesIO
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-INPUT = ROOT / "scripts" / "sat_input.xlsx"
-INPUT_XLS = ROOT / "scripts" / "sat_input.xls"
 OUTPUT = ROOT / "app" / "data" / "sat_catalog.json"
+LOCAL_DEFAULT = ROOT / "scripts" / "sat_input.xlsx"
+LOCAL_XLS = ROOT / "scripts" / "sat_input.xls"
+
+# URL oficial del SAT con todos los catalogos CFDI 4.0 (sheet c_ClaveProdServ)
+SAT_URL = "http://omawww.sat.gob.mx/tramitesyservicios/Paginas/documentos/catCFDI_V_4_23032023.xls"
 
 
-def main():
-    src = None
-    if INPUT.exists():
-        src = INPUT
-    elif INPUT_XLS.exists():
-        src = INPUT_XLS
-        print("ADVERTENCIA: archivo .xls antiguo. Si falla, abrelo y guardalo como .xlsx")
-    else:
-        print(f"ERROR: falta el archivo. Descarga el catalogo SAT y guardalo como:")
-        print(f"  {INPUT}")
+def descargar():
+    try:
+        import httpx
+    except ImportError:
+        print("Necesitas httpx. Instalalo: pip install httpx")
+        sys.exit(1)
+    print(f"Descargando catalogo SAT...")
+    print(f"  URL: {SAT_URL}")
+    try:
+        r = httpx.get(SAT_URL, timeout=120, follow_redirects=True)
+        r.raise_for_status()
+        print(f"  Descargado: {len(r.content) / 1024:.0f} KB")
+        return r.content
+    except Exception as e:
+        print(f"ERROR al descargar: {e}")
+        print(f"Alternativa: descargalo manualmente y pasalo con --local")
         sys.exit(1)
 
+
+def procesar(xls_bytes: bytes):
     try:
         from openpyxl import load_workbook
     except ImportError:
-        print("ERROR: necesitas openpyxl. Instalalo: pip install openpyxl")
+        print("Necesitas openpyxl. Instalalo: pip install openpyxl")
         sys.exit(1)
 
-    print(f"Leyendo {src}...")
-    wb = load_workbook(src, read_only=True, data_only=True)
+    # openpyxl no lee .xls (formato viejo BIFF), solo .xlsx
+    # Si bytes empiezan con D0CF (signature de XLS viejo), intentamos xlrd
+    if xls_bytes[:2] == b"\xd0\xcf":
+        print("Archivo es .xls (formato antiguo). Intentando con xlrd...")
+        try:
+            import xlrd
+        except ImportError:
+            print("ERROR: necesitas xlrd para archivos .xls antiguos")
+            print("Instala con: pip install xlrd==1.2.0")
+            sys.exit(1)
+        wb = xlrd.open_workbook(file_contents=xls_bytes)
+        target = None
+        for name in wb.sheet_names():
+            if "ProdServ" in name or "claveprodserv" in name.lower():
+                target = name
+                break
+        if not target:
+            print(f"Hojas disponibles: {wb.sheet_names()}")
+            sys.exit(1)
+        ws = wb.sheet_by_name(target)
+        rows = ((ws.cell_value(r, c) for c in range(ws.ncols)) for r in range(ws.nrows))
+        rows_list = [list(r) for r in rows]
+    else:
+        wb = load_workbook(BytesIO(xls_bytes), read_only=True, data_only=True)
+        target = None
+        for name in wb.sheetnames:
+            if "ProdServ" in name or "claveprodserv" in name.lower():
+                target = name
+                break
+        if not target:
+            print(f"Hojas disponibles: {wb.sheetnames}")
+            sys.exit(1)
+        ws = wb[target]
+        rows_list = [list(r) for r in ws.iter_rows(values_only=True)]
 
-    # El sheet con productos suele llamarse "c_ClaveProdServ" o similar
-    target_sheet = None
-    for name in wb.sheetnames:
-        if "ProdServ" in name or "Prod_Serv" in name or "claveprodserv" in name.lower():
-            target_sheet = name
-            break
-    if not target_sheet:
-        target_sheet = wb.sheetnames[0]
-        print(f"ADVERTENCIA: no encontre hoja 'c_ClaveProdServ', usando '{target_sheet}'")
+    print(f"Procesando hoja '{target}' con {len(rows_list)} filas...")
 
-    ws = wb[target_sheet]
-    catalog: list[dict] = []
-    for row in ws.iter_rows(min_row=1, values_only=True):
-        if not row or not row[0]:
+    # Debug: muestra primeras 3 filas para verificar formato
+    print("Muestra primeras 3 filas:")
+    for i, r in enumerate(rows_list[:3]):
+        print(f"  Fila {i}: {r[:4] if r else '(vacia)'}")
+
+    def normalizar_clave(val):
+        """Convierte cualquier valor a clave de 8 digitos o devuelve None."""
+        if val is None:
+            return None
+        # xlrd lee numericos como float
+        if isinstance(val, float):
+            val = int(val)
+        if isinstance(val, int):
+            val = str(val)
+        else:
+            val = str(val).strip()
+        # Solo digitos
+        if not val.isdigit():
+            return None
+        # Padding con ceros si es 7 (algunos catalogos pierden el cero inicial)
+        if len(val) == 7:
+            val = "0" + val
+        return val if len(val) == 8 else None
+
+    catalog = []
+    for row in rows_list:
+        if not row:
             continue
-        clave = str(row[0]).strip()
-        # La descripcion puede estar en columna 1 o 2 dependiendo del layout
+        clave = normalizar_clave(row[0])
+        if not clave:
+            continue
+        # Descripcion suele estar en columna 1 (B) o 2 (C)
         desc = ""
-        for i in range(1, min(4, len(row))):
-            if row[i]:
-                desc = str(row[i]).strip()
-                if len(desc) > 5:  # filtra headers y campos cortos
-                    break
-        if clave.isdigit() and len(clave) == 8 and desc:
+        for i in range(1, min(5, len(row))):
+            val = row[i]
+            if val is None:
+                continue
+            s = str(val).strip()
+            if len(s) > 3 and not s.replace("-", "").replace("/", "").isdigit():
+                desc = s
+                break
+        if desc:
             catalog.append({"clave": clave, "descripcion": desc})
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(catalog, ensure_ascii=False, separators=(",", ":")))
-
-    print(f"OK: {len(catalog)} claves SAT guardadas en {OUTPUT}")
-    print(f"Tamano: {OUTPUT.stat().st_size / 1024:.0f} KB")
+    print(f"OK: {len(catalog)} claves SAT guardadas")
+    print(f"  Archivo: {OUTPUT}")
+    print(f"  Tamano:  {OUTPUT.stat().st_size / 1024:.0f} KB")
     print()
-    print("Siguientes pasos:")
+    print("Siguiente paso:")
+    print("  cd ..")
     print("  git add backend/app/data/sat_catalog.json")
-    print("  git commit -m 'data: catalogo SAT c_ClaveProdServ'")
+    print("  git commit -m 'data: catalogo SAT c_ClaveProdServ completo'")
     print("  git push")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--local", help="Ruta a archivo .xls/.xlsx local en lugar de descargar del SAT")
+    args = ap.parse_args()
+
+    if args.local:
+        path = Path(args.local)
+        if not path.exists():
+            print(f"ERROR: archivo no existe: {path}")
+            sys.exit(1)
+        xls_bytes = path.read_bytes()
+    elif LOCAL_DEFAULT.exists():
+        print(f"Usando archivo local: {LOCAL_DEFAULT}")
+        xls_bytes = LOCAL_DEFAULT.read_bytes()
+    elif LOCAL_XLS.exists():
+        print(f"Usando archivo local: {LOCAL_XLS}")
+        xls_bytes = LOCAL_XLS.read_bytes()
+    else:
+        xls_bytes = descargar()
+
+    procesar(xls_bytes)
 
 
 if __name__ == "__main__":
