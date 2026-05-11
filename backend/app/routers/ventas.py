@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import DocumentoVenta, Cliente, Empresa
 from app.models.venta import TipoDocumento, EstatusDocumento
-from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut
+from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut, DevolucionIn
 from app.services import venta_service, pdf_service
 from app.services.security import get_active_empresa_id
 
@@ -79,6 +79,63 @@ def consolidar_remisiones_en_factura(
 ):
     try:
         return venta_service.consolidar_remisiones(db, cliente_id, remision_ids, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/{documento_id}/conceptos")
+def conceptos_de_documento(
+    documento_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    doc = (
+        db.query(DocumentoVenta)
+        .options(joinedload(DocumentoVenta.conceptos))
+        .filter(DocumentoVenta.id == documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(404, "Documento no existe")
+    return [
+        {
+            "id": c.id, "variante_id": c.variante_id,
+            "descripcion": c.descripcion,
+            "cantidad": float(c.cantidad),
+            "precio_unitario": float(c.precio_unitario),
+            "importe": float(c.importe),
+        }
+        for c in doc.conceptos
+    ]
+
+
+@router.post("/devolucion")
+def crear_devolucion(
+    payload: DevolucionIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Crea NOTA_CREDITO desde una factura. Devuelve inventario y reduce CxC."""
+    try:
+        nc = venta_service.crear_devolucion(
+            db, payload.factura_id,
+            [{"variante_id": c.variante_id, "cantidad": c.cantidad} for c in payload.conceptos],
+            payload.motivo, empresa_id,
+        )
+        result = {
+            "id": nc.id, "folio": nc.folio, "total": float(nc.total),
+            "factura_relacionada_id": nc.factura_relacionada_id,
+        }
+        # Opcional: timbrar CFDI Egreso si el usuario lo pidio
+        if payload.timbrar_cfdi_egreso:
+            try:
+                from app.services import cfdi_service
+                cfdi_result = cfdi_service.emitir_nota_credito_cfdi(db, nc.id, empresa_id)
+                result["cfdi"] = cfdi_result
+            except Exception as e:
+                result["cfdi_error"] = str(e)
+        return result
     except ValueError as e:
         raise HTTPException(400, str(e))
 

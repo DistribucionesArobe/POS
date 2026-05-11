@@ -156,3 +156,113 @@ def consolidar_remisiones(db: Session, cliente_id: int, remision_ids: list[int],
     db.commit()
     db.refresh(factura)
     return factura
+
+
+def crear_devolucion(
+    db: Session, factura_id: int,
+    conceptos_devolver: list[dict], motivo: str | None,
+    empresa_id: int,
+) -> DocumentoVenta:
+    """Crea NOTA_CREDITO referenciando la factura original.
+
+    - Devuelve mercancia al inventario (kardex DEVOLUCION_VENTA +)
+    - Reduce CxC si existe (factura PPD o remision facturada)
+    - Si no hay CxC, no hace nada con cartera (factura PUE pagada)
+    """
+    factura = db.get(DocumentoVenta, factura_id)
+    if not factura:
+        raise ValueError("Factura no existe")
+    if factura.empresa_id != empresa_id:
+        raise ValueError("Factura pertenece a otra empresa")
+    if factura.tipo != TipoDocumento.FACTURA.value:
+        raise ValueError("Solo se devuelven facturas")
+    if factura.estatus == EstatusDocumento.CANCELADO.value:
+        raise ValueError("La factura esta cancelada")
+
+    # Validar cantidades vs conceptos originales
+    devolver_map = {c["variante_id"]: float(c["cantidad"]) for c in conceptos_devolver}
+    nuevos_conceptos = []
+    subtotal_dev = 0.0
+    for cv in factura.conceptos:
+        cant_dev = devolver_map.get(cv.variante_id, 0)
+        if cant_dev <= 0:
+            continue
+        if cant_dev > float(cv.cantidad):
+            raise ValueError(
+                f"Cantidad a devolver ({cant_dev}) excede la facturada ({cv.cantidad}) en {cv.descripcion}"
+            )
+        importe_dev = cant_dev * float(cv.precio_unitario)
+        subtotal_dev += importe_dev
+        nuevos_conceptos.append({
+            "variante_id": cv.variante_id,
+            "descripcion": cv.descripcion,
+            "cantidad": cant_dev,
+            "precio_unitario": float(cv.precio_unitario),
+            "importe": importe_dev,
+            "clave_prod_serv_sat": cv.clave_prod_serv_sat,
+            "clave_unidad_sat": cv.clave_unidad_sat,
+            "tasa_iva": float(cv.tasa_iva),
+        })
+
+    if not nuevos_conceptos:
+        raise ValueError("No hay conceptos a devolver")
+
+    iva_dev = round(subtotal_dev * IVA_TASA, 2)
+    total_dev = round(subtotal_dev + iva_dev, 2)
+
+    nc = DocumentoVenta(
+        empresa_id=empresa_id,
+        folio=siguiente_folio(db, TipoDocumento.NOTA_CREDITO.value, empresa_id),
+        tipo=TipoDocumento.NOTA_CREDITO.value,
+        estatus=EstatusDocumento.CONFIRMADO.value,
+        cliente_id=factura.cliente_id,
+        fecha=datetime.utcnow(),
+        subtotal=subtotal_dev,
+        iva=iva_dev,
+        total=total_dev,
+        forma_pago_sat=factura.forma_pago_sat,
+        metodo_pago_sat="PUE",
+        uso_cfdi="G02",  # Devoluciones, descuentos o bonificaciones
+        factura_relacionada_id=factura.id,
+        notas=motivo,
+    )
+    for c in nuevos_conceptos:
+        nc.conceptos.append(ConceptoVenta(
+            variante_id=c["variante_id"],
+            descripcion=c["descripcion"],
+            cantidad=c["cantidad"],
+            precio_unitario=c["precio_unitario"],
+            importe=c["importe"],
+            clave_prod_serv_sat=c["clave_prod_serv_sat"],
+            clave_unidad_sat=c["clave_unidad_sat"],
+            tasa_iva=c["tasa_iva"],
+        ))
+    db.add(nc)
+    db.flush()
+
+    # Devolver al inventario
+    for c in nuevos_conceptos:
+        inventario_service.aplicar_movimiento(
+            db, c["variante_id"], "DEVOLUCION_VENTA", c["cantidad"],
+            empresa_id=empresa_id,
+            referencia_tipo="NOTA_CREDITO", referencia_id=nc.id,
+            notas=f"Devolucion de {factura.folio}",
+        )
+
+    # Reducir CxC si la factura tenia saldo
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.documento_id == factura.id,
+        CuentaPorCobrar.pagado == False,
+    ).first()
+    if cxc:
+        nuevo_saldo = float(cxc.saldo) - total_dev
+        if nuevo_saldo <= 0.01:
+            cxc.saldo = 0
+            cxc.pagado = True
+            factura.estatus = EstatusDocumento.PAGADO.value
+        else:
+            cxc.saldo = nuevo_saldo
+
+    db.commit()
+    db.refresh(nc)
+    return nc

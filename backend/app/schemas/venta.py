@@ -30,6 +30,18 @@ class ConceptoVentaOut(BaseModel):
     importe: float
 
 
+class ConceptoDevolucionIn(BaseModel):
+    variante_id: int
+    cantidad: float = Field(gt=0)
+
+
+class DevolucionIn(BaseModel):
+    factura_id: int
+    conceptos: list[ConceptoDevolucionIn]
+    motivo: str | None = None
+    timbrar_cfdi_egreso: bool = False
+
+
 class DocumentoVentaOut(BaseModel):
     id: int
     folio: str

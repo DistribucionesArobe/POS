@@ -97,6 +97,109 @@ def descargar_xml(db: Session, cfdi_id: int, empresa_id: int) -> bytes:
     return FacturamaClient(empresa).descargar_xml(facturama_id)
 
 
+def emitir_nota_credito_cfdi(db: Session, nc_id: int, empresa_id: int) -> dict:
+    """Emite CFDI Egreso (tipo E) para una NOTA_CREDITO ya creada."""
+    nc = db.get(DocumentoVenta, nc_id)
+    if not nc or nc.empresa_id != empresa_id:
+        raise ValueError("Nota de credito no existe o de otra empresa")
+    if nc.tipo != "NOTA_CREDITO":
+        raise ValueError("Documento no es nota de credito")
+    if not nc.factura_relacionada_id:
+        raise ValueError("NC sin factura relacionada")
+
+    factura = db.get(DocumentoVenta, nc.factura_relacionada_id)
+    cfdi_factura = db.query(Cfdi).filter(Cfdi.documento_venta_id == factura.id).first()
+    if not cfdi_factura:
+        raise ValueError("La factura relacionada no esta timbrada - no se puede emitir NC fiscal")
+
+    cliente = db.get(Cliente, nc.cliente_id)
+    empresa = db.get(Empresa, empresa_id)
+
+    existente = db.query(Cfdi).filter(Cfdi.documento_venta_id == nc.id).first()
+    if existente and not existente.cancelado:
+        raise ValueError(f"NC ya timbrada (UUID {existente.uuid})")
+
+    client = FacturamaClient(empresa)
+
+    # Construir payload Egreso con CfdiRelacionados al UUID original
+    items = []
+    for c in nc.conceptos:
+        importe = float(c.importe)
+        tasa = float(c.tasa_iva)
+        iva_calc = round(importe * tasa, 2)
+        items.append({
+            "ProductCode": c.clave_prod_serv_sat or "01010101",
+            "IdentificationNumber": str(c.variante_id),
+            "Description": c.descripcion,
+            "Unit": "Pieza",
+            "UnitCode": c.clave_unidad_sat or "H87",
+            "UnitPrice": float(c.precio_unitario),
+            "Quantity": float(c.cantidad),
+            "Subtotal": importe,
+            "TaxObject": "02",
+            "Taxes": [{
+                "Total": iva_calc, "Name": "IVA", "Base": importe,
+                "Rate": tasa, "IsRetention": False,
+            }],
+            "Total": importe + iva_calc,
+        })
+
+    payload = {
+        "NameId": "2",
+        "CfdiType": "E",
+        "PaymentForm": nc.forma_pago_sat,
+        "PaymentMethod": "PUE",
+        "Currency": "MXN",
+        "ExpeditionPlace": empresa.codigo_postal,
+        "Issuer": {
+            "FiscalRegime": empresa.regimen_fiscal,
+            "Rfc": empresa.rfc,
+            "Name": (empresa.razon_social or empresa.nombre).upper(),
+        },
+        "Receiver": {
+            "Rfc": cliente.rfc,
+            "Name": (cliente.razon_social or cliente.nombre).upper(),
+            "FiscalRegime": cliente.regimen_fiscal or "616",
+            "TaxZipCode": cliente.codigo_postal or empresa.codigo_postal,
+            "CfdiUse": "G02",
+        },
+        "Relations": {
+            "Type": "01",  # 01 = Nota de credito de los documentos relacionados
+            "Cfdis": [{"Uuid": cfdi_factura.uuid}],
+        },
+        "Items": items,
+    }
+    try:
+        response = client._post("/3/cfdis", payload)
+    except FacturamaError as e:
+        raise ValueError(f"Facturama rechazo NC: {e}")
+
+    uuid = response["Complement"]["TaxStamp"]["Uuid"]
+    facturama_id = response.get("Id")
+    fecha_str = response["Complement"]["TaxStamp"]["Date"].replace("Z", "")
+
+    cfdi_nc = Cfdi(
+        documento_venta_id=nc.id,
+        uuid=uuid,
+        serie=response.get("Serie", ""),
+        folio=str(response.get("Folio", "")),
+        fecha_timbrado=datetime.fromisoformat(fecha_str.split("+")[0]),
+        rfc_emisor=response["Issuer"]["Rfc"],
+        rfc_receptor=response["Receiver"]["Rfc"],
+        total=nc.total,
+        tipo_comprobante="E",
+        respuesta_pac=response,
+        xml_url=f"facturama://{facturama_id}/xml" if facturama_id else None,
+        pdf_url=f"facturama://{facturama_id}/pdf" if facturama_id else None,
+    )
+    db.add(cfdi_nc)
+    db.commit()
+    return {
+        "cfdi_id": cfdi_nc.id, "uuid": uuid,
+        "serie": cfdi_nc.serie, "folio": cfdi_nc.folio,
+    }
+
+
 def descargar_pdf_cfdi(db: Session, cfdi_id: int, empresa_id: int) -> bytes:
     cfdi = db.get(Cfdi, cfdi_id)
     if not cfdi:
