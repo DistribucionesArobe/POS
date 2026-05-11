@@ -32,6 +32,12 @@ export default function Productos() {
   const [resultadoImport, setResultadoImport] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // IA - sugerencias de clave SAT
+  const [sugiriendoSat, setSugiriendoSat] = useState(false);
+  const [propuestasSat, setPropuestasSat] = useState<any[] | null>(null);
+  const [aprobadas, setAprobadas] = useState<Record<number, boolean>>({});
+  const [aplicandoSat, setAplicandoSat] = useState(false);
+
   const [varProductoId, setVarProductoId] = useState<number | null>(null);
   const [nuevaVar, setNuevaVar] = useState({
     sku: "", presentacion: "", unidad: "PZA", clave_unidad_sat: "H87",
@@ -121,6 +127,73 @@ export default function Productos() {
     }
   }
 
+  async function sugerirClaveSatIndividual() {
+    if (!form.nombre) return alert("Captura el nombre primero");
+    setSugiriendoSat(true);
+    try {
+      const r = await api.post("/api/productos/sugerir-clave-sat", {
+        nombre: form.nombre,
+        categoria: form.categoria,
+        marca: form.marca,
+      });
+      const ok = confirm(
+        `Sugerencia (confianza ${r.data.confianza}):\n\n${r.data.clave} — ${r.data.descripcion}\n\nUsar esta clave?`
+      );
+      if (ok) setForm({ ...form, clave_prod_serv_sat: r.data.clave });
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSugiriendoSat(false);
+    }
+  }
+
+  async function abrirSugerenciasBulk() {
+    setSugiriendoSat(true);
+    setPropuestasSat(null);
+    try {
+      const r = await api.post("/api/productos/asignar-claves-sat-bulk?aplicar=false");
+      const props = r.data.propuestas;
+      if (!props || props.length === 0) {
+        alert(r.data.mensaje || "Todos los productos ya tienen clave SAT");
+        return;
+      }
+      setPropuestasSat(props);
+      // Por default aprobamos las de confianza alta
+      const aprob: Record<number, boolean> = {};
+      props.forEach((p: any) => { aprob[p.producto_id] = p.confianza === "alta"; });
+      setAprobadas(aprob);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSugiriendoSat(false);
+    }
+  }
+
+  async function aplicarPropuestasSeleccionadas() {
+    if (!propuestasSat) return;
+    const seleccionadas = propuestasSat.filter((p) => aprobadas[p.producto_id]);
+    if (seleccionadas.length === 0) return alert("Selecciona al menos una propuesta");
+    setAplicandoSat(true);
+    try {
+      // Aplicar producto por producto via PATCH (no tenemos endpoint masivo, lo agregamos via crear con clave)
+      // Mejor: llamar al bulk con aplicar=true y dejar que el backend lo haga
+      // Pero el bulk re-genera todo, mas costo. Hacemos PATCH individual:
+      for (const p of seleccionadas) {
+        // No tenemos PATCH de producto, usamos un endpoint generico - por ahora hacemos via SQL del backend
+        // Solucion mas rapida: el backend ya tiene asignar-claves-sat-bulk con aplicar=true
+        // que aplica TODAS las propuestas, no solo las seleccionadas. Workaround:
+        await api.patch(`/api/productos/${p.producto_id}/clave-sat`, { clave: p.clave_sugerida });
+      }
+      alert(`${seleccionadas.length} clave(s) aplicadas`);
+      setPropuestasSat(null);
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setAplicandoSat(false);
+    }
+  }
+
   async function importarExcel(file: File) {
     setImportando(true);
     setResultadoImport(null);
@@ -144,6 +217,10 @@ export default function Productos() {
       subtitle={`${productos.length} producto(s) en ${familias.length} familia(s)`}
       actions={
         <div style={{ display: "flex", gap: 6 }}>
+          <button className="btn-icon" onClick={abrirSugerenciasBulk} disabled={sugiriendoSat}
+            title="Sugiere claves SAT con IA para todos los productos sin clave">
+            {sugiriendoSat ? "..." : "🪄 Asignar SAT con IA"}
+          </button>
           <button className="btn-icon" onClick={descargarPlantilla} title="Descarga XLSX vacia para llenar y subir">
             Plantilla XLSX
           </button>
@@ -223,10 +300,68 @@ export default function Productos() {
             </div>
             <div>
               <label>Clave SAT (opcional)</label>
-              <input className="input" value={form.clave_prod_serv_sat} onChange={(e) => setForm({ ...form, clave_prod_serv_sat: e.target.value })} />
+              <div style={{ display: "flex", gap: 4 }}>
+                <input className="input" value={form.clave_prod_serv_sat}
+                  onChange={(e) => setForm({ ...form, clave_prod_serv_sat: e.target.value })} />
+                <button type="button" className="btn-icon" onClick={sugerirClaveSatIndividual}
+                  disabled={sugiriendoSat || !form.nombre} title="Sugerir con IA"
+                  style={{ whiteSpace: "nowrap" }}>
+                  {sugiriendoSat ? "..." : "🪄 IA"}
+                </button>
+              </div>
             </div>
           </div>
           <button className="btn" style={{ marginTop: 12 }} onClick={crearProducto}>Guardar</button>
+        </div>
+      )}
+
+      {/* Modal de propuestas SAT bulk */}
+      {propuestasSat && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setPropuestasSat(null)}>
+          <div className="card" style={{ maxWidth: 900, width: "94%", maxHeight: "90vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="card-header">🪄 Propuestas de claves SAT</h3>
+            <p style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+              {propuestasSat.length} producto(s) sin clave. Las de confianza <strong>alta</strong> ya están seleccionadas; revisa las demás.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Producto</th>
+                  <th>Familia</th>
+                  <th>Clave sugerida</th>
+                  <th>Descripción SAT</th>
+                  <th>Confianza</th>
+                </tr>
+              </thead>
+              <tbody>
+                {propuestasSat.map((p) => (
+                  <tr key={p.producto_id}>
+                    <td>
+                      <input type="checkbox" checked={!!aprobadas[p.producto_id]}
+                        onChange={(e) => setAprobadas({ ...aprobadas, [p.producto_id]: e.target.checked })} />
+                    </td>
+                    <td>{p.nombre}</td>
+                    <td>{p.categoria || "-"}</td>
+                    <td><code>{p.clave_sugerida}</code></td>
+                    <td style={{ fontSize: 12 }}>{p.descripcion_sat}</td>
+                    <td>
+                      <span className={`badge ${
+                        p.confianza === "alta" ? "badge-success" :
+                        p.confianza === "media" ? "badge-warning" : "badge-danger"
+                      }`}>{p.confianza}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button className="btn" disabled={aplicandoSat} onClick={aplicarPropuestasSeleccionadas}>
+                {aplicandoSat ? "Aplicando..." : `Aplicar ${Object.values(aprobadas).filter(Boolean).length} seleccionada(s)`}
+              </button>
+              <button className="btn-icon" onClick={() => setPropuestasSat(null)}>Cancelar</button>
+            </div>
+          </div>
         </div>
       )}
 

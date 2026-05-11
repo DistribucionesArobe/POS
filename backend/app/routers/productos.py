@@ -13,6 +13,83 @@ from app.services.security import get_active_empresa_id
 router = APIRouter()
 
 
+@router.post("/sugerir-clave-sat")
+def sugerir_clave_sat(
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+):
+    """Sugiere clave SAT con IA para un producto individual."""
+    from app.integrations.anthropic_client import ClaudeClient
+    try:
+        client = ClaudeClient()
+        return client.sugerir_clave_sat(
+            nombre=payload.get("nombre", ""),
+            categoria=payload.get("categoria"),
+            marca=payload.get("marca"),
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Error con IA: {e}")
+
+
+@router.post("/asignar-claves-sat-bulk")
+def asignar_claves_sat_bulk(
+    aplicar: bool = Query(False, description="Si False solo regresa propuestas, si True las guarda"),
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Procesa todos los productos sin clave SAT en la empresa.
+
+    Por default (aplicar=False) solo devuelve propuestas para revisar.
+    Con aplicar=True, guarda las claves sugeridas.
+    """
+    from app.integrations.anthropic_client import ClaudeClient
+
+    sin_clave = (
+        db.query(Producto)
+        .filter(Producto.empresa_id == empresa_id, Producto.activo == True)
+        .filter(or_(Producto.clave_prod_serv_sat.is_(None), Producto.clave_prod_serv_sat == ""))
+        .all()
+    )
+    if not sin_clave:
+        return {"propuestas": [], "mensaje": "Todos los productos ya tienen clave SAT"}
+
+    productos_input = [
+        {"id": p.id, "nombre": p.nombre, "categoria": p.categoria}
+        for p in sin_clave
+    ]
+
+    try:
+        client = ClaudeClient()
+        # Procesar en lotes de 30 para no agotar tokens
+        propuestas = []
+        for i in range(0, len(productos_input), 30):
+            lote = productos_input[i:i + 30]
+            sugerencias = client.sugerir_claves_sat_lote(lote)
+            for s in sugerencias:
+                p = next((x for x in sin_clave if x.id == s.get("id")), None)
+                if not p:
+                    continue
+                propuestas.append({
+                    "producto_id": p.id,
+                    "nombre": p.nombre,
+                    "categoria": p.categoria,
+                    "clave_sugerida": s.get("clave"),
+                    "descripcion_sat": s.get("descripcion"),
+                    "confianza": s.get("confianza"),
+                })
+    except Exception as e:
+        raise HTTPException(500, f"Error con IA: {e}")
+
+    if aplicar:
+        for prop in propuestas:
+            p = db.get(Producto, prop["producto_id"])
+            if p and prop["clave_sugerida"]:
+                p.clave_prod_serv_sat = prop["clave_sugerida"]
+        db.commit()
+
+    return {"propuestas": propuestas, "aplicado": aplicar}
+
+
 @router.get("/import/plantilla")
 def descargar_plantilla():
     """Devuelve XLSX con headers para importacion masiva."""
@@ -185,6 +262,21 @@ def crear_variante(
     db.add(v)
     db.commit()
     return {"id": v.id, "sku": v.sku}
+
+
+@router.patch("/{producto_id}/clave-sat")
+def actualizar_clave_sat(
+    producto_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    p = db.get(Producto, producto_id)
+    if not p or p.empresa_id != empresa_id:
+        raise HTTPException(404, "Producto no existe")
+    p.clave_prod_serv_sat = payload.get("clave")
+    db.commit()
+    return {"ok": True}
 
 
 @router.patch("/variantes/{variante_id}/precio")
