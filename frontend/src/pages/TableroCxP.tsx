@@ -4,6 +4,9 @@ import { api } from "../api/client";
 
 const fmt = (n: number) =>
   "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum = (n: number) =>
+  n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPct = (n: number) => n.toFixed(2) + "%";
 
 const MESES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
@@ -32,38 +35,41 @@ type Tablero = {
   };
 };
 
+type DeudaProv = { total: number; filas: { proveedor_id: number; proveedor: string; saldo: number; pct: number }[] };
+
 export default function TableroCxP() {
   const hoy = new Date();
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth() + 1);
-  const [filtroMes, setFiltroMes] = useState(true); // true = solo del mes, false = todas
-  const [incluirPagadas, setIncluirPagadas] = useState(false);
   const [arrastrarVencidas, setArrastrarVencidas] = useState(true);
+  const [incluirPagadas, setIncluirPagadas] = useState(false);
 
   const [tablero, setTablero] = useState<Tablero | null>(null);
   const [cxps, setCxps] = useState<CxP[]>([]);
+  const [deudaProv, setDeudaProv] = useState<DeudaProv | null>(null);
   const [showCaptura, setShowCaptura] = useState(false);
   const [editandoPanel, setEditandoPanel] = useState(false);
   const [panelDraft, setPanelDraft] = useState<any>(null);
   const [abonando, setAbonando] = useState<CxP | null>(null);
 
   async function cargar() {
-    const [t, c] = await Promise.all([
+    const [t, c, d] = await Promise.all([
       api.get("/api/cxp/tablero", { params: { anio, mes } }),
       api.get("/api/cxp/cartera", {
         params: {
-          anio: filtroMes ? anio : undefined,
-          mes: filtroMes ? mes : undefined,
+          anio, mes,
           incluir_pagadas: incluirPagadas,
           arrastrar_vencidas: arrastrarVencidas,
         },
       }),
+      api.get("/api/cxp/deuda-por-proveedor"),
     ]);
     setTablero(t.data);
     setCxps(c.data);
+    setDeudaProv(d.data);
   }
 
-  useEffect(() => { cargar(); }, [anio, mes, filtroMes, incluirPagadas, arrastrarVencidas]);
+  useEffect(() => { cargar(); }, [anio, mes, incluirPagadas, arrastrarVencidas]);
 
   async function guardarPanel() {
     await api.post("/api/cxp/panel", panelDraft);
@@ -94,9 +100,28 @@ export default function TableroCxP() {
     return new Date(c.fecha_vencimiento) < new Date();
   }
 
+  // Cálculos del panel estilo Excel (todos derivan de panel + KPIs)
+  const k = tablero?.kpis;
+  const p = tablero?.panel;
+  const ventaMes = p?.venta_objetivo_mes || 0;
+  const saldo = p?.saldo_banco || 0;
+  const ingresoEgresoBanco = saldo; // alias - mismo concepto
+  const ventaPromDia = ventaMes && k ? ventaMes / k.dias_mes : 0;
+  const ventaMensualEst = ventaPromDia * (k?.dias_mes || 30);
+  const facturasPorPagar = k?.cxp_total || 0;
+  const aVenderPorDia = facturasPorPagar / (k?.dias_restantes || 30);
+  const restanteVentaEstimada = ventaMensualEst - (k?.venta_mes || 0);
+  const restanteFacturasPagar = facturasPorPagar - saldo;
+  const pctNecesario = ventaMensualEst > 0 ? saldo / ventaMensualEst : 0;
+  const usdMxn = p?.usd_mxn || 0;
+  const deudasXCobrar = k?.cxc_total || 0;
+  const pctVentaDeuda = facturasPorPagar > 0 ? ventaMensualEst / facturasPorPagar : 0;
+  const totalProveedores = facturasPorPagar;
+  const diferencia = ventaMensualEst + deudasXCobrar - facturasPorPagar;
+
   return (
     <Layout title="Tablero de Cuentas por Pagar"
-      subtitle={`A quién debemos y cuándo · ${MESES[mes]} ${anio}`}
+      subtitle={`${MESES[mes]} ${anio} · Plan de continuidad`}
       actions={
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon no-print" onClick={imprimir}>🖨 Imprimir</button>
@@ -106,234 +131,263 @@ export default function TableroCxP() {
       }>
 
       {/* Selector de mes */}
-      <div className="card no-print" style={{ marginBottom: 16 }}>
-        <div className="toolbar" style={{ marginBottom: 0, flexWrap: "wrap", gap: 8 }}>
+      <div className="card no-print" style={{ marginBottom: 12 }}>
+        <div className="toolbar" style={{ marginBottom: 0, flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           <select className="input" value={mes} onChange={(e) => setMes(+e.target.value)}>
             {MESES.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
           <input className="input" type="number" value={anio}
             onChange={(e) => setAnio(+e.target.value)} style={{ maxWidth: 100 }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginLeft: 12 }}
-            title="Si lo destildas, ves TODAS las CxP sin importar el mes">
-            <input type="checkbox" checked={filtroMes}
-              onChange={(e) => setFiltroMes(e.target.checked)} />
-            Solo CxP de este mes
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginLeft: 12 }}>
+            <input type="checkbox" checked={arrastrarVencidas}
+              onChange={(e) => setArrastrarVencidas(e.target.checked)} />
+            Arrastrar vencidas de meses anteriores
           </label>
-          {filtroMes && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}
-              title="Las CxP vencidas de meses anteriores que aún no se pagan se incluyen automáticamente">
-              <input type="checkbox" checked={arrastrarVencidas}
-                onChange={(e) => setArrastrarVencidas(e.target.checked)} />
-              Arrastrar vencidas de meses anteriores
-            </label>
-          )}
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
             <input type="checkbox" checked={incluirPagadas}
               onChange={(e) => setIncluirPagadas(e.target.checked)} />
             Incluir ya pagadas
           </label>
+          <button className="btn-icon" onClick={() => {
+            if (!editandoPanel && p) setPanelDraft({ ...p, anio, mes });
+            setEditandoPanel(!editandoPanel);
+          }} style={{ marginLeft: "auto" }}>
+            {editandoPanel ? "Cancelar edición" : "✎ Editar panel"}
+          </button>
         </div>
       </div>
 
-      {/* Panel del mes - tipo Excel */}
+      {/* PANEL DEL MES - replica exacta del Excel */}
       {tablero && (
-        <div className="card" style={{ marginBottom: 16, background: "#fef3c7" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>Panel del mes — {MESES[mes]} {anio}</h3>
-            <button className="btn-icon no-print" onClick={() => {
-              if (!editandoPanel) setPanelDraft({ ...tablero.panel, anio, mes });
-              setEditandoPanel(!editandoPanel);
-            }}>
-              {editandoPanel ? "Cancelar" : "✎ Editar"}
-            </button>
-          </div>
-
-          {editandoPanel ? (
-            <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-              <div>
-                <label>Meta de venta del mes</label>
-                <input className="input" type="number" step="0.01"
-                  value={panelDraft.venta_objetivo_mes}
-                  onChange={(e) => setPanelDraft({ ...panelDraft, venta_objetivo_mes: +e.target.value })} />
-              </div>
-              <div>
-                <label>Saldo en banco hoy</label>
-                <input className="input" type="number" step="0.01"
-                  value={panelDraft.saldo_banco}
-                  onChange={(e) => setPanelDraft({ ...panelDraft, saldo_banco: +e.target.value })} />
-              </div>
-              <div>
-                <label>USD/MXN</label>
-                <input className="input" type="number" step="0.0001"
-                  value={panelDraft.usd_mxn}
-                  onChange={(e) => setPanelDraft({ ...panelDraft, usd_mxn: +e.target.value })} />
-              </div>
-              <div className="form-grid-full">
-                <label>Notas (visible para tu equipo / familia)</label>
-                <textarea className="input" rows={2}
-                  value={panelDraft.notas || ""}
-                  onChange={(e) => setPanelDraft({ ...panelDraft, notas: e.target.value })} />
-              </div>
-              <div>
-                <button className="btn" onClick={guardarPanel}>Guardar</button>
-              </div>
+        <div className="card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
+          <table style={panelTableStyle}>
+            <tbody>
+              <tr>
+                <td style={lblGreen}>Venta del mes</td>
+                <td style={valRed}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.01" value={panelDraft.venta_objetivo_mes}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, venta_objetivo_mes: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmt(ventaMes)}
+                </td>
+                <td style={lblYellow}>Saldo</td>
+                <td style={valBlack}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.01" value={panelDraft.saldo_banco}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, saldo_banco: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmt(saldo)}
+                </td>
+                <td style={lblGreen}></td>
+                <td style={lblGreen}>DIA DEL MES</td>
+                <td style={valBlack}>{k?.dia_actual}</td>
+                <td style={lblYellow}>Quedarían</td>
+              </tr>
+              <tr>
+                <td style={lblGreen}>Venta promedio día</td>
+                <td style={valBlack}>{fmt(ventaPromDia)}</td>
+                <td style={lblBlue}>Venta mensual estimada</td>
+                <td style={valBlack}>{fmt(ventaMensualEst)}</td>
+                <td style={lblYellow}>Facturas por pagar</td>
+                <td style={valBlack}>{fmt(facturasPorPagar)}</td>
+                <td style={lblYellow}>A vender por día</td>
+                <td style={valRed}>{fmt(aVenderPorDia)}</td>
+              </tr>
+              <tr>
+                <td style={lblGreen}>$ ingreso - egreso - banco</td>
+                <td style={valBlack}>{fmt(ingresoEgresoBanco)}</td>
+                <td style={lblBlue}>Restante a venta estimada</td>
+                <td style={valBlack}>{fmt(restanteVentaEstimada)}</td>
+                <td style={lblBlue}>Restante facturas por pagar</td>
+                <td style={valBlack}>{fmt(restanteFacturasPagar)}</td>
+                <td colSpan={2} style={{ ...valBlack, color: diferencia < 0 ? "#dc2626" : "#16a34a" }}>
+                  {diferencia < 0 ? "-" : ""}{fmt(Math.abs(diferencia))}
+                </td>
+              </tr>
+              <tr>
+                <td style={lblGreen}>% $ necesario</td>
+                <td style={valBlack}>{fmtPct(pctNecesario * 100)}</td>
+                <td style={lblYellow}>USD/MXN</td>
+                <td style={valRed}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.0001" value={panelDraft.usd_mxn}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, usd_mxn: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmtNum(usdMxn)}
+                </td>
+                <td style={lblRed}>Deudas x cobrar</td>
+                <td style={valBlack}>{fmt(deudasXCobrar)}</td>
+                <td style={lblBlue}>DIFERENCIA</td>
+                <td style={{ ...valBlack, fontWeight: 800, color: diferencia < 0 ? "#dc2626" : "#16a34a" }}>
+                  {fmt(diferencia)}
+                </td>
+              </tr>
+              <tr>
+                <td></td>
+                <td></td>
+                <td style={lblBlue}>% venta estimada /deuda</td>
+                <td style={valRed}>{fmtPct(pctVentaDeuda * 100)}</td>
+                <td colSpan={4}></td>
+              </tr>
+              <tr>
+                <td colSpan={4} style={{ ...lblGreen, textAlign: "center" }}>TOTAL DE PROVEEDORES</td>
+                <td colSpan={2} style={valBlack}>{fmt(totalProveedores)}</td>
+                <td colSpan={2} style={valBlack}>{fmt(totalSaldado)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {editandoPanel && (
+            <div style={{ padding: 12, background: "#fef3c7", display: "flex", gap: 8, alignItems: "center" }}>
+              <input className="input" placeholder="Notas para el equipo / familia..."
+                value={panelDraft.notas || ""}
+                onChange={(e) => setPanelDraft({ ...panelDraft, notas: e.target.value })}
+                style={{ flex: 1 }} />
+              <button className="btn" onClick={guardarPanel}>Guardar panel</button>
             </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-              <Card label="Meta de venta" value={fmt(tablero.panel.venta_objetivo_mes)} />
-              <Card label="Saldo banco" value={fmt(tablero.panel.saldo_banco)} />
-              <Card label="USD/MXN" value={tablero.panel.usd_mxn ? `$${tablero.panel.usd_mxn}` : "—"} />
-              <Card label="Día del mes" value={`${tablero.kpis.dia_actual} / ${tablero.kpis.dias_mes}`} />
-
-              <Card label="Vendido hasta hoy" value={fmt(tablero.kpis.venta_mes)} sub={`promedio ${fmt(tablero.kpis.venta_promedio_dia)}/día`} />
-              <Card label="Falta para meta" value={fmt(tablero.kpis.restante_meta)} sub={`${fmt(tablero.kpis.a_vender_por_dia)}/día`} />
-              <Card label="A pagar este mes" value={fmt(tablero.kpis.cxp_del_mes)} sub={`total CxP: ${fmt(tablero.kpis.cxp_total)}`} danger />
-              <Card label="Por cobrar (CxC)" value={fmt(tablero.kpis.cxc_total)} success />
-
-              <div style={{ gridColumn: "1 / span 4", display: "flex", justifyContent: "space-between",
-                padding: "12px 16px", background: "white", borderRadius: 8, marginTop: 4,
-                border: "2px solid " + (tablero.kpis.diferencia >= 0 ? "#16a34a" : "#dc2626") }}>
-                <div>
-                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase" }}>
-                    Proyección: (CxC + Venta estimada) − CxP total
-                  </div>
-                  <div style={{ fontSize: 13, color: "#9ca3af" }}>
-                    Venta estimada del mes: {fmt(tablero.kpis.venta_estimada_mes)}
-                  </div>
-                </div>
-                <div style={{ fontSize: 28, fontWeight: 800,
-                  color: tablero.kpis.diferencia >= 0 ? "#16a34a" : "#dc2626" }}>
-                  {tablero.kpis.diferencia >= 0 ? "+" : ""}{fmt(tablero.kpis.diferencia)}
-                </div>
-              </div>
-
-              {tablero.panel.notas && (
-                <div style={{ gridColumn: "1 / span 4", background: "white", padding: 10, borderRadius: 6, fontSize: 13 }}>
-                  <strong>Notas:</strong> {tablero.panel.notas}
-                </div>
-              )}
+          )}
+          {!editandoPanel && p?.notas && (
+            <div style={{ padding: 10, background: "#fef3c7", fontSize: 13 }}>
+              <strong>Notas:</strong> {p.notas}
             </div>
           )}
         </div>
       )}
 
-      {/* Tabla CxP */}
-      <div className="card print-area">
-        <div style={{ padding: "8px 0 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <h3 style={{ margin: 0 }}>Cuentas por pagar</h3>
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-              Ordenadas por fecha de vencimiento · Las vencidas se marcan en rojo
-              {filtroMes && arrastrarVencidas && (
-                <span> · Las que vencieron antes y no se han pagado aparecen automáticamente cada mes</span>
-              )}
-            </p>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>SALDO PENDIENTE</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-danger)" }}>{fmt(totalSaldo)}</div>
-            <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-              de {fmt(totalMonto)} · pagado {fmt(totalSaldado)}
-            </div>
-          </div>
-        </div>
+      {/* TABLA DE CUENTAS POR PAGAR - orden exacto del Excel */}
+      <div className="card print-area" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={thOrange}>Fecha llegada</th>
+              <th style={thOrange}>Folio</th>
+              <th style={thOrange}>Fecha vence</th>
+              <th style={thOrange}>Empresa</th>
+              <th style={thOrange}>Obs</th>
+              <th style={{ ...thOrange, textAlign: "right" }}>Monto</th>
+              <th style={{ ...thOrange, textAlign: "right" }}>Saldado</th>
+              <th style={{ ...thOrange, textAlign: "right" }}>Saldo</th>
+              <th className="no-print" style={thOrange}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cxps.length === 0 ? (
+              <tr><td colSpan={9} style={{ padding: 32, textAlign: "center", color: "var(--color-text-muted)" }}>
+                Sin cuentas por pagar en este filtro.
+              </td></tr>
+            ) : cxps.map((c) => {
+              const vencida = esVencida(c);
+              return (
+                <tr key={c.cxp_id} style={{
+                  background: c.pagado ? "#f0fdf4" : (vencida ? "#fee2e2" : "white"),
+                }}>
+                  <td style={td}>{c.fecha_recepcion ? new Date(c.fecha_recepcion).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : "—"}</td>
+                  <td style={td}><code style={{ fontSize: 12 }}>{c.folio_factura || c.compra_folio || ""}</code></td>
+                  <td style={td}>
+                    {c.fecha_vencimiento ? new Date(c.fecha_vencimiento).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : ""}
+                    {vencida && <span className="badge badge-danger" style={{ marginLeft: 4, fontSize: 10 }}>VENCIDA</span>}
+                  </td>
+                  <td style={{ ...td, fontWeight: 600 }}>{c.proveedor}</td>
+                  <td style={{ ...td, fontSize: 12, color: "var(--color-text-secondary)" }}>{c.observaciones || ""}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{fmt(c.monto_original)}</td>
+                  <td style={{ ...td, textAlign: "right", color: "var(--color-text-muted)" }}>
+                    {c.saldado > 0 ? fmt(c.saldado) : ""}
+                  </td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700,
+                    color: c.pagado ? "var(--color-success)" : "var(--color-danger)" }}>
+                    {c.pagado ? "✓ pagado" : fmt(c.saldo)}
+                  </td>
+                  <td className="no-print" style={td}>
+                    {!c.pagado && <button className="btn btn-sm" onClick={() => setAbonando(c)}>Abonar</button>}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr style={{ background: "#dbeafe", fontWeight: 700 }}>
+              <td colSpan={5} style={{ ...td, textAlign: "right" }}>TOTAL ({cxps.length} doc{cxps.length !== 1 ? "s" : ""})</td>
+              <td style={{ ...td, textAlign: "right" }}>{fmt(totalMonto)}</td>
+              <td style={{ ...td, textAlign: "right" }}>{fmt(totalSaldado)}</td>
+              <td style={{ ...td, textAlign: "right", fontSize: 14 }}>{fmt(totalSaldo)}</td>
+              <td className="no-print"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        {cxps.length === 0 ? (
-          <p style={{ color: "var(--color-text-muted)", textAlign: "center", padding: 32 }}>
-            Sin cuentas por pagar {filtroMes ? `en ${MESES[mes]} ${anio}` : ""}.
-          </p>
-        ) : (
-          <table style={{ fontSize: 13 }}>
+      {/* SECCIÓN DEUDA POR PROVEEDOR */}
+      {deudaProv && (
+        <div className="card print-area">
+          <h3 className="card-header">Deuda por proveedor</h3>
+          <table style={{ width: "100%", fontSize: 13 }}>
             <thead>
-              <tr>
-                <th>Folio factura</th>
-                <th>Llegada</th>
-                <th>Vence</th>
-                <th>Proveedor</th>
-                <th>Observaciones</th>
-                <th style={{ textAlign: "right" }}>Monto</th>
-                <th style={{ textAlign: "right" }}>Saldado</th>
-                <th style={{ textAlign: "right" }}>Saldo</th>
-                <th className="no-print"></th>
+              <tr style={{ background: "#1f2937", color: "white" }}>
+                <th style={{ ...thBlack, textAlign: "right", width: "20%" }}>DEUDA</th>
+                <th style={{ ...thBlack, textAlign: "right", width: "12%" }}>%</th>
+                <th style={thBlack}>Proveedor</th>
               </tr>
             </thead>
             <tbody>
-              {cxps.map((c) => {
-                const vencida = esVencida(c);
-                return (
-                  <tr key={c.cxp_id} style={{
-                    background: vencida ? "#fee2e2" : (c.pagado ? "#f0fdf4" : undefined),
-                  }}>
-                    <td><code>{c.folio_factura || c.compra_folio || "—"}</code></td>
-                    <td>{c.fecha_recepcion ? new Date(c.fecha_recepcion).toLocaleDateString("es-MX") : "—"}</td>
-                    <td>
-                      {c.fecha_vencimiento ? new Date(c.fecha_vencimiento).toLocaleDateString("es-MX") : "—"}
-                      {vencida && <span className="badge badge-danger" style={{ marginLeft: 4 }}>VENCIDA</span>}
-                    </td>
-                    <td><strong>{c.proveedor}</strong></td>
-                    <td style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{c.observaciones || ""}</td>
-                    <td style={{ textAlign: "right" }}>{fmt(c.monto_original)}</td>
-                    <td style={{ textAlign: "right", color: "var(--color-text-muted)" }}>{fmt(c.saldado)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700,
-                      color: c.pagado ? "var(--color-success)" : "var(--color-danger)" }}>
-                      {c.pagado ? "✓ pagado" : fmt(c.saldo)}
-                    </td>
-                    <td className="no-print" style={{ display: "flex", gap: 4 }}>
-                      {!c.pagado && (
-                        <button className="btn btn-sm" onClick={() => setAbonando(c)}>Abonar</button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr style={{ background: "#dbeafe", fontWeight: 700 }}>
-                <td colSpan={5} style={{ textAlign: "right" }}>TOTAL</td>
-                <td style={{ textAlign: "right" }}>{fmt(totalMonto)}</td>
-                <td style={{ textAlign: "right" }}>{fmt(totalSaldado)}</td>
-                <td style={{ textAlign: "right", fontSize: 15 }}>{fmt(totalSaldo)}</td>
-                <td className="no-print"></td>
+              {deudaProv.filas.map((f) => (
+                <tr key={f.proveedor_id} style={{
+                  background: f.saldo > 0 ? "white" : "#f9fafb",
+                  color: f.saldo > 0 ? undefined : "#9ca3af",
+                }}>
+                  <td style={{ ...td, textAlign: "right", fontWeight: f.saldo > 0 ? 700 : 400 }}>
+                    {f.saldo > 0 ? fmt(f.saldo) : "—"}
+                  </td>
+                  <td style={{ ...td, textAlign: "right" }}>
+                    {f.saldo > 0 ? fmtPct(f.pct) : "0.00%"}
+                  </td>
+                  <td style={td}>{f.proveedor}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#dbeafe", fontWeight: 800 }}>
+                <td style={{ ...td, textAlign: "right", fontSize: 14 }}>{fmt(deudaProv.total)}</td>
+                <td style={{ ...td, textAlign: "right" }}>100.00%</td>
+                <td style={td}>TOTAL</td>
               </tr>
             </tbody>
           </table>
-        )}
-
-        <p style={{ marginTop: 12, fontSize: 11, color: "var(--color-text-muted)", fontStyle: "italic" }}>
-          Generado: {new Date().toLocaleString("es-MX")}
-        </p>
-      </div>
+        </div>
+      )}
 
       {showCaptura && (
-        <CapturaCxPModal
-          onClose={() => setShowCaptura(false)}
-          onSaved={() => { setShowCaptura(false); cargar(); }}
-        />
+        <CapturaCxPModal onClose={() => setShowCaptura(false)}
+          onSaved={() => { setShowCaptura(false); cargar(); }} />
       )}
-
       {abonando && (
-        <AbonoModal cxp={abonando}
-          onClose={() => setAbonando(null)}
-          onSaved={() => { setAbonando(null); cargar(); }}
-        />
+        <AbonoModal cxp={abonando} onClose={() => setAbonando(null)}
+          onSaved={() => { setAbonando(null); cargar(); }} />
       )}
 
-      <style>{`@media print { .no-print, .sidebar, .layout-header { display: none !important; } }`}</style>
+      <style>{`@media print { .no-print, .sidebar, .layout-header { display: none !important; } body { font-size: 11px; } }`}</style>
     </Layout>
   );
 }
 
-
-function Card({ label, value, sub, danger, success }: {
-  label: string; value: string; sub?: string; danger?: boolean; success?: boolean;
-}) {
-  const color = danger ? "#dc2626" : success ? "#16a34a" : "#1f2937";
-  return (
-    <div style={{ background: "white", padding: 12, borderRadius: 8 }}>
-      <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color, marginTop: 2 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
+// === Estilos para replicar las celdas del Excel ===
+const panelTableStyle: React.CSSProperties = {
+  width: "100%", borderCollapse: "collapse", fontSize: 12,
+};
+const cellBase: React.CSSProperties = {
+  padding: "8px 10px", border: "1px solid #d1d5db",
+  fontWeight: 700, textAlign: "left", whiteSpace: "nowrap",
+};
+const lblGreen: React.CSSProperties = { ...cellBase, background: "#86efac", color: "#14532d" };
+const lblYellow: React.CSSProperties = { ...cellBase, background: "#fde047", color: "#713f12" };
+const lblBlue: React.CSSProperties = { ...cellBase, background: "#bfdbfe", color: "#1e40af" };
+const lblRed: React.CSSProperties = { ...cellBase, background: "#fca5a5", color: "#7f1d1d" };
+const valBlack: React.CSSProperties = { ...cellBase, fontWeight: 600, textAlign: "right", background: "white", color: "#1f2937" };
+const valRed: React.CSSProperties = { ...valBlack, color: "#dc2626", fontWeight: 700 };
+const thOrange: React.CSSProperties = {
+  padding: "10px 12px", background: "#ea580c", color: "white",
+  fontWeight: 700, textAlign: "left", borderBottom: "1px solid #c2410c",
+};
+const thBlack: React.CSSProperties = {
+  padding: "8px 10px", textAlign: "left", fontWeight: 600,
+};
+const td: React.CSSProperties = { padding: "8px 10px", borderBottom: "1px solid #e5e7eb" };
+const inpStyle: React.CSSProperties = { width: 110, padding: 4, fontSize: 12, textAlign: "right" };
 
 
 function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -372,9 +426,6 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     <div style={modalBg} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={modalCard}>
         <h3 style={{ marginTop: 0 }}>Captura rápida de cuenta por pagar</h3>
-        <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 16px" }}>
-          Para deudas que llegan por factura del proveedor sin registrar la compra completa con inventario.
-        </p>
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div className="form-grid-full">
             <label>Proveedor *</label>
@@ -391,15 +442,16 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               placeholder="A89271" />
           </div>
           <div>
-            <label>Fecha de llegada</label>
+            <label>Fecha llegada</label>
             <input className="input" type="date" value={fechaRecep}
               onChange={(e) => setFechaRecep(e.target.value)} />
           </div>
           <div>
-            <label>Fecha de vencimiento</label>
+            <label>Fecha vence</label>
             <input className="input" type="date" value={fechaVence}
               onChange={(e) => setFechaVence(e.target.value)} />
           </div>
+          <div></div>
           <div>
             <label>Monto total *</label>
             <input className="input" type="number" step="0.01" value={monto}
@@ -438,8 +490,6 @@ function AbonoModal({ cxp, onClose, onSaved }: { cxp: CxP; onClose: () => void; 
     if (monto <= 0 || monto > cxp.saldo + 0.01) return alert(`Monto fuera de rango (saldo ${fmt(cxp.saldo)})`);
     setBusy(true);
     try {
-      // Si es CxP manual, usamos PATCH para sumar al saldado
-      // Si es ligada a Compra, usamos el endpoint de abono CxP existente
       if (cxp.manual) {
         const nuevoSaldado = cxp.saldado + monto;
         await api.patch(`/api/cxp/manual/${cxp.cxp_id}`, { saldado: nuevoSaldado });

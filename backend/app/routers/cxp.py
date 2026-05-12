@@ -342,6 +342,55 @@ def tablero_cxp(
     }
 
 
+@router.get("/deuda-por-proveedor")
+def deuda_por_proveedor(
+    incluir_zero: bool = True,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Agrupa saldo pendiente por proveedor para el tablero estilo Excel.
+    Si incluir_zero=true, devuelve TODOS los proveedores (incluso con saldo 0).
+    """
+    # Suma de saldo por proveedor
+    sub = (
+        db.query(
+            CuentaPorPagar.proveedor_id,
+            func.coalesce(func.sum(CuentaPorPagar.saldo), 0).label("saldo"),
+        )
+        .outerjoin(Compra, Compra.id == CuentaPorPagar.compra_id)
+        .filter(or_(
+            CuentaPorPagar.empresa_id == empresa_id,
+            Compra.empresa_id == empresa_id,
+        ))
+        .filter(CuentaPorPagar.pagado == False)
+        .group_by(CuentaPorPagar.proveedor_id)
+        .subquery()
+    )
+    rows = (
+        db.query(Proveedor, sub.c.saldo)
+        .outerjoin(sub, sub.c.proveedor_id == Proveedor.id)
+        .filter(Proveedor.empresa_id == empresa_id)
+        .filter(Proveedor.activo == True)
+        .all()
+    )
+    out = []
+    total = 0.0
+    for prov, saldo in rows:
+        s = float(saldo or 0)
+        if not incluir_zero and s <= 0.01:
+            continue
+        out.append({
+            "proveedor_id": prov.id,
+            "proveedor": prov.nombre,
+            "saldo": s,
+        })
+        total += s
+    out.sort(key=lambda x: -x["saldo"])
+    for r in out:
+        r["pct"] = (r["saldo"] / total * 100) if total > 0 else 0
+    return {"total": round(total, 2), "filas": out}
+
+
 @router.post("/panel")
 def upsert_panel(
     payload: PanelIn,
