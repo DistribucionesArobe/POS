@@ -138,9 +138,12 @@ export default function Clientes() {
                 onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
             </div>
             <div>
-              <label>CP fiscal</label>
-              <input className="input" placeholder="5 digitos" value={form.codigo_postal}
-                onChange={(e) => setForm({ ...form, codigo_postal: e.target.value })} />
+              <label>CP fiscal *</label>
+              <input className="input" placeholder="5 digitos" maxLength={5} value={form.codigo_postal}
+                onChange={(e) => setForm({ ...form, codigo_postal: e.target.value.replace(/\D/g, "") })} />
+              <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "4px 0 0" }}>
+                Requerido para facturar (debe coincidir con la Constancia SAT).
+              </p>
             </div>
             <div>
               <label>Regimen fiscal</label>
@@ -189,8 +192,9 @@ export default function Clientes() {
         <table>
           <thead>
             <tr>
-              <th>ID</th><th>Razon social / Nombre</th><th>RFC</th><th>Regimen</th>
-              <th>WhatsApp</th><th>Dias cred.</th><th></th>
+              <th>ID</th><th>Razón social / Nombre</th><th>RFC</th>
+              <th>CP</th><th>Régimen</th>
+              <th>WhatsApp</th><th>Correo</th><th>Días cred.</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -199,8 +203,16 @@ export default function Clientes() {
                 <td><code>#{c.id}</code></td>
                 <td>{c.razon_social || c.nombre}</td>
                 <td>{c.rfc || "-"}</td>
+                <td>
+                  {c.codigo_postal || (
+                    <span style={{ color: "var(--color-danger)", fontSize: 11 }}>
+                      ⚠ falta
+                    </span>
+                  )}
+                </td>
                 <td>{c.regimen_fiscal && <span className="badge badge-info">{c.regimen_fiscal}</span>}</td>
                 <td>{c.whatsapp || "-"}</td>
+                <td style={{ fontSize: 12 }}>{c.correo || "-"}</td>
                 <td>{c.dias_credito}</td>
                 <td>
                   <button className="btn-icon" onClick={() => abrirEditar(c.id)} style={{ marginRight: 4 }}>Editar</button>
