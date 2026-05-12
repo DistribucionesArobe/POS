@@ -2,6 +2,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+// Si el hostname es facturacion.* el sitio es el portal publico de autofacturacion.
+// Cualquier ruta cae a /facturar (no al POS interno).
+const isPortalAutoFactura =
+  typeof window !== "undefined" &&
+  window.location.hostname.startsWith("facturacion.");
+
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Caja from "./pages/Caja";
@@ -21,23 +27,31 @@ import "./index.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/facturar" element={<AutoFactura />} />
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/caja" element={<Caja />} />
-        <Route path="/venta" element={<VentaNueva />} />
-        <Route path="/ventas" element={<Ventas />} />
-        <Route path="/cotizaciones" element={<Cotizaciones />} />
-        <Route path="/corte" element={<CorteCaja />} />
-        <Route path="/productos" element={<Productos />} />
-        <Route path="/clientes" element={<Clientes />} />
-        <Route path="/proveedores" element={<Proveedores />} />
-        <Route path="/compras" element={<Compras />} />
-        <Route path="/empresas" element={<Empresas />} />
-        <Route path="/cartera" element={<Cartera />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      {isPortalAutoFactura ? (
+        // En facturacion.aceromax.mx solo existe el portal publico
+        <Routes>
+          <Route path="/facturar" element={<AutoFactura />} />
+          <Route path="*" element={<Navigate to="/facturar" replace />} />
+        </Routes>
+      ) : (
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/facturar" element={<AutoFactura />} />
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/caja" element={<Caja />} />
+          <Route path="/venta" element={<VentaNueva />} />
+          <Route path="/ventas" element={<Ventas />} />
+          <Route path="/cotizaciones" element={<Cotizaciones />} />
+          <Route path="/corte" element={<CorteCaja />} />
+          <Route path="/productos" element={<Productos />} />
+          <Route path="/clientes" element={<Clientes />} />
+          <Route path="/proveedores" element={<Proveedores />} />
+          <Route path="/compras" element={<Compras />} />
+          <Route path="/empresas" element={<Empresas />} />
+          <Route path="/cartera" element={<Cartera />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      )}
     </BrowserRouter>
   </React.StrictMode>
 );
