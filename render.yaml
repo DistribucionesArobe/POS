@@ -36,6 +36,11 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
+    # SPA fallback: cualquier ruta cae a index.html para que React Router maneje routing
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_URL
         value: https://aceromax-pos-backend.onrender.com
