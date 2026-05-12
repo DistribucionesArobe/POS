@@ -1,22 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { VitePWA } from "vite-plugin-pwa";
 
+// NOTA: Removimos vite-plugin-pwa porque generaba un Service Worker agresivo
+// que cacheaba el bundle y bloqueaba los updates. Para POS interno no
+// necesitamos PWA / offline.
 export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: "autoUpdate",
-      manifest: {
-        name: "Aceromax POS",
-        short_name: "Aceromax",
-        theme_color: "#1f2937",
-        background_color: "#ffffff",
-        display: "standalone",
-        start_url: "/",
-        icons: [],
-      },
-    }),
-  ],
+  plugins: [react()],
   server: { port: 5173 },
 });

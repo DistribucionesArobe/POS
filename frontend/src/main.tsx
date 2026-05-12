@@ -2,6 +2,31 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+// === Auto-limpieza de Service Workers viejos ===
+// Antes el build incluia vite-plugin-pwa que registraba un SW que
+// cacheaba agresivamente y bloqueaba updates. Removimos el plugin
+// pero hay que limpiar los SW que ya estan instalados en los navegadores
+// de los usuarios. Esto corre una vez al cargar:
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    if (regs.length > 0) {
+      Promise.all(regs.map((r) => r.unregister())).then(() => {
+        // Limpiar tambien la Cache API
+        if (typeof caches !== "undefined") {
+          caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n))))
+            .finally(() => {
+              // Recargar UNA vez para tomar bundle fresco sin SW
+              if (!sessionStorage.getItem("__sw_cleaned")) {
+                sessionStorage.setItem("__sw_cleaned", "1");
+                location.reload();
+              }
+            });
+        }
+      });
+    }
+  }).catch(() => {});
+}
+
 // Si el hostname es facturacion.* el sitio es el portal publico de autofacturacion.
 // Cualquier ruta cae a /facturar (no al POS interno).
 const isPortalAutoFactura =
