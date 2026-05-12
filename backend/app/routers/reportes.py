@@ -582,3 +582,173 @@ def antiguedad_cartera(
         elif d <= 90: buckets["61-90"] += saldo
         else: buckets["91+"] += saldo
     return buckets
+
+
+# === Reporte diario de facturas agrupado por forma de pago ===
+
+def _reporte_diario_data(db: Session, empresa_id: int, ini: datetime, fin: datetime, incluir_tickets: bool = False):
+    """Construye los grupos por forma de pago: facturas del rango."""
+    from app.models import Cfdi
+    tipos = [TipoDocumento.FACTURA.value]
+    if incluir_tickets:
+        tipos.append(TipoDocumento.TICKET.value)
+    rows = (
+        db.query(DocumentoVenta, Cliente)
+        .join(Cliente, Cliente.id == DocumentoVenta.cliente_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(DocumentoVenta.fecha >= ini, DocumentoVenta.fecha < fin)
+        .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
+        .filter(DocumentoVenta.tipo.in_(tipos))
+        .order_by(DocumentoVenta.forma_pago_sat, DocumentoVenta.fecha)
+        .all()
+    )
+
+    # Agrupar por forma_pago_sat
+    grupos: dict[str, list[dict]] = {}
+    for d, cli in rows:
+        # Para FACTURA, tomar serie/folio del CFDI si esta timbrada
+        cfdi = db.query(Cfdi).filter(
+            Cfdi.documento_venta_id == d.id, Cfdi.cancelado == False
+        ).first()
+        # Estado: CO=cobrado (PUE timbrada), PE=pendiente (PPD sin pagar), CR=cancelado
+        if d.metodo_pago_sat == "PPD":
+            cxc = db.query(CuentaPorCobrar).filter(
+                CuentaPorCobrar.documento_id == d.id, CuentaPorCobrar.pagado == False
+            ).first()
+            estado = "PE" if cxc else "CO"
+        else:
+            estado = "CO"
+        forma = d.forma_pago_sat or "01"
+        if forma not in grupos:
+            grupos[forma] = []
+        grupos[forma].append({
+            "fecha": d.fecha.strftime("%d/%m/%Y"),
+            "serie": cfdi.serie if cfdi else (("FC" if d.tipo == "FACTURA" else "TK")),
+            "referencia": cfdi.folio if cfdi else d.folio,
+            "folio_interno": d.folio,
+            "cliente": (cli.razon_social or cli.nombre).upper(),
+            "rfc": cli.rfc or "",
+            "total": float(d.total),
+            "estado": estado,
+            "metodo": d.metodo_pago_sat,
+        })
+
+    # Ordenar grupos por codigo SAT
+    return dict(sorted(grupos.items(), key=lambda kv: kv[0])), len(rows), sum(float(d.total) for d, _ in rows)
+
+
+@router.get("/diario")
+def reporte_diario(
+    desde: date | None = None,
+    hasta: date | None = None,
+    incluir_tickets: bool = False,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    f_desde = desde or datetime.utcnow().date()
+    f_hasta = hasta or f_desde
+    ini = datetime.combine(f_desde, datetime.min.time())
+    fin = datetime.combine(f_hasta, datetime.min.time()) + timedelta(days=1)
+
+    grupos, n_total, total_gral = _reporte_diario_data(db, empresa_id, ini, fin, incluir_tickets)
+
+    return {
+        "desde": f_desde.isoformat(),
+        "hasta": f_hasta.isoformat(),
+        "grupos": [
+            {
+                "forma_pago": k,
+                "label": FORMA_LABEL.get(k, k),
+                "n": len(rows),
+                "subtotal": round(sum(r["total"] for r in rows), 2),
+                "facturas": rows,
+            }
+            for k, rows in grupos.items()
+        ],
+        "n_total": n_total,
+        "total_general": round(total_gral, 2),
+    }
+
+
+@router.get("/diario-xlsx")
+def reporte_diario_xlsx(
+    desde: date | None = None,
+    hasta: date | None = None,
+    incluir_tickets: bool = False,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    f_desde = desde or datetime.utcnow().date()
+    f_hasta = hasta or f_desde
+    ini = datetime.combine(f_desde, datetime.min.time())
+    fin = datetime.combine(f_hasta, datetime.min.time()) + timedelta(days=1)
+    grupos, n_total, total_gral = _reporte_diario_data(db, empresa_id, ini, fin, incluir_tickets)
+
+    # Empresa
+    from app.models import Empresa
+    emp = db.get(Empresa, empresa_id)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reporte"
+
+    # Header titulo
+    ws["A1"] = (emp.nombre if emp else "ACEROMAX").upper()
+    ws["A1"].font = Font(bold=True, size=16)
+    ws.merge_cells("A1:F1")
+
+    rango = f"Del día {f_desde.strftime('%d-%m-%Y')} al día {f_hasta.strftime('%d-%m-%Y')}"
+    ws["A2"] = f"Reporte de Facturas — {rango}"
+    ws["A2"].font = Font(bold=True, size=11)
+    ws.merge_cells("A2:F2")
+
+    # Encabezado columnas
+    headers = ["Fecha", "Serie", "Referencia", "Cliente", "Total", "Estado"]
+    row_idx = 4
+    for col, h in enumerate(headers, start=1):
+        c = ws.cell(row=row_idx, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1F2937")
+        c.alignment = Alignment(horizontal="left")
+    thin = Side(style="thin", color="9CA3AF")
+
+    row_idx = 5
+    for forma_sat, rows in grupos.items():
+        # Label de grupo
+        label_grupo = f"Pago {forma_sat}" if forma_sat in ("01", "02", "03") else (
+            "Pago TA" if forma_sat in ("04", "28") else f"Pago {forma_sat}"
+        )
+        ws.cell(row=row_idx, column=1, value=label_grupo).font = Font(bold=True, italic=True)
+        row_idx += 1
+        for r in rows:
+            ws.cell(row=row_idx, column=1, value=r["fecha"])
+            ws.cell(row=row_idx, column=2, value=r["serie"])
+            ws.cell(row=row_idx, column=3, value=r["referencia"])
+            ws.cell(row=row_idx, column=4, value=r["cliente"])
+            ws.cell(row=row_idx, column=5, value=r["total"]).number_format = '"$"#,##0.00'
+            ws.cell(row=row_idx, column=6, value=r["estado"])
+            for col in range(1, 7):
+                ws.cell(row=row_idx, column=col).border = Border(top=thin, bottom=thin)
+            row_idx += 1
+        # Subtotal del grupo
+        ws.cell(row=row_idx, column=1, value=f"{len(rows)} doc(s)").font = Font(bold=True)
+        ws.cell(row=row_idx, column=5, value=round(sum(r["total"] for r in rows), 2)).number_format = '"$"#,##0.00'
+        ws.cell(row=row_idx, column=5).font = Font(bold=True)
+        ws.cell(row=row_idx, column=5).fill = PatternFill("solid", fgColor="F3F4F6")
+        row_idx += 2
+
+    # Total general
+    ws.cell(row=row_idx, column=1, value=f"TOTAL: {n_total} doc(s)").font = Font(bold=True, size=12)
+    ws.cell(row=row_idx, column=5, value=round(total_gral, 2)).number_format = '"$"#,##0.00'
+    ws.cell(row=row_idx, column=5).font = Font(bold=True, size=12)
+    ws.cell(row=row_idx, column=5).fill = PatternFill("solid", fgColor="DBEAFE")
+
+    # Anchos
+    for col, w in zip("ABCDEF", [12, 8, 14, 42, 14, 8]):
+        ws.column_dimensions[col].width = w
+
+    nombre = f"reporte_facturas_{f_desde.isoformat()}_{f_hasta.isoformat()}.xlsx"
+    return _xlsx_response(wb, nombre)

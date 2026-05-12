@@ -24,6 +24,8 @@ import Cotizaciones from "./pages/Cotizaciones";
 import CorteCaja from "./pages/CorteCaja";
 import CotizacionPublica from "./pages/CotizacionPublica";
 import ConvertirRemisiones from "./pages/ConvertirRemisiones";
+import Reportes from "./pages/Reportes";
+import ReporteDiario from "./pages/ReporteDiario";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -47,6 +49,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/cotizaciones" element={<Cotizaciones />} />
           <Route path="/cot/:folio" element={<CotizacionPublica />} />
           <Route path="/convertir-remisiones" element={<ConvertirRemisiones />} />
+          <Route path="/reportes" element={<Reportes />} />
+          <Route path="/reportes/diario" element={<ReporteDiario />} />
           <Route path="/corte" element={<CorteCaja />} />
           <Route path="/productos" element={<Productos />} />
           <Route path="/clientes" element={<Clientes />} />
