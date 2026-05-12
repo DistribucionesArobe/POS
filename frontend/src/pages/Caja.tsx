@@ -238,8 +238,29 @@ export default function Caja() {
         if (e.key === "Escape") { e.preventDefault(); setShowCobrar(false); focus(); }
         return;
       }
-      if (e.key === "F5") { e.preventDefault(); abrirCobrar(); }
+      if (e.key === "F5") { e.preventDefault(); setTipoSel("TICKET"); abrirCobrar(); }
       if (e.key === "F4") {
+        // F4 = cobrar como Remisión (a crédito)
+        e.preventDefault();
+        if (items.length === 0) return;
+        setTipoSel("REMISION");
+        // pequeno delay para que el state se aplique antes de abrir modal
+        setTimeout(() => abrirCobrar(), 0);
+      }
+      if (e.key === "F7") {
+        e.preventDefault();
+        if (items.length === 0) return;
+        setTipoSel("FACTURA_PUE");
+        setTimeout(() => abrirCobrar(), 0);
+      }
+      if (e.key === "F8") {
+        e.preventDefault();
+        if (items.length === 0) return;
+        setTipoSel("FACTURA_PPD");
+        setTimeout(() => abrirCobrar(), 0);
+      }
+      if (e.key === "F9") {
+        // Limpiar venta actual
         e.preventDefault();
         if (items.length > 0 && confirm("Limpiar venta actual?")) {
           setItems([]); focus();
@@ -339,8 +360,11 @@ export default function Caja() {
           <div style={{ marginTop: "auto", paddingTop: 16, borderTop: "1px solid var(--color-border)", display: "flex", gap: 16, color: "var(--color-text-secondary)", fontSize: 12, flexWrap: "wrap" }}>
             <span><kbd style={kbdStyle}>Enter</kbd> agregar/buscar</span>
             <span><kbd style={kbdStyle}>F2</kbd> cambiar cliente</span>
-            <span><kbd style={kbdStyle}>F4</kbd> limpiar venta</span>
-            <span><kbd style={kbdStyle}>F5</kbd> cobrar</span>
+            <span><kbd style={kbdStyle}>F4</kbd> remisión (crédito)</span>
+            <span><kbd style={kbdStyle}>F5</kbd> ticket</span>
+            <span><kbd style={kbdStyle}>F7</kbd> factura PUE</span>
+            <span><kbd style={kbdStyle}>F8</kbd> factura PPD</span>
+            <span><kbd style={kbdStyle}>F9</kbd> limpiar</span>
             <span><kbd style={kbdStyle}>Esc</kbd> cerrar dialog</span>
           </div>
         </div>
