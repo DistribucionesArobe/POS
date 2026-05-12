@@ -336,8 +336,8 @@ export default function TableroCxP() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr>
-              <th style={thOrange}>Fecha llegada</th>
               <th style={thOrange}>Folio</th>
+              <th style={thOrange}>Fecha llegada</th>
               <th style={thOrange}>Fecha vence</th>
               <th style={thOrange}>Empresa</th>
               <th style={thOrange}>Obs</th>
@@ -362,7 +362,6 @@ export default function TableroCxP() {
                 <tr key={c.cxp_id} style={{
                   background: c.pagado ? "#f0fdf4" : (vencida ? "#fee2e2" : "white"),
                 }}>
-                  <td style={td}>{celdaEdit(c, "fecha_recepcion", fLleg, fLlegEdit)}</td>
                   <td style={td}>
                     {editing?.id === c.cxp_id && editing.field === "folio_factura"
                       ? celdaEdit(c, "folio_factura", c.folio_factura || "")
@@ -372,6 +371,7 @@ export default function TableroCxP() {
                         </code>
                     }
                   </td>
+                  <td style={td}>{celdaEdit(c, "fecha_recepcion", fLleg, fLlegEdit)}</td>
                   <td style={td}>
                     {celdaEdit(c, "fecha_vencimiento", fVenc, fVencEdit)}
                     {vencida && <span className="badge badge-danger" style={{ marginLeft: 4, fontSize: 10 }}>VENCIDA</span>}
@@ -518,19 +518,10 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       <div onClick={(e) => e.stopPropagation()} style={modalCard}>
         <h3 style={{ marginTop: 0 }}>Captura rápida de cuenta por pagar</h3>
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <div className="form-grid-full">
-            <label>Proveedor *</label>
-            <input className="input" value={proveedorNombre}
-              onChange={(e) => setProveedorNombre(e.target.value)}
-              placeholder="USG, Truper, Deacero..." />
-            <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "2px 0 0" }}>
-              Si no existe, se crea automáticamente.
-            </p>
-          </div>
           <div>
             <label>Folio de factura</label>
             <input className="input" value={folio} onChange={(e) => setFolio(e.target.value)}
-              placeholder="A89271" />
+              placeholder="A89271" autoFocus />
           </div>
           <div>
             <label>Fecha llegada</label>
@@ -542,21 +533,29 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
             <input className="input" type="date" value={fechaVence}
               onChange={(e) => setFechaVence(e.target.value)} />
           </div>
-          <div></div>
           <div>
-            <label>Monto total *</label>
+            <label>Empresa (proveedor) *</label>
+            <input className="input" value={proveedorNombre}
+              onChange={(e) => setProveedorNombre(e.target.value)}
+              placeholder="USG, Truper, Deacero..." />
+            <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "2px 0 0" }}>
+              Si no existe, se crea automáticamente.
+            </p>
+          </div>
+          <div className="form-grid-full">
+            <label>Observaciones (Obs)</label>
+            <input className="input" value={obs} onChange={(e) => setObs(e.target.value)}
+              placeholder="tablaroca, herramienta, pedido obra..." />
+          </div>
+          <div>
+            <label>Monto *</label>
             <input className="input" type="number" step="0.01" value={monto}
               onChange={(e) => setMonto(+e.target.value)} />
           </div>
           <div>
-            <label>Ya saldado (si aplica)</label>
+            <label>Saldado (ya pagado)</label>
             <input className="input" type="number" step="0.01" value={saldado}
               onChange={(e) => setSaldado(+e.target.value)} />
-          </div>
-          <div className="form-grid-full">
-            <label>Observaciones</label>
-            <input className="input" value={obs} onChange={(e) => setObs(e.target.value)}
-              placeholder="tablaroca, herramienta, pedido obra..." />
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 20 }}>

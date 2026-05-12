@@ -560,8 +560,8 @@ def export_cartera_proveedores_xlsx(
     ws["A2"].font = Font(italic=True, size=10, color="6B7280")
     ws.merge_cells("A2:H2")
 
-    headers = ["Folio factura", "Llegada", "Vence", "Proveedor",
-               "Observaciones", "Monto", "Saldado", "Saldo"]
+    headers = ["Folio", "Fecha llegada", "Fecha vence", "Empresa",
+               "Obs", "Monto", "Saldado", "Saldo"]
     for col, h in enumerate(headers, start=1):
         c = ws.cell(row=4, column=col, value=h)
         c.font = Font(bold=True, color="FFFFFF")
