@@ -23,6 +23,7 @@ import AutoFactura from "./pages/AutoFactura";
 import Cotizaciones from "./pages/Cotizaciones";
 import CorteCaja from "./pages/CorteCaja";
 import CotizacionPublica from "./pages/CotizacionPublica";
+import ConvertirRemisiones from "./pages/ConvertirRemisiones";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -45,6 +46,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/ventas" element={<Ventas />} />
           <Route path="/cotizaciones" element={<Cotizaciones />} />
           <Route path="/cot/:folio" element={<CotizacionPublica />} />
+          <Route path="/convertir-remisiones" element={<ConvertirRemisiones />} />
           <Route path="/corte" element={<CorteCaja />} />
           <Route path="/productos" element={<Productos />} />
           <Route path="/clientes" element={<Clientes />} />

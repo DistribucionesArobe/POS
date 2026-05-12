@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
@@ -10,7 +11,9 @@ type CfdiInfo = {
 };
 type VentaT = {
   id: number; folio: string; tipo: string; estatus: string;
-  cliente_id: number; fecha: string; total: number;
+  cliente_id: number; cliente_nombre?: string; cliente_rfc?: string | null;
+  fecha: string; total: number; saldo?: number; facturada?: boolean;
+  metodo_pago_sat?: string;
   cfdi?: CfdiInfo | null;
   conceptos?: any[];
 };
@@ -25,8 +28,12 @@ const MOTIVOS_CANCELACION = [
 ];
 
 export default function Ventas() {
+  const nav = useNavigate();
   const [ventas, setVentas] = useState<VentaT[]>([]);
   const [filtroTipo, setFiltroTipo] = useState<string>("");
+  const [busquedaCliente, setBusquedaCliente] = useState<string>("");
+  const [soloPendientes, setSoloPendientes] = useState<boolean>(false);
+  const [seleccionadas, setSeleccionadas] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<number | null>(null);
 
   // Modal de cancelacion
@@ -42,7 +49,12 @@ export default function Ventas() {
 
   async function cargar() {
     const r = await api.get("/api/ventas", {
-      params: { tipo: filtroTipo || undefined, limit: 100 },
+      params: {
+        tipo: filtroTipo || undefined,
+        q: busquedaCliente || undefined,
+        solo_pendientes: soloPendientes || undefined,
+        limit: 200,
+      },
     });
     const lista: VentaT[] = r.data;
     await Promise.all(
@@ -58,9 +70,60 @@ export default function Ventas() {
         })
     );
     setVentas(lista);
+    setSeleccionadas(new Set());
   }
 
-  useEffect(() => { cargar(); }, [filtroTipo]);
+  useEffect(() => { cargar(); }, [filtroTipo, soloPendientes]);
+
+  // Recargar cuando cambia búsqueda (debounce)
+  useEffect(() => {
+    const t = setTimeout(() => cargar(), 300);
+    return () => clearTimeout(t);
+  }, [busquedaCliente]);
+
+  // Agrupado por cliente para el caso de Remisiones
+  const ventasPorCliente = useMemo(() => {
+    const map: Record<number, { cliente: string; rfc: string | null; total: number; saldo: number; n: number }> = {};
+    for (const v of ventas) {
+      if (!map[v.cliente_id]) {
+        map[v.cliente_id] = {
+          cliente: v.cliente_nombre || `#${v.cliente_id}`,
+          rfc: v.cliente_rfc ?? null,
+          total: 0, saldo: 0, n: 0,
+        };
+      }
+      map[v.cliente_id].total += v.total;
+      map[v.cliente_id].saldo += v.saldo || 0;
+      map[v.cliente_id].n += 1;
+    }
+    return map;
+  }, [ventas]);
+
+  // Validacion: las seleccionadas deben ser todas del mismo cliente y todas REMISIONES sin facturar
+  const seleccionadasArr = ventas.filter((v) => seleccionadas.has(v.id));
+  const todasRemision = seleccionadasArr.length > 0 && seleccionadasArr.every((v) => v.tipo === "REMISION" && !v.facturada);
+  const mismoCliente = new Set(seleccionadasArr.map((v) => v.cliente_id)).size === 1;
+  const puedeConvertir = todasRemision && mismoCliente;
+
+  function toggleSel(id: number) {
+    const nuevo = new Set(seleccionadas);
+    if (nuevo.has(id)) nuevo.delete(id); else nuevo.add(id);
+    setSeleccionadas(nuevo);
+  }
+  function selAllVisibles() {
+    const remisionesVisibles = ventas.filter((v) => v.tipo === "REMISION" && !v.facturada).map((v) => v.id);
+    setSeleccionadas(new Set(remisionesVisibles));
+  }
+  function selNada() { setSeleccionadas(new Set()); }
+
+  function convertirSeleccionadas() {
+    if (!puedeConvertir) return;
+    const ids = seleccionadasArr.map((v) => v.id).join(",");
+    nav(`/convertir-remisiones?ids=${ids}`);
+  }
+  function convertirUna(v: VentaT) {
+    nav(`/convertir-remisiones?ids=${v.id}`);
+  }
 
   async function timbrar(documento_id: number) {
     if (!confirm("Timbrar esta factura ahora? Se emitira un CFDI real.")) return;
@@ -228,29 +291,96 @@ export default function Ventas() {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
+  const esRemisionFiltro = filtroTipo === "REMISION";
+
   return (
     <Layout title="Mis ventas" subtitle={`${ventas.length} documentos`}
       actions={<button className="btn-icon" onClick={exportarVentas}>Exportar XLSX</button>}>
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="toolbar" style={{ marginBottom: 0 }}>
-          <select className="input" style={{ maxWidth: 240 }} value={filtroTipo}
+        <div className="toolbar" style={{ marginBottom: 0, flexWrap: "wrap", gap: 8 }}>
+          <select className="input" style={{ maxWidth: 220 }} value={filtroTipo}
             onChange={(e) => setFiltroTipo(e.target.value)}>
             <option value="">Todos los tipos</option>
             <option value="TICKET">Tickets</option>
             <option value="REMISION">Remisiones</option>
             <option value="FACTURA">Facturas</option>
-            <option value="NOTA_CREDITO">Notas de credito</option>
+            <option value="NOTA_CREDITO">Notas de crédito</option>
           </select>
+          <input className="input" placeholder="Buscar por cliente, RFC o folio..."
+            value={busquedaCliente} onChange={(e) => setBusquedaCliente(e.target.value)}
+            style={{ flex: 1, minWidth: 240 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={soloPendientes}
+              onChange={(e) => setSoloPendientes(e.target.checked)} />
+            Solo pendientes de facturar
+          </label>
         </div>
       </div>
+
+      {/* Banner cuando filtro = REMISION: muestra agrupado por cliente */}
+      {esRemisionFiltro && Object.keys(ventasPorCliente).length > 0 && (
+        <div className="card" style={{ marginBottom: 16, background: "#fef3c7" }}>
+          <h3 className="card-header">Resumen por cliente</h3>
+          <table>
+            <thead>
+              <tr><th>Cliente</th><th>RFC</th><th>Docs</th>
+                <th style={{ textAlign: "right" }}>Total</th>
+                <th style={{ textAlign: "right" }}>Saldo</th></tr>
+            </thead>
+            <tbody>
+              {Object.entries(ventasPorCliente).map(([cid, g]) => (
+                <tr key={cid}>
+                  <td><strong>{g.cliente}</strong></td>
+                  <td><code>{g.rfc || "—"}</code></td>
+                  <td>{g.n}</td>
+                  <td style={{ textAlign: "right" }}>{fmt(g.total)}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: g.saldo > 0 ? "var(--color-danger)" : "var(--color-success)" }}>
+                    {fmt(g.saldo)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Barra de acciones cuando hay seleccionadas */}
+      {esRemisionFiltro && seleccionadas.size > 0 && (
+        <div style={{ position: "sticky", top: 0, background: "#1e293b", color: "white",
+          padding: "10px 16px", borderRadius: 8, marginBottom: 12, zIndex: 10,
+          display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <strong>{seleccionadas.size} remisión(es) seleccionada(s)</strong>
+          {puedeConvertir ? (
+            <button className="btn" onClick={convertirSeleccionadas}>
+              → Convertir a Ticket / Factura
+            </button>
+          ) : (
+            <span style={{ fontSize: 12, color: "#fca5a5" }}>
+              {!mismoCliente ? "⚠ Selecciona del mismo cliente" : "⚠ Solo remisiones no facturadas"}
+            </span>
+          )}
+          <button onClick={selNada}
+            style={{ marginLeft: "auto", background: "transparent", color: "white", border: "1px solid #475569", padding: "4px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+            Limpiar
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <table>
           <thead>
             <tr>
+              {esRemisionFiltro && (
+                <th style={{ width: 30 }}>
+                  <input type="checkbox"
+                    checked={seleccionadas.size > 0 && seleccionadas.size === ventas.filter((v) => v.tipo === "REMISION" && !v.facturada).length}
+                    onChange={(e) => e.target.checked ? selAllVisibles() : selNada()} />
+                </th>
+              )}
               <th>Folio</th><th>Tipo</th><th>Estatus</th>
               <th>Cliente</th><th>Fecha</th>
               <th style={{ textAlign: "right" }}>Total</th>
+              {esRemisionFiltro && <th style={{ textAlign: "right" }}>Saldo</th>}
               <th>CFDI</th><th>Acciones</th>
             </tr>
           </thead>
@@ -264,14 +394,38 @@ export default function Ventas() {
               }[v.tipo] || "";
               const isFactura = v.tipo === "FACTURA";
               const timbrada = isFactura && v.cfdi && !v.cfdi.cancelado;
+              const isRemision = v.tipo === "REMISION";
               return (
-                <tr key={v.id}>
+                <tr key={v.id} style={{ background: v.facturada ? "#f3f4f6" : undefined }}>
+                  {esRemisionFiltro && (
+                    <td>
+                      {isRemision && !v.facturada && (
+                        <input type="checkbox" checked={seleccionadas.has(v.id)}
+                          onChange={() => toggleSel(v.id)} />
+                      )}
+                    </td>
+                  )}
                   <td><code>{v.folio}</code></td>
-                  <td><span className={`badge ${tipoBadge}`}>{v.tipo}</span></td>
+                  <td>
+                    <span className={`badge ${tipoBadge}`}>{v.tipo}</span>
+                    {isFactura && v.metodo_pago_sat === "PPD" && (
+                      <span className="badge badge-warning" style={{ marginLeft: 4 }}>PPD</span>
+                    )}
+                    {v.facturada && <span className="badge" style={{ marginLeft: 4, fontSize: 10 }}>FACTURADA</span>}
+                  </td>
                   <td>{v.estatus}</td>
-                  <td>#{v.cliente_id}</td>
+                  <td>
+                    <strong>{v.cliente_nombre || `#${v.cliente_id}`}</strong>
+                    {v.cliente_rfc && <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{v.cliente_rfc}</div>}
+                  </td>
                   <td>{new Date(v.fecha).toLocaleDateString("es-MX")}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(v.total)}</td>
+                  {esRemisionFiltro && (
+                    <td style={{ textAlign: "right", fontWeight: 600,
+                      color: (v.saldo || 0) > 0 ? "var(--color-danger)" : "var(--color-text-muted)" }}>
+                      {fmt(v.saldo || 0)}
+                    </td>
+                  )}
                   <td>
                     {!isFactura ? <span style={{ color: "var(--color-text-muted)" }}>—</span> :
                       timbrada ? (
@@ -289,6 +443,12 @@ export default function Ventas() {
                     <button className="btn-icon" onClick={() => descargarPdfInterno(v.id, v.folio)}>
                       PDF
                     </button>
+                    {isRemision && !v.facturada && (
+                      <button className="btn btn-sm" onClick={() => convertirUna(v)}
+                        style={{ background: "var(--color-success)" }}>
+                        → Facturar / Ticket
+                      </button>
+                    )}
                     {isFactura && !timbrada && !v.cfdi?.cancelado && (
                       <button className="btn btn-sm" disabled={busy === v.id}
                         onClick={() => timbrar(v.id)}>
