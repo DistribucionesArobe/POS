@@ -51,6 +51,83 @@ export default function TableroCxP() {
   const [editandoPanel, setEditandoPanel] = useState(false);
   const [panelDraft, setPanelDraft] = useState<any>(null);
   const [abonando, setAbonando] = useState<CxP | null>(null);
+  // Edicion doble click: {cxp_id, campo}
+  const [editing, setEditing] = useState<{ id: number; field: string } | null>(null);
+  const [editValue, setEditValue] = useState<string>("");
+
+  async function guardarEdit(cxp: CxP) {
+    if (!editing) return;
+    const field = editing.field;
+    let payload: any = {};
+
+    if (field === "folio_factura") {
+      payload.folio_factura = editValue.trim() || null;
+    } else if (field === "observaciones") {
+      payload.observaciones = editValue.trim() || null;
+    } else if (field === "fecha_recepcion" || field === "fecha_vencimiento") {
+      if (!editValue) {
+        payload[field] = null;
+      } else {
+        // editValue es "YYYY-MM-DD", lo convertimos a ISO datetime
+        payload[field] = new Date(editValue + "T00:00:00").toISOString();
+      }
+    } else if (field === "saldado") {
+      const n = +editValue;
+      if (isNaN(n) || n < 0) return alert("Saldado inválido");
+      if (n > cxp.monto_original) return alert("Saldado no puede ser mayor al monto");
+      payload.saldado = n;
+    } else if (field === "monto") {
+      const n = +editValue;
+      if (isNaN(n) || n <= 0) return alert("Monto inválido");
+      // Para cambiar monto, recalculamos saldo = monto - saldado actual
+      // Pero el endpoint solo acepta saldado, así que necesitamos otra ruta
+      // Por simplicidad: solo permitir cambiar monto si no hay abonos
+      if (cxp.saldado > 0 && !cxp.manual) {
+        return alert("No se puede cambiar monto si ya tiene abonos");
+      }
+      // Recalcular saldado y enviar
+      payload.saldado = cxp.saldado;
+      payload.monto_original = n; // backend no lo acepta hoy, pero lo agregamos abajo
+      return alert("Para cambiar monto, usa Captura rápida con un nuevo registro");
+    }
+    try {
+      await api.patch(`/api/cxp/manual/${cxp.cxp_id}`, payload);
+      setEditing(null);
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  function iniciarEdit(c: CxP, field: string, current: string) {
+    setEditing({ id: c.cxp_id, field });
+    setEditValue(current);
+  }
+
+  function celdaEdit(c: CxP, field: string, valorVisible: string, valorEdit?: string) {
+    const isEditing = editing?.id === c.cxp_id && editing.field === field;
+    if (!isEditing) {
+      return (
+        <span onDoubleClick={() => iniciarEdit(c, field, valorEdit ?? valorVisible)}
+          style={{ cursor: "pointer" }} title="Doble click para editar">
+          {valorVisible || <span style={{ color: "#cbd5e1" }}>—</span>}
+        </span>
+      );
+    }
+    const inputType = field === "fecha_recepcion" || field === "fecha_vencimiento" ? "date" :
+                      field === "saldado" || field === "monto" ? "number" : "text";
+    return (
+      <input autoFocus type={inputType} step="0.01"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={() => guardarEdit(c)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); guardarEdit(c); }
+          if (e.key === "Escape") setEditing(null);
+        }}
+        style={{ width: "100%", padding: 4, fontSize: 12, border: "2px solid var(--color-primary)" }} />
+    );
+  }
 
   async function cargar() {
     const [t, c, d] = await Promise.all([
@@ -277,21 +354,35 @@ export default function TableroCxP() {
               </td></tr>
             ) : cxps.map((c) => {
               const vencida = esVencida(c);
+              const fLleg = c.fecha_recepcion ? new Date(c.fecha_recepcion).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : "";
+              const fVenc = c.fecha_vencimiento ? new Date(c.fecha_vencimiento).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : "";
+              const fLlegEdit = c.fecha_recepcion ? c.fecha_recepcion.slice(0, 10) : "";
+              const fVencEdit = c.fecha_vencimiento ? c.fecha_vencimiento.slice(0, 10) : "";
               return (
                 <tr key={c.cxp_id} style={{
                   background: c.pagado ? "#f0fdf4" : (vencida ? "#fee2e2" : "white"),
                 }}>
-                  <td style={td}>{c.fecha_recepcion ? new Date(c.fecha_recepcion).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : "—"}</td>
-                  <td style={td}><code style={{ fontSize: 12 }}>{c.folio_factura || c.compra_folio || ""}</code></td>
+                  <td style={td}>{celdaEdit(c, "fecha_recepcion", fLleg, fLlegEdit)}</td>
                   <td style={td}>
-                    {c.fecha_vencimiento ? new Date(c.fecha_vencimiento).toLocaleDateString("es-MX", { day: "2-digit", month: "short" }) : ""}
+                    {editing?.id === c.cxp_id && editing.field === "folio_factura"
+                      ? celdaEdit(c, "folio_factura", c.folio_factura || "")
+                      : <code style={{ fontSize: 12, cursor: "pointer" }}
+                          onDoubleClick={() => iniciarEdit(c, "folio_factura", c.folio_factura || "")}>
+                          {c.folio_factura || c.compra_folio || <span style={{ color: "#cbd5e1" }}>—</span>}
+                        </code>
+                    }
+                  </td>
+                  <td style={td}>
+                    {celdaEdit(c, "fecha_vencimiento", fVenc, fVencEdit)}
                     {vencida && <span className="badge badge-danger" style={{ marginLeft: 4, fontSize: 10 }}>VENCIDA</span>}
                   </td>
                   <td style={{ ...td, fontWeight: 600 }}>{c.proveedor}</td>
-                  <td style={{ ...td, fontSize: 12, color: "var(--color-text-secondary)" }}>{c.observaciones || ""}</td>
+                  <td style={{ ...td, fontSize: 12, color: "var(--color-text-secondary)" }}>
+                    {celdaEdit(c, "observaciones", c.observaciones || "")}
+                  </td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(c.monto_original)}</td>
                   <td style={{ ...td, textAlign: "right", color: "var(--color-text-muted)" }}>
-                    {c.saldado > 0 ? fmt(c.saldado) : ""}
+                    {celdaEdit(c, "saldado", c.saldado > 0 ? fmt(c.saldado) : "", String(c.saldado))}
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700,
                     color: c.pagado ? "var(--color-success)" : "var(--color-danger)" }}>

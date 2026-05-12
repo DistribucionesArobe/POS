@@ -143,24 +143,17 @@ export default function Compras() {
   return (
     <Layout
       title="Compras"
-      subtitle="Recepción de mercancía y cuentas por pagar"
+      subtitle="Recepción de mercancía (afecta inventario)"
       actions={<button className="btn" onClick={abrirNueva}>+ Nueva compra</button>}
     >
-      <div className="card" style={{ marginBottom: 12, padding: 0 }}>
-        <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
-          <button onClick={() => setTab("compras")}
-            style={{
-              padding: "12px 24px", background: tab === "compras" ? "white" : "transparent",
-              borderBottom: tab === "compras" ? "2px solid var(--color-primary)" : "2px solid transparent",
-              border: 0, cursor: "pointer", fontWeight: 600, color: tab === "compras" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            }}>Compras ({compras.length})</button>
-          <button onClick={() => setTab("cxp")}
-            style={{
-              padding: "12px 24px", background: tab === "cxp" ? "white" : "transparent",
-              borderBottom: tab === "cxp" ? "2px solid var(--color-primary)" : "2px solid transparent",
-              border: 0, cursor: "pointer", fontWeight: 600, color: tab === "cxp" ? "var(--color-primary)" : "var(--color-text-secondary)",
-            }}>Cuentas por pagar ({cxp.length})</button>
+      <div className="card" style={{ marginBottom: 12, background: "#dbeafe", border: "1px solid #3b82f6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <strong>¿Buscas Cuentas por Pagar?</strong>
+          <p style={{ margin: "2px 0 0", fontSize: 13, color: "#1e40af" }}>
+            La gestión de CxP (a quién debes, cuánto, vencimientos) ahora vive en <strong>Tablero CxP</strong>.
+          </p>
         </div>
+        <a href="/cxp-tablero" className="btn">Ir al Tablero CxP →</a>
       </div>
 
       {mostrarForm && (
@@ -264,34 +257,33 @@ export default function Compras() {
         </div>
       )}
 
-      {tab === "compras" && (
-        <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Folio</th><th>Proveedor</th><th>Factura prov.</th>
-                <th>Fecha</th>
-                <th style={{ textAlign: "right" }}>Total</th>
-                <th>Estatus</th>
+      <div className="card">
+        <h3 className="card-header">Compras registradas con inventario ({compras.length})</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Folio</th><th>Proveedor</th><th>Factura prov.</th>
+              <th>Fecha</th>
+              <th style={{ textAlign: "right" }}>Total</th>
+              <th>Estatus</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compras.map((c) => (
+              <tr key={c.id}>
+                <td><code>{c.folio}</code></td>
+                <td>#{c.proveedor_id}</td>
+                <td>{c.folio_factura_proveedor || "-"}</td>
+                <td>{new Date(c.fecha_recepcion).toLocaleDateString("es-MX")}</td>
+                <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(c.total)}</td>
+                <td><span className={`badge ${c.estatus === "PAGADA" ? "badge-success" : "badge-warning"}`}>{c.estatus}</span></td>
               </tr>
-            </thead>
-            <tbody>
-              {compras.map((c) => (
-                <tr key={c.id}>
-                  <td><code>{c.folio}</code></td>
-                  <td>#{c.proveedor_id}</td>
-                  <td>{c.folio_factura_proveedor || "-"}</td>
-                  <td>{new Date(c.fecha_recepcion).toLocaleDateString("es-MX")}</td>
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(c.total)}</td>
-                  <td><span className={`badge ${c.estatus === "PAGADA" ? "badge-success" : "badge-warning"}`}>{c.estatus}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-      {tab === "cxp" && (
+      {false && (
         <div className="card">
           <table>
             <thead>
