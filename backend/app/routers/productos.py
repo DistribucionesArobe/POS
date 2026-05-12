@@ -310,6 +310,79 @@ def actualizar_precio(
     return {"ok": True, "precio_publico": float(v.precio_publico)}
 
 
+@router.patch("/{producto_id}")
+def actualizar_producto(
+    producto_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Edita campos del producto: nombre, categoria, marca, clave_prod_serv_sat."""
+    p = db.get(Producto, producto_id)
+    if not p or p.empresa_id != empresa_id:
+        raise HTTPException(404, "Producto no existe")
+    campos_editables = {"nombre", "categoria", "marca", "clave_prod_serv_sat"}
+    for k, val in payload.items():
+        if k in campos_editables:
+            setattr(p, k, val if val != "" else None)
+    if not p.nombre:
+        raise HTTPException(400, "El nombre es obligatorio")
+    db.commit()
+    return {"ok": True, "id": p.id}
+
+
+@router.patch("/variantes/{variante_id}")
+def actualizar_variante(
+    variante_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Edita variante: sku, presentacion, unidad, clave_unidad_sat,
+    precio_publico, precio_mayoreo, costo_promedio, stock_minimo, activo."""
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+
+    campos_str = {"sku", "presentacion", "unidad", "clave_unidad_sat"}
+    campos_num = {"precio_publico", "precio_mayoreo", "costo_promedio", "stock_minimo"}
+    campos_bool = {"activo"}
+
+    for k, val in payload.items():
+        if k in campos_str:
+            if val == "" and k != "sku":
+                val = None
+            setattr(v, k, val)
+        elif k in campos_num:
+            if val is None or val == "":
+                continue
+            setattr(v, k, float(val))
+        elif k in campos_bool:
+            setattr(v, k, bool(val))
+
+    if not v.sku:
+        raise HTTPException(400, "El SKU es obligatorio")
+
+    # Si cambio el SKU, verificar que no exista otra variante con ese SKU en la empresa
+    if "sku" in payload:
+        dup = (
+            db.query(VarianteProducto)
+            .join(Producto, Producto.id == VarianteProducto.producto_id)
+            .filter(Producto.empresa_id == empresa_id)
+            .filter(VarianteProducto.sku == v.sku)
+            .filter(VarianteProducto.id != v.id)
+            .first()
+        )
+        if dup:
+            raise HTTPException(400, f"Ya existe otra variante con SKU '{v.sku}'")
+
+    db.commit()
+    return {"ok": True, "id": v.id}
+
+
 @router.delete("/variantes/{variante_id}")
 def desactivar_variante(
     variante_id: int,

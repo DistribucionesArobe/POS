@@ -45,6 +45,9 @@ export default function Productos() {
     precio_publico: 0, costo_promedio: 0,
   });
 
+  // Modal de edicion full
+  const [editandoVar, setEditandoVar] = useState<{ producto: ProductoT; variante: Variante } | null>(null);
+
   async function cargar() {
     const r = await api.get("/api/productos", { params: { q: busqueda || undefined } });
     setProductos(r.data);
@@ -470,7 +473,10 @@ export default function Productos() {
                                 </span>
                               </td>
                               <td>
-                                <button className="btn-icon" onClick={() => cambiarPrecio(v.id, v.precio_publico)} style={{ marginRight: 2 }}>$</button>
+                                <button className="btn-icon" onClick={() => setEditandoVar({ producto: p, variante: v })}
+                                  title="Editar producto y variante" style={{ marginRight: 2 }}>✎ Editar</button>
+                                <button className="btn-icon" onClick={() => cambiarPrecio(v.id, v.precio_publico)}
+                                  title="Cambiar precio rápido" style={{ marginRight: 2 }}>$</button>
                                 {v.activo && <button className="btn-icon" onClick={() => desactivar(v.id)} title="Desactivar (mantiene historial)" style={{ marginRight: 2 }}>×</button>}
                                 <button className="btn-icon" onClick={() => borrarPermanente(v.id, v.sku)} title="Borrar permanente (solo sin historial)" style={{ color: "var(--color-danger)" }}>🗑</button>
                               </td>
@@ -505,6 +511,156 @@ export default function Productos() {
           })
         )}
       </div>
+
+      {editandoVar && (
+        <EditarVarianteModal
+          producto={editandoVar.producto}
+          variante={editandoVar.variante}
+          onClose={() => setEditandoVar(null)}
+          onSaved={() => { setEditandoVar(null); cargar(); }}
+        />
+      )}
     </Layout>
+  );
+}
+
+
+function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
+  producto: ProductoT; variante: Variante;
+  onClose: () => void; onSaved: () => void;
+}) {
+  // Producto fields
+  const [nombre, setNombre] = useState(producto.nombre);
+  const [categoria, setCategoria] = useState(producto.categoria || "");
+  const [marca, setMarca] = useState(producto.marca || "");
+  const [claveSat, setClaveSat] = useState(producto.clave_prod_serv_sat || "");
+
+  // Variante fields
+  const [sku, setSku] = useState(variante.sku);
+  const [presentacion, setPresentacion] = useState(variante.presentacion);
+  const [unidad, setUnidad] = useState(variante.unidad);
+  const [precioPublico, setPrecioPublico] = useState(variante.precio_publico);
+  const [precioMayoreo, setPrecioMayoreo] = useState(variante.precio_mayoreo ?? 0);
+  const [costoPromedio, setCostoPromedio] = useState(variante.costo_promedio);
+  const [stockMinimo, setStockMinimo] = useState(variante.stock_minimo);
+  const [activo, setActivo] = useState(variante.activo);
+  const [busy, setBusy] = useState(false);
+
+  async function guardar() {
+    if (!nombre.trim()) return alert("El nombre del producto es obligatorio");
+    if (!sku.trim()) return alert("El SKU es obligatorio");
+    setBusy(true);
+    try {
+      await api.patch(`/api/productos/${producto.id}`, {
+        nombre: nombre.trim(),
+        categoria: categoria.trim() || null,
+        marca: marca.trim() || null,
+        clave_prod_serv_sat: claveSat.trim() || null,
+      });
+      await api.patch(`/api/productos/variantes/${variante.id}`, {
+        sku: sku.trim(),
+        presentacion: presentacion.trim(),
+        unidad: unidad.trim(),
+        precio_publico: +precioPublico,
+        precio_mayoreo: +precioMayoreo || null,
+        costo_promedio: +costoPromedio,
+        stock_minimo: +stockMinimo,
+        activo,
+      });
+      onSaved();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex",
+      alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background: "white", maxWidth: 720, width: "94%", maxHeight: "90vh",
+          overflow: "auto", padding: 24, borderRadius: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18 }}>Editar producto y variante</h2>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
+              <strong>{producto.nombre}</strong> · {variante.sku}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: "transparent", border: 0, fontSize: 22, cursor: "pointer" }}>×</button>
+        </div>
+
+        <h4 style={{ margin: "12px 0 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>Producto</h4>
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="form-grid-full">
+            <label>Nombre *</label>
+            <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          </div>
+          <div>
+            <label>Familia / Categoría</label>
+            <input className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} />
+          </div>
+          <div>
+            <label>Marca</label>
+            <input className="input" value={marca} onChange={(e) => setMarca(e.target.value)} />
+          </div>
+          <div className="form-grid-full">
+            <label>Clave SAT (8 dígitos)</label>
+            <input className="input" maxLength={8} value={claveSat}
+              onChange={(e) => setClaveSat(e.target.value.replace(/\D/g, ""))} />
+          </div>
+        </div>
+
+        <h4 style={{ margin: "16px 0 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>Variante</h4>
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div>
+            <label>SKU *</label>
+            <input className="input" value={sku} onChange={(e) => setSku(e.target.value)} />
+          </div>
+          <div>
+            <label>Presentación</label>
+            <input className="input" value={presentacion} onChange={(e) => setPresentacion(e.target.value)} />
+          </div>
+          <div>
+            <label>Unidad</label>
+            <input className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)} />
+          </div>
+          <div>
+            <label>Precio público</label>
+            <input className="input" type="number" step="0.01" value={precioPublico}
+              onChange={(e) => setPrecioPublico(+e.target.value)} />
+          </div>
+          <div>
+            <label>Precio mayoreo</label>
+            <input className="input" type="number" step="0.01" value={precioMayoreo}
+              onChange={(e) => setPrecioMayoreo(+e.target.value)} />
+          </div>
+          <div>
+            <label>Costo promedio</label>
+            <input className="input" type="number" step="0.01" value={costoPromedio}
+              onChange={(e) => setCostoPromedio(+e.target.value)} />
+          </div>
+          <div>
+            <label>Stock mínimo</label>
+            <input className="input" type="number" step="1" value={stockMinimo}
+              onChange={(e) => setStockMinimo(+e.target.value)} />
+          </div>
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, cursor: "pointer" }}>
+              <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} />
+              Activo
+            </label>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+          <button className="btn" disabled={busy} onClick={guardar} style={{ flex: 1, justifyContent: "center" }}>
+            {busy ? "Guardando..." : "Guardar cambios"}
+          </button>
+          <button className="btn-icon" onClick={onClose}>Cancelar</button>
+        </div>
+      </div>
+    </div>
   );
 }
