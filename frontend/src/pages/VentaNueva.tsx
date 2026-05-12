@@ -15,7 +15,12 @@ const FORMAS_PAGO_SAT = [
 ];
 
 export default function VentaNueva() {
-  const [tipo, setTipo] = useState<"TICKET" | "REMISION" | "FACTURA">("TICKET");
+  const [tipoSel, setTipoSel] = useState<"TICKET" | "REMISION" | "FACTURA_PUE" | "FACTURA_PPD">("TICKET");
+  const tipo: "TICKET" | "REMISION" | "FACTURA" =
+    tipoSel === "TICKET" ? "TICKET" :
+    tipoSel === "REMISION" ? "REMISION" : "FACTURA";
+  const esCredito = tipoSel === "REMISION" || tipoSel === "FACTURA_PPD";
+  const metodoPagoSat = esCredito ? "PPD" : "PUE";
   const [clienteId, setClienteId] = useState<number>(1);
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
@@ -56,11 +61,11 @@ export default function VentaNueva() {
     setPagos(nuevos.length ? nuevos : [{ forma_pago_sat: "01", monto: total }]);
   }
   function autoPago() {
-    setPagos([{ forma_pago_sat: tipo === "FACTURA" ? "03" : "01", monto: total }]);
+    setPagos([{ forma_pago_sat: tipoSel === "FACTURA_PUE" ? "03" : "01", monto: total }]);
   }
 
   async function guardar() {
-    if (tipo !== "REMISION") {
+    if (!esCredito) {
       if (sumaPagos < total - 0.01) {
         alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
         return;
@@ -68,13 +73,13 @@ export default function VentaNueva() {
     }
     const payload: any = {
       tipo, cliente_id: clienteId,
-      forma_pago_sat: tipo === "FACTURA" ? (pagos[0]?.forma_pago_sat || "03") : "01",
-      metodo_pago_sat: tipo === "REMISION" ? "PPD" : "PUE",
+      forma_pago_sat: esCredito ? "99" : (pagos[0]?.forma_pago_sat || "01"),
+      metodo_pago_sat: metodoPagoSat,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
     };
-    if (tipo !== "REMISION") {
+    if (!esCredito) {
       payload.pagos = pagos.map((p) => ({ forma_pago_sat: p.forma_pago_sat, monto: +p.monto }));
     }
     try {
@@ -97,10 +102,11 @@ export default function VentaNueva() {
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
           <div>
             <label>Tipo de documento</label>
-            <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value as any)}>
-              <option value="TICKET">Ticket</option>
-              <option value="REMISION">Remision (a credito)</option>
-              <option value="FACTURA">Factura CFDI</option>
+            <select className="input" value={tipoSel} onChange={(e) => setTipoSel(e.target.value as any)}>
+              <option value="TICKET">Ticket (al contado)</option>
+              <option value="REMISION">Remisión (a crédito, sin CFDI)</option>
+              <option value="FACTURA_PUE">Factura CFDI - PUE (al contado)</option>
+              <option value="FACTURA_PPD">Factura CFDI - PPD (a crédito)</option>
             </select>
           </div>
           <div>
@@ -184,7 +190,7 @@ export default function VentaNueva() {
                 <strong style={{ fontSize: 18 }}>{fmt(total)}</strong>
               </div>
 
-              {tipo !== "REMISION" && (
+              {!esCredito && (
                 <div style={{ marginTop: 12, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <strong style={{ fontSize: 13 }}>Forma(s) de pago</strong>

@@ -30,7 +30,14 @@ export default function Caja() {
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
   const [showCobrar, setShowCobrar] = useState(false);
-  const [tipo, setTipo] = useState<"TICKET" | "REMISION" | "FACTURA">("TICKET");
+  // Tipo seleccionado en el dropdown. FACTURA_PUE vs FACTURA_PPD se diferencian
+  // por el metodo de pago SAT que se mandara al timbrar.
+  const [tipoSel, setTipoSel] = useState<"TICKET" | "REMISION" | "FACTURA_PUE" | "FACTURA_PPD">("TICKET");
+  const tipo: "TICKET" | "REMISION" | "FACTURA" =
+    tipoSel === "TICKET" ? "TICKET" :
+    tipoSel === "REMISION" ? "REMISION" : "FACTURA";
+  const esCredito = tipoSel === "REMISION" || tipoSel === "FACTURA_PPD";
+  const metodoPagoSat = esCredito ? "PPD" : "PUE";
   const [cliente, setCliente] = useState<ClienteSel>({ id: 1, nombre: "Publico en General" });
   const [showClientePicker, setShowClientePicker] = useState(false);
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
@@ -111,7 +118,7 @@ export default function Caja() {
 
   function abrirCobrar() {
     if (items.length === 0) return;
-    setPagos([{ forma_pago_sat: tipo === "FACTURA" ? "03" : "01", monto: total }]);
+    setPagos([{ forma_pago_sat: tipoSel === "FACTURA_PUE" ? "03" : "01", monto: total }]);
     setShowCobrar(true);
     setTimeout(() => recibidoRef.current?.select(), 100);
   }
@@ -135,9 +142,9 @@ export default function Caja() {
 
   async function cobrar() {
     if (procesando) return;
-    // Validar pagos para TICKET y FACTURA PUE; REMISION es a credito (sin pagos)
-    if (tipo !== "REMISION") {
-      // Se permite pagar MAS del total (la diferencia es cambio); solo falla si paga menos.
+    // Validar pagos solo si se cobra al contado (PUE).
+    // REMISION y FACTURA PPD son a credito, se cobraran despues desde Cartera.
+    if (!esCredito) {
       if (sumaPagos < total - 0.01) {
         alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
         return;
@@ -154,13 +161,14 @@ export default function Caja() {
     setProcesando(true);
     const payload: any = {
       tipo, cliente_id: cliente.id,
-      forma_pago_sat: tipo === "FACTURA" ? (pagos[0]?.forma_pago_sat || "03") : "01",
-      metodo_pago_sat: tipo === "REMISION" ? "PPD" : "PUE",
+      // En PPD el SAT exige forma "99" Por definir
+      forma_pago_sat: esCredito ? "99" : (pagos[0]?.forma_pago_sat || "01"),
+      metodo_pago_sat: metodoPagoSat,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
     };
-    if (tipo !== "REMISION") {
+    if (!esCredito) {
       payload.pagos = pagos.map((p) => ({
         forma_pago_sat: p.forma_pago_sat, monto: +p.monto,
       }));
@@ -214,7 +222,7 @@ export default function Caja() {
       setBusqueda("");
       setSugerencias([]);
       setPagos([{ forma_pago_sat: "01", monto: 0 }]);
-      setTipo("TICKET");
+      setTipoSel("TICKET");
       focus();
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
@@ -414,10 +422,11 @@ export default function Caja() {
             <div className="form-grid">
               <div>
                 <label>Tipo de documento</label>
-                <select className="input" value={tipo} onChange={(e) => setTipo(e.target.value as any)} style={{ fontSize: 16, padding: 10 }}>
-                  <option value="TICKET">Ticket</option>
-                  <option value="REMISION">Remisión (a crédito)</option>
-                  <option value="FACTURA">Factura CFDI</option>
+                <select className="input" value={tipoSel} onChange={(e) => setTipoSel(e.target.value as any)} style={{ fontSize: 16, padding: 10 }}>
+                  <option value="TICKET">Ticket (pago al contado)</option>
+                  <option value="REMISION">Remisión (a crédito, sin CFDI)</option>
+                  <option value="FACTURA_PUE">Factura CFDI - PUE (pago al contado)</option>
+                  <option value="FACTURA_PPD">Factura CFDI - PPD (a crédito)</option>
                 </select>
               </div>
               <div>
@@ -435,7 +444,14 @@ export default function Caja() {
                 )}
               </div>
             </div>
-            {tipo !== "REMISION" && (
+            {esCredito && (
+              <div style={{ marginTop: 16, padding: 14, background: "#fef3c7", borderRadius: 8, fontSize: 13 }}>
+                <strong>{tipoSel === "REMISION" ? "Remisión a crédito" : "Factura PPD a crédito"}:</strong>{" "}
+                no se cobra al momento. Se generará una cuenta por cobrar y la cobrarás desde
+                <strong> Cartera → Abonar</strong>{tipoSel === "FACTURA_PPD" ? ", donde podrás emitir el complemento de pago." : "."}
+              </div>
+            )}
+            {!esCredito && (
               <div style={{ marginTop: 16, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <strong style={{ fontSize: 14 }}>Forma(s) de pago</strong>
@@ -498,7 +514,7 @@ export default function Caja() {
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
               <button onClick={cobrar}
-                disabled={procesando || (tipo !== "REMISION" && sumaPagos < total - 0.01)}
+                disabled={procesando || (!esCredito && sumaPagos < total - 0.01)}
                 style={{
                   flex: 1, padding: 18, fontSize: 18, fontWeight: 700, color: "white",
                   background: procesando ? "#94a3b8" : "var(--color-primary)",
