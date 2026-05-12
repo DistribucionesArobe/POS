@@ -219,8 +219,18 @@ export default function Ventas() {
     }
   }
 
+  async function exportarVentas() {
+    const r = await api.get("/api/reportes/ventas-xlsx", { responseType: "blob" });
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url; a.download = "ventas.xlsx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   return (
-    <Layout title="Mis ventas" subtitle={`${ventas.length} documentos`}>
+    <Layout title="Mis ventas" subtitle={`${ventas.length} documentos`}
+      actions={<button className="btn-icon" onClick={exportarVentas}>Exportar XLSX</button>}>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="toolbar" style={{ marginBottom: 0 }}>
           <select className="input" style={{ maxWidth: 240 }} value={filtroTipo}

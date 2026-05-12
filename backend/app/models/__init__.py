@@ -11,3 +11,4 @@ from app.models.cxc import CuentaPorCobrar, AbonoCxC  # noqa
 from app.models.cxp import CuentaPorPagar, AbonoCxP, Compra, ConceptoCompra  # noqa
 from app.models.cfdi import Cfdi, ComplementoPago  # noqa
 from app.models.cotizacion import Cotizacion  # noqa
+from app.models.corte_caja import CorteCaja  # noqa

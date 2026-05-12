@@ -25,6 +25,7 @@ const items = [
   { to: "/proveedores", label: "Proveedores", icon: Icon.users },
   { to: "/compras", label: "Compras y CxP", icon: Icon.package },
   { to: "/cartera", label: "Cartera", icon: Icon.dollar },
+  { to: "/corte", label: "Corte de caja", icon: Icon.dollar },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }

@@ -13,8 +13,18 @@ export default function Cartera() {
 
   const total = rows.reduce((a, r) => a + r.saldo, 0);
 
+  async function exportar() {
+    const r = await api.get("/api/reportes/cartera-xlsx", { responseType: "blob" });
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url; a.download = "cartera.xlsx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   return (
-    <Layout title="Cartera por cobrar" subtitle={`${rows.length} documentos pendientes - Total ${fmt(total)}`}>
+    <Layout title="Cartera por cobrar" subtitle={`${rows.length} documentos pendientes - Total ${fmt(total)}`}
+      actions={<button className="btn-icon" onClick={exportar}>Exportar XLSX</button>}>
       <div className="card">
         {rows.length === 0 ? (
           <p style={{ color: "var(--color-text-muted)", textAlign: "center", padding: 24, margin: 0 }}>
