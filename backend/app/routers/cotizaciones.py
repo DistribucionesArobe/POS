@@ -252,7 +252,7 @@ def pdf_cotizacion(
     )
 
 
-# === Endpoint publico (para WhatsApp): no auth, busca por folio ===
+# === Endpoints publicos (para WhatsApp): no auth, busca por folio ===
 @router.get("/publica/{folio}")
 def cotizacion_publica(folio: str):
     db = SessionLocal()
@@ -261,17 +261,39 @@ def cotizacion_publica(folio: str):
         if not c:
             raise HTTPException(404, "Cotizacion no encontrada")
         emp = db.get(Empresa, c.empresa_id)
+        cli = db.get(Cliente, c.cliente_id) if c.cliente_id else None
         return {
             "folio": c.folio,
             "fecha": c.fecha.isoformat(),
             "vigencia_hasta": c.vigencia_hasta.isoformat() if c.vigencia_hasta else None,
             "emisor": {"nombre": emp.nombre, "razon_social": emp.razon_social, "rfc": emp.rfc},
-            "cliente": c.nombre_libre or "Cliente",
+            "cliente": (cli.nombre if cli else None) or c.nombre_libre or "Cliente",
             "conceptos": c.conceptos or [],
             "subtotal": float(c.subtotal),
             "iva": float(c.iva),
             "total": float(c.total),
             "estatus": c.estatus,
+            "notas": c.notas,
         }
+    finally:
+        db.close()
+
+
+@router.get("/publica/{folio}/pdf")
+def cotizacion_publica_pdf(folio: str):
+    """Sirve el PDF de la cotizacion sin requerir login (para WhatsApp / cliente final)."""
+    from app.services.pdf_service import generar_pdf_cotizacion
+    db = SessionLocal()
+    try:
+        c = db.query(Cotizacion).filter(Cotizacion.folio == folio).first()
+        if not c:
+            raise HTTPException(404, "Cotizacion no encontrada")
+        cli = db.get(Cliente, c.cliente_id) if c.cliente_id else None
+        emp = db.get(Empresa, c.empresa_id)
+        pdf = generar_pdf_cotizacion(c, cli, emp)
+        return Response(
+            content=pdf, media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename={c.folio}.pdf"},
+        )
     finally:
         db.close()

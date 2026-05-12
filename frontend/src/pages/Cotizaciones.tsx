@@ -47,10 +47,15 @@ export default function Cotizaciones() {
     if (!tel) return;
     const e164 = tel.replace(/\D/g, "");
     const numero = e164.length === 10 ? "52" + e164 : e164;
+    // URL publica de la cotizacion (preferimos facturacion.aceromax.mx si esta configurada,
+    // si no usamos el dominio actual donde corre el POS).
+    const portal = "https://facturacion.aceromax.mx";
+    const linkCot = `${portal}/cot/${c.folio}`;
     const msg = encodeURIComponent(
       `Hola ${c.cliente_nombre}, te comparto tu cotización ${c.folio}:\n\n` +
       `Total: ${fmt(c.total)}\n` +
       `Vigencia: ${c.vigencia_hasta ? new Date(c.vigencia_hasta).toLocaleDateString("es-MX") : "—"}\n\n` +
+      `Velo aquí (con opción de descargar PDF):\n${linkCot}\n\n` +
       `Cualquier duda, respondemos por aquí.\nAceroMAX`
     );
     window.open(`https://wa.me/${numero}?text=${msg}`, "_blank");
