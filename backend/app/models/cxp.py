@@ -55,17 +55,50 @@ class CuentaPorPagar(Base):
     __tablename__ = "cuentas_por_pagar"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int | None] = mapped_column(
+        ForeignKey("empresas.id"), nullable=True, index=True
+    )
     proveedor_id: Mapped[int] = mapped_column(ForeignKey("proveedores.id"), index=True)
-    compra_id: Mapped[int] = mapped_column(ForeignKey("compras.id"), unique=True)
+    # Si proviene de una Compra registrada, se liga. Pero permitimos CxP manuales
+    # sin compra para el flujo tipo Excel (solo control de deudas).
+    compra_id: Mapped[int | None] = mapped_column(
+        ForeignKey("compras.id"), unique=True, nullable=True
+    )
+
+    folio_factura: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    fecha_recepcion: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    observaciones: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     monto_original: Mapped[float] = mapped_column(Numeric(14, 2))
     saldo: Mapped[float] = mapped_column(Numeric(14, 2))
     fecha_vencimiento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     pagado: Mapped[bool] = mapped_column(default=False)
 
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
     abonos: Mapped[list["AbonoCxP"]] = relationship(
         back_populates="cxp", cascade="all, delete-orphan"
     )
+
+
+class PanelCxP(Base):
+    """Snapshot mensual editable del 'tablero' tipo Excel del usuario.
+    Un registro por (empresa, año, mes). Los campos son todos manual."""
+    __tablename__ = "panel_cxp"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+    anio: Mapped[int] = mapped_column()
+    mes: Mapped[int] = mapped_column()  # 1-12
+
+    # Editables tipo Excel
+    venta_objetivo_mes: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    saldo_banco: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    usd_mxn: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class AbonoCxP(Base):
