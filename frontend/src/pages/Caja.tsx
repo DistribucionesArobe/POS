@@ -194,11 +194,18 @@ export default function Caja() {
         setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
       } catch {}
 
+      // Cambio si pagó de más
+      const cambioLinea = sumaPagos > total + 0.01
+        ? `\n\n💵 CAMBIO A DAR: ${fmt(sumaPagos - total)}`
+        : "";
+
       if (cfdiOk) {
         const corr = cfdiOk.correo_enviado_a ? `\nEnviada a ${cfdiOk.correo_enviado_a}` : "";
-        alert(`Factura ${r.data.folio} timbrada.\nUUID: ${cfdiOk.uuid}${corr}`);
+        alert(`Factura ${r.data.folio} timbrada.\nUUID: ${cfdiOk.uuid}${corr}${cambioLinea}`);
       } else if (cfdiErr) {
-        alert(`Venta ${r.data.folio} creada pero NO se timbró:\n${cfdiErr}\n\nReintenta desde Mis ventas.`);
+        alert(`Venta ${r.data.folio} creada pero NO se timbró:\n${cfdiErr}\n\nReintenta desde Mis ventas.${cambioLinea}`);
+      } else if (cambioLinea) {
+        alert(`Ticket ${r.data.folio} cobrado.${cambioLinea}`);
       }
 
       // Reset

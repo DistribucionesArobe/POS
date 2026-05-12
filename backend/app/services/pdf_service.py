@@ -82,25 +82,46 @@ def generar_pdf_documento(doc: DocumentoVenta, cliente: Cliente, empresa: Empres
     elements.append(tt)
     elements.append(Spacer(1, 12))
 
-    # Forma(s) de pago si las hay
+    # Forma(s) de pago + Recibido + Cambio
     pagos = getattr(doc, "pagos", None) or []
     if pagos:
         forma_label = {
             "01": "Efectivo", "02": "Cheque", "03": "Transferencia",
             "04": "T. Crédito", "28": "T. Débito", "99": "Por definir",
         }
+        suma_pagos = round(sum(float(p.monto) for p in pagos), 2)
+        cambio = round(suma_pagos - float(doc.total), 2)
+
         rows = [[forma_label.get(p.forma_pago_sat, p.forma_pago_sat), f"${float(p.monto):,.2f}"]
                 for p in pagos]
-        if len(rows) > 1 or (len(rows) == 1 and rows[0][0] != "Efectivo"):
-            pago_t = Table([["Forma de pago", "Monto"]] + rows, colWidths=[6*cm, 3*cm], hAlign='RIGHT')
-            pago_t.setStyle(TableStyle([
+        # Mostrar el bloque si hay >1 metodo, si la unica forma no es efectivo, o si hay cambio
+        mostrar = len(rows) > 1 or (len(rows) == 1 and rows[0][0] != "Efectivo") or cambio > 0.01
+        if mostrar:
+            data_rows = [["Forma de pago", "Monto"]] + rows
+            # Total cobrado (suma)
+            if len(rows) > 1:
+                data_rows.append(["Recibido", f"${suma_pagos:,.2f}"])
+            if cambio > 0.01:
+                data_rows.append(["CAMBIO", f"${cambio:,.2f}"])
+            pago_t = Table(data_rows, colWidths=[6*cm, 3*cm], hAlign='RIGHT')
+            style = [
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e5e7eb')),
                 ('FONTSIZE', (0,0), (-1,-1), 9),
                 ('ALIGN', (1,0), (1,-1), 'RIGHT'),
                 ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
                 ('TOPPADDING', (0,0), (-1,-1), 3),
                 ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-            ]))
+            ]
+            if cambio > 0.01:
+                # destacar la fila de cambio
+                last = len(data_rows) - 1
+                style += [
+                    ('FONTNAME', (0, last), (-1, last), 'Helvetica-Bold'),
+                    ('BACKGROUND', (0, last), (-1, last), colors.HexColor('#dcfce7')),
+                    ('TEXTCOLOR', (0, last), (-1, last), colors.HexColor('#15803d')),
+                    ('FONTSIZE', (0, last), (-1, last), 11),
+                ]
+            pago_t.setStyle(TableStyle(style))
             elements.append(pago_t)
             elements.append(Spacer(1, 12))
 
