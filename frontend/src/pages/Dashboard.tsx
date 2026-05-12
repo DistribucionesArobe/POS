@@ -11,21 +11,59 @@ const I = {
 };
 
 const fmtMoney = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum = (n: number) => n.toLocaleString("es-MX", { maximumFractionDigits: 1 });
+
+type PeriodoData = {
+  total: number; n: number; ticket_promedio: number;
+  vs_anterior: { total: number; n: number };
+  cambio_pct: number | null;
+};
 
 export default function Dashboard() {
-  const [kpis, setKpis] = useState<any>(null);
-  const [corte, setCorte] = useState<any>(null);
+  const [dash, setDash] = useState<{
+    periodos: { hoy: PeriodoData; semana: PeriodoData; mes: PeriodoData };
+    top_productos: { descripcion: string; cantidad: number; monto: number }[];
+    clientes_nuevos_mes: number;
+    cartera_total: number;
+  } | null>(null);
   const [cartera, setCartera] = useState<any>(null);
+  const [kpis, setKpis] = useState<any>(null);
 
   useEffect(() => {
+    api.get("/api/reportes/dashboard").then((r) => setDash(r.data)).catch(() => {});
     api.get("/api/reportes/kpis").then((r) => setKpis(r.data)).catch(() => {});
-    api.get("/api/reportes/corte-caja").then((r) => setCorte(r.data)).catch(() => {});
     api.get("/api/reportes/antiguedad-cartera").then((r) => setCartera(r.data)).catch(() => {});
   }, []);
 
+  const periodos = dash?.periodos;
+
   return (
-    <Layout title="Dashboard" subtitle="Resumen del dia y cartera">
+    <Layout title="Dashboard" subtitle="Resumen de ventas, cartera y top productos">
       <div className="stat-grid">
+        <StatCard
+          label="Ventas hoy"
+          value={periodos ? fmtMoney(periodos.hoy.total) : "..."}
+          meta={periodos ? `${periodos.hoy.n} ventas · ticket prom ${fmtMoney(periodos.hoy.ticket_promedio)}` : ""}
+          icon={I.trending}
+        />
+        <StatCard
+          label="Ventas esta semana"
+          value={periodos ? fmtMoney(periodos.semana.total) : "..."}
+          meta={periodos ? cambioLabel(periodos.semana.cambio_pct, "vs semana anterior") : ""}
+          icon={I.trending}
+        />
+        <StatCard
+          label="Ventas este mes"
+          value={periodos ? fmtMoney(periodos.mes.total) : "..."}
+          meta={periodos ? cambioLabel(periodos.mes.cambio_pct, "vs mes anterior") : ""}
+          icon={I.trending}
+        />
+        <StatCard
+          label="Cartera por cobrar"
+          value={dash ? fmtMoney(dash.cartera_total) : "..."}
+          meta={kpis ? `${kpis.documentos_pendientes} documentos pendientes` : ""}
+          icon={I.dollar}
+        />
         <StatCard
           label="Productos en stock"
           value={kpis?.productos_stock ?? "..."}
@@ -33,48 +71,44 @@ export default function Dashboard() {
           icon={I.package}
         />
         <StatCard
-          label="Ventas hoy"
-          value={kpis ? fmtMoney(kpis.ventas_hoy) : "..."}
-          meta={kpis ? `${kpis.documentos_hoy} documentos` : ""}
-          icon={I.trending}
-        />
-        <StatCard
-          label="Cartera por cobrar"
-          value={kpis ? fmtMoney(kpis.cartera_total) : "..."}
-          meta={kpis ? `${kpis.documentos_pendientes} pendientes` : ""}
-          icon={I.dollar}
-        />
-        <StatCard
-          label="Clientes activos"
-          value={kpis?.clientes_activos ?? "..."}
-          meta="Total registrados"
+          label="Clientes nuevos este mes"
+          value={dash?.clientes_nuevos_mes ?? "..."}
+          meta={kpis ? `${kpis.clientes_activos} clientes activos total` : ""}
           icon={I.users}
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, marginTop: 16 }}>
         <div className="card">
-          <h3 className="card-header">Corte de caja - hoy</h3>
-          {corte?.por_tipo?.length ? (
+          <h3 className="card-header">Top 10 productos del mes</h3>
+          {dash?.top_productos?.length ? (
             <table>
-              <thead><tr><th>Tipo</th><th>Documentos</th><th style={{ textAlign: "right" }}>Total</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Producto</th>
+                  <th style={{ textAlign: "right" }}>Cantidad</th>
+                  <th style={{ textAlign: "right" }}>Monto</th>
+                </tr>
+              </thead>
               <tbody>
-                {corte.por_tipo.map((r: any) => (
-                  <tr key={r.tipo}>
-                    <td><span className="badge badge-info">{r.tipo}</span></td>
-                    <td>{r.n}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.total)}</td>
+                {dash.top_productos.map((p, i) => (
+                  <tr key={i}>
+                    <td><span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>{i + 1}</span></td>
+                    <td style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.descripcion}</td>
+                    <td style={{ textAlign: "right" }}>{fmtNum(p.cantidad)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(p.monto)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <p style={{ color: "var(--color-text-muted)", margin: 0 }}>Sin ventas todavia hoy.</p>
+            <p style={{ color: "var(--color-text-muted)", margin: 0 }}>Sin ventas este mes todavía.</p>
           )}
         </div>
 
         <div className="card">
-          <h3 className="card-header">Antiguedad de cartera</h3>
+          <h3 className="card-header">Antigüedad de cartera</h3>
           {cartera ? (
             <table>
               <thead><tr><th>Bucket</th><th style={{ textAlign: "right" }}>Saldo</th></tr></thead>
@@ -84,7 +118,7 @@ export default function Dashboard() {
                   const cls = m === 0 ? "" : bucket === "91+" ? "badge-danger" : bucket.startsWith("61") ? "badge-warning" : "badge-success";
                   return (
                     <tr key={bucket}>
-                      <td>{bucket} dias {cls && <span className={`badge ${cls}`} style={{ marginLeft: 6 }}>&nbsp;</span>}</td>
+                      <td>{bucket} días {cls && <span className={`badge ${cls}`} style={{ marginLeft: 6 }}>&nbsp;</span>}</td>
                       <td style={{ textAlign: "right", fontWeight: m > 0 ? 600 : 400, color: m > 0 ? "var(--color-text-primary)" : "var(--color-text-muted)" }}>
                         {fmtMoney(m)}
                       </td>
@@ -98,4 +132,11 @@ export default function Dashboard() {
       </div>
     </Layout>
   );
+}
+
+
+function cambioLabel(pct: number | null, sufijo: string): string {
+  if (pct === null) return `Sin datos ${sufijo}`;
+  const flecha = pct >= 0 ? "▲" : "▼";
+  return `${flecha} ${Math.abs(pct).toFixed(1)}% ${sufijo}`;
 }

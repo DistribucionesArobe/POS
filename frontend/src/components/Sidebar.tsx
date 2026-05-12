@@ -18,6 +18,7 @@ const items = [
   { to: "/", label: "Dashboard", icon: Icon.dashboard },
   { to: "/caja", label: "Caja rapida", icon: Icon.cart },
   { to: "/venta", label: "Nueva venta", icon: Icon.cart },
+  { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list },
   { to: "/productos", label: "Productos", icon: Icon.package },
   { to: "/clientes", label: "Clientes", icon: Icon.users },

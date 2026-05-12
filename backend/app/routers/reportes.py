@@ -6,12 +6,126 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import (
-    DocumentoVenta, CuentaPorCobrar, VarianteProducto, Cliente, Producto,
+    DocumentoVenta, ConceptoVenta, CuentaPorCobrar, VarianteProducto, Cliente, Producto,
 )
-from app.models.venta import EstatusDocumento
+from app.models.venta import EstatusDocumento, TipoDocumento
 from app.services.security import get_active_empresa_id
 
 router = APIRouter()
+
+
+def _rango(periodo: str) -> tuple[datetime, datetime]:
+    """Devuelve (inicio, fin) UTC para el periodo dado."""
+    today = datetime.utcnow().date()
+    if periodo == "hoy":
+        inicio = datetime.combine(today, datetime.min.time())
+        return inicio, inicio + timedelta(days=1)
+    if periodo == "semana":
+        lunes = today - timedelta(days=today.weekday())
+        inicio = datetime.combine(lunes, datetime.min.time())
+        return inicio, inicio + timedelta(days=7)
+    if periodo == "mes":
+        primero = today.replace(day=1)
+        inicio = datetime.combine(primero, datetime.min.time())
+        # primer dia del mes siguiente
+        if primero.month == 12:
+            sig = primero.replace(year=primero.year + 1, month=1)
+        else:
+            sig = primero.replace(month=primero.month + 1)
+        return inicio, datetime.combine(sig, datetime.min.time())
+    # default: hoy
+    inicio = datetime.combine(today, datetime.min.time())
+    return inicio, inicio + timedelta(days=1)
+
+
+@router.get("/dashboard")
+def dashboard(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """KPIs + ventas por periodo + top productos + comparativa vs periodo anterior."""
+
+    def _resumen(ini: datetime, fin: datetime) -> dict:
+        q = db.query(
+            func.coalesce(func.sum(DocumentoVenta.total), 0).label("total"),
+            func.count().label("n"),
+            func.coalesce(func.avg(DocumentoVenta.total), 0).label("avg"),
+        ).filter(
+            DocumentoVenta.empresa_id == empresa_id,
+            DocumentoVenta.fecha >= ini,
+            DocumentoVenta.fecha < fin,
+            DocumentoVenta.tipo.in_([
+                TipoDocumento.TICKET.value, TipoDocumento.FACTURA.value,
+                TipoDocumento.REMISION.value,
+            ]),
+            DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
+        ).one()
+        return {"total": float(q.total or 0), "n": q.n, "ticket_promedio": float(q.avg or 0)}
+
+    periodos: dict[str, dict] = {}
+    for p in ("hoy", "semana", "mes"):
+        ini, fin = _rango(p)
+        actual = _resumen(ini, fin)
+        # Periodo anterior del mismo largo
+        delta = fin - ini
+        prev = _resumen(ini - delta, ini)
+        if prev["total"] > 0:
+            cambio_pct = (actual["total"] - prev["total"]) / prev["total"] * 100
+        else:
+            cambio_pct = None
+        periodos[p] = {**actual, "vs_anterior": prev, "cambio_pct": cambio_pct}
+
+    # Top productos del mes por monto
+    ini_mes, fin_mes = _rango("mes")
+    top = (
+        db.query(
+            ConceptoVenta.descripcion,
+            func.sum(ConceptoVenta.cantidad).label("cant"),
+            func.sum(ConceptoVenta.importe).label("monto"),
+        )
+        .join(DocumentoVenta, DocumentoVenta.id == ConceptoVenta.documento_id)
+        .filter(
+            DocumentoVenta.empresa_id == empresa_id,
+            DocumentoVenta.fecha >= ini_mes,
+            DocumentoVenta.fecha < fin_mes,
+            DocumentoVenta.tipo.in_([
+                TipoDocumento.TICKET.value, TipoDocumento.FACTURA.value,
+                TipoDocumento.REMISION.value,
+            ]),
+            DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value,
+        )
+        .group_by(ConceptoVenta.descripcion)
+        .order_by(func.sum(ConceptoVenta.importe).desc())
+        .limit(10)
+        .all()
+    )
+
+    # Clientes nuevos del mes
+    nuevos = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        Cliente.creado_en >= ini_mes,
+        Cliente.creado_en < fin_mes,
+    ).count()
+
+    # Cartera total pendiente
+    cartera = (
+        db.query(func.coalesce(func.sum(CuentaPorCobrar.saldo), 0))
+        .join(DocumentoVenta, DocumentoVenta.id == CuentaPorCobrar.documento_id)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(CuentaPorCobrar.pagado == False)
+        .scalar()
+    )
+
+    return {
+        "periodos": periodos,
+        "top_productos": [
+            {"descripcion": d, "cantidad": float(c or 0), "monto": float(m or 0)}
+            for d, c, m in top
+        ],
+        "clientes_nuevos_mes": nuevos,
+        "cartera_total": float(cartera or 0),
+    }
+
 
 
 @router.get("/kpis")

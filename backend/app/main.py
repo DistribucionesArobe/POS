@@ -18,6 +18,7 @@ from app.routers import (
     reportes,
     whatsapp,
     autofactura,
+    cotizaciones,
 )
 
 settings = get_settings()
@@ -62,3 +63,4 @@ app.include_router(cfdi.router, prefix="/api/cfdi", tags=["cfdi"])
 app.include_router(reportes.router, prefix="/api/reportes", tags=["reportes"])
 app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["whatsapp"])
 app.include_router(autofactura.router, prefix="/api/public/facturar", tags=["autofactura"])
+app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["cotizaciones"])
