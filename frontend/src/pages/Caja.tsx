@@ -275,8 +275,17 @@ export default function Caja() {
     return () => window.removeEventListener("keydown", handler);
   }, [items, showCobrar, cliente.id]);
 
+  function quickAction(tipo: typeof tipoSel) {
+    if (items.length === 0) {
+      alert("Agrega al menos un producto primero");
+      return;
+    }
+    setTipoSel(tipo);
+    setTimeout(() => abrirCobrar(), 0);
+  }
+
   return (
-    <div style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100vh", background: "var(--color-bg)" }}>
+    <div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", height: "100vh", background: "var(--color-bg)" }}>
       {/* Header */}
       <div style={{
         background: "var(--color-sidebar-bg)", color: "white",
@@ -305,6 +314,28 @@ export default function Caja() {
           }}>
           Salir de caja
         </button>
+      </div>
+
+      {/* Barra de atajos rapidos */}
+      <div style={{
+        background: "#0f172a", padding: "8px 24px",
+        display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+        borderTop: "1px solid #1e293b",
+      }}>
+        <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>
+          Cobrar como:
+        </span>
+        <QuickBtn k="F5" label="🧾 Ticket"     color="#3b82f6" onClick={() => quickAction("TICKET")} />
+        <QuickBtn k="F4" label="📋 Remisión"   color="#f59e0b" onClick={() => quickAction("REMISION")} />
+        <QuickBtn k="F7" label="🧾 Factura PUE" color="#10b981" onClick={() => quickAction("FACTURA_PUE")} />
+        <QuickBtn k="F8" label="📋 Factura PPD" color="#8b5cf6" onClick={() => quickAction("FACTURA_PPD")} />
+
+        <span style={{ flex: 1 }}></span>
+
+        <span style={{ fontSize: 11, color: "#64748b", marginRight: 4 }}>Otros:</span>
+        <QuickBtn k="F2" label="Cliente" color="transparent" onClick={() => setShowClientePicker(true)} />
+        <QuickBtn k="F9" label="🗑 Limpiar" color="transparent"
+          onClick={() => { if (items.length > 0 && confirm("Limpiar venta?")) setItems([]); }} />
       </div>
 
       {/* Main: scanner | cart */}
@@ -578,3 +609,27 @@ const kbdStyle: React.CSSProperties = {
   fontSize: 11,
   fontFamily: "monospace",
 };
+
+function QuickBtn({ k, label, color, onClick }: {
+  k: string; label: string; color: string; onClick: () => void;
+}) {
+  const filled = color !== "transparent";
+  return (
+    <button onClick={onClick} type="button"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "5px 10px", fontSize: 13, fontWeight: 600,
+        background: filled ? color : "transparent",
+        color: "white",
+        border: filled ? "none" : "1px solid #334155",
+        borderRadius: 6, cursor: "pointer",
+      }}>
+      <span style={{
+        background: filled ? "rgba(0,0,0,0.25)" : "#1e293b",
+        padding: "1px 6px", borderRadius: 3, fontSize: 10,
+        fontFamily: "monospace",
+      }}>{k}</span>
+      <span>{label}</span>
+    </button>
+  );
+}
