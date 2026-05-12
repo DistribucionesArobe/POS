@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
+import ClientePicker, { ClienteSel } from "../components/ClientePicker";
 
 type Item = {
   variante_id: number; sku: string; nombre: string;
@@ -142,7 +143,8 @@ export default function Cotizaciones() {
 
 
 function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [clienteId, setClienteId] = useState<number | null>(null);
+  const [cliente, setCliente] = useState<ClienteSel | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
   const [nombreLibre, setNombreLibre] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [vigenciaDias, setVigenciaDias] = useState(15);
@@ -174,11 +176,14 @@ function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
 
   async function guardar() {
     if (items.length === 0) return alert("Agrega al menos un producto");
+    if (!cliente && !nombreLibre.trim()) {
+      return alert("Selecciona un cliente o captura un nombre libre");
+    }
     setBusy(true);
     try {
       const payload: any = {
-        cliente_id: clienteId,
-        nombre_libre: nombreLibre || undefined,
+        cliente_id: cliente?.id ?? null,
+        nombre_libre: !cliente ? (nombreLibre || undefined) : undefined,
         whatsapp_origen: whatsapp || undefined,
         vigencia_dias: vigenciaDias,
         notas: notas || undefined,
@@ -201,18 +206,30 @@ function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     <div className="card" style={{ marginBottom: 16 }}>
       <h3 className="card-header">Nueva cotización</h3>
       <div className="form-grid">
-        <div>
-          <label>Cliente ID (opcional, si está registrado)</label>
-          <input className="input" type="number" value={clienteId ?? ""}
-            onChange={(e) => setClienteId(e.target.value ? +e.target.value : null)} />
+        <div className="form-grid-full">
+          <label>Cliente</label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button type="button" onClick={() => setShowPicker(true)}
+              style={{ flex: 1, padding: 10, fontSize: 14, textAlign: "left",
+                border: "1px solid var(--color-border)", borderRadius: 6, background: "white", cursor: "pointer" }}>
+              {cliente ? `${cliente.nombre}${cliente.rfc ? ` · ${cliente.rfc}` : ""}` : "Click para buscar o crear cliente"}
+              <span style={{ float: "right", color: "var(--color-text-muted)" }}>{cliente ? "cambiar ✎" : "seleccionar →"}</span>
+            </button>
+            {cliente && (
+              <button type="button" onClick={() => setCliente(null)}
+                className="btn-icon" title="Quitar cliente (usar nombre libre)">×</button>
+            )}
+          </div>
         </div>
+        {!cliente && (
+          <div className="form-grid-full">
+            <label>Nombre libre (si el cliente no está registrado)</label>
+            <input className="input" value={nombreLibre} onChange={(e) => setNombreLibre(e.target.value)}
+              placeholder="Ej. Sr. Juan Pérez" />
+          </div>
+        )}
         <div>
-          <label>Nombre libre (si NO está registrado)</label>
-          <input className="input" value={nombreLibre} onChange={(e) => setNombreLibre(e.target.value)}
-            placeholder="Ej. Sr. Juan Pérez" />
-        </div>
-        <div>
-          <label>WhatsApp (sin lada)</label>
+          <label>WhatsApp (opcional, para enviar la cotización)</label>
           <input className="input" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
             placeholder="8341234567" />
         </div>
@@ -226,6 +243,17 @@ function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
           <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} />
         </div>
       </div>
+
+      {showPicker && (
+        <ClientePicker
+          onClose={() => setShowPicker(false)}
+          onSelect={(c) => {
+            setCliente(c);
+            if (c.whatsapp && !whatsapp) setWhatsapp(c.whatsapp);
+            setShowPicker(false);
+          }}
+        />
+      )}
 
       <div style={{ marginTop: 16 }}>
         <div className="toolbar" style={{ marginBottom: 8 }}>
