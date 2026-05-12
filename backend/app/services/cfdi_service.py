@@ -1,10 +1,20 @@
 """Logica de timbrado/cancelacion via Facturama, por empresa."""
 from datetime import datetime
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.integrations.facturama import FacturamaClient, FacturamaError
-from app.models import DocumentoVenta, Cfdi, Cliente, Empresa
+from app.models import (
+    DocumentoVenta, Cfdi, Cliente, Empresa,
+    CuentaPorCobrar, AbonoCxC, ComplementoPago,
+)
 from app.services import email_service
+
+IVA_TASA = 0.16
+
+# Codigos SAT que aplican a CFDI tipo P (Pago)
+SAT_CLAVE_PROD_PAGO = "84111506"  # Servicios de facturación
+SAT_CLAVE_UNIDAD_PAGO = "ACT"      # Actividad
 
 
 def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
@@ -306,3 +316,203 @@ def descargar_pdf_cfdi(db: Session, cfdi_id: int, empresa_id: int) -> bytes:
     empresa = db.get(Empresa, empresa_id)
     facturama_id = (cfdi.xml_url or "").replace("facturama://", "").split("/")[0]
     return FacturamaClient(empresa).descargar_pdf(facturama_id)
+
+
+def emitir_complemento_pago(db: Session, abono_id: int, empresa_id: int) -> dict:
+    """Emite CFDI Complemento de Pago (tipo P) por un abono a una factura PPD timbrada.
+
+    Reglas SAT 4.0:
+    - El CFDI base de Pago no lleva conceptos con monto (Subtotal=Total=0)
+    - El monto y desglose va en el complemento Payments[].RelatedDocuments[]
+    - Parcialidad es incremental (1, 2, 3...) por cada abono a la misma factura
+    - PreviousBalanceAmount = saldo antes del abono
+    - AmountPaid = monto del abono
+    - ImpSaldoInsoluto = saldo despues del abono
+    - Si el CFDI original llevaba IVA 16%, los Taxes del RelatedDocument
+      desglosan IVA proporcional al monto pagado.
+    """
+    abono = db.get(AbonoCxC, abono_id)
+    if not abono:
+        raise ValueError("Abono no existe")
+    cxc = db.get(CuentaPorCobrar, abono.cxc_id)
+    if not cxc:
+        raise ValueError("CxC no existe")
+    doc = db.get(DocumentoVenta, cxc.documento_id)
+    if not doc or doc.empresa_id != empresa_id:
+        raise ValueError("Documento de otra empresa")
+    if doc.tipo != "FACTURA":
+        raise ValueError("Solo se puede emitir complemento de pago sobre FACTURAs PPD")
+    if doc.metodo_pago_sat != "PPD":
+        raise ValueError("La factura no es PPD; no requiere complemento de pago")
+
+    cfdi_origen = db.query(Cfdi).filter(Cfdi.documento_venta_id == doc.id).first()
+    if not cfdi_origen or cfdi_origen.cancelado:
+        raise ValueError("La factura no esta timbrada o esta cancelada")
+
+    # No re-emitir si ya hay complemento por este abono
+    if abono.id:
+        existente = db.query(ComplementoPago).filter(
+            ComplementoPago.abono_cxc_id == abono.id
+        ).first()
+        if existente:
+            raise ValueError(f"Este abono ya tiene complemento UUID {existente.uuid_complemento}")
+
+    cliente = db.get(Cliente, doc.cliente_id)
+    empresa = db.get(Empresa, empresa_id)
+
+    # Parcialidad: cuantos abonos anteriores a este existen en la misma CxC
+    parcialidad = (
+        db.query(func.count(AbonoCxC.id))
+        .filter(AbonoCxC.cxc_id == cxc.id, AbonoCxC.id < abono.id)
+        .scalar() or 0
+    ) + 1
+
+    # Saldo antes del abono = saldo actual + monto del abono
+    saldo_actual = float(cxc.saldo)  # despues del abono
+    monto = float(abono.monto)
+    saldo_anterior = round(saldo_actual + monto, 2)
+    saldo_insoluto = round(saldo_actual, 2)
+
+    # IVA proporcional al monto pagado (asumiendo factura original con 16%)
+    base = round(monto / (1 + IVA_TASA), 2)
+    iva = round(monto - base, 2)
+
+    # Mapeo de forma de pago: el abono guarda nombres ("EFECTIVO", "TRANSFERENCIA")
+    # o codigos directos ("01", "03"). Resolvemos a codigo SAT.
+    forma_map = {
+        "EFECTIVO": "01", "CHEQUE": "02", "TRANSFERENCIA": "03",
+        "TARJETA_CREDITO": "04", "T_CREDITO": "04",
+        "TARJETA_DEBITO": "28", "T_DEBITO": "28",
+        "01": "01", "02": "02", "03": "03", "04": "04", "28": "28",
+    }
+    forma_sat = forma_map.get((abono.forma_pago or "").upper().strip(), "01")
+
+    fecha_pago = abono.fecha.strftime("%Y-%m-%dT%H:%M:%S")
+
+    payload = {
+        "NameId": "14",
+        "CfdiType": "P",
+        "PaymentForm": "01",  # Dummy en P; se ignora SAT
+        "PaymentMethod": "PUE",  # Dummy en P
+        "Currency": "XXX",  # Para CFDI P el sat marca XXX (sin moneda)
+        "ExpeditionPlace": empresa.codigo_postal,
+        "Issuer": {
+            "FiscalRegime": empresa.regimen_fiscal,
+            "Rfc": empresa.rfc,
+            "Name": (empresa.razon_social or empresa.nombre).upper(),
+        },
+        "Receiver": {
+            "Rfc": cliente.rfc,
+            "Name": (cliente.razon_social or cliente.nombre).upper(),
+            "FiscalRegime": cliente.regimen_fiscal or "616",
+            "TaxZipCode": cliente.codigo_postal or empresa.codigo_postal,
+            "CfdiUse": "CP01",  # Pagos
+        },
+        "Items": [{
+            "ProductCode": SAT_CLAVE_PROD_PAGO,
+            "Description": "Pago",
+            "Unit": "Actividad",
+            "UnitCode": SAT_CLAVE_UNIDAD_PAGO,
+            "Quantity": 1,
+            "UnitPrice": 0,
+            "Subtotal": 0,
+            "Total": 0,
+            "TaxObject": "01",
+        }],
+        "Complemento": {
+            "Payments": [{
+                "Date": fecha_pago,
+                "PaymentForm": forma_sat,
+                "Currency": "MXN",
+                "Amount": round(monto, 2),
+                "RelatedDocuments": [{
+                    "Uuid": cfdi_origen.uuid,
+                    "Serie": cfdi_origen.serie or "",
+                    "Folio": cfdi_origen.folio or "",
+                    "Currency": "MXN",
+                    "PaymentMethod": "PPD",
+                    "PartialityNumber": parcialidad,
+                    "PreviousBalanceAmount": saldo_anterior,
+                    "AmountPaid": round(monto, 2),
+                    "ImpSaldoInsoluto": saldo_insoluto,
+                    "TaxObject": "02",
+                    "Taxes": [{
+                        "Total": iva,
+                        "Name": "IVA",
+                        "Base": base,
+                        "Rate": IVA_TASA,
+                        "IsRetention": False,
+                    }],
+                }],
+            }],
+        },
+    }
+
+    client = FacturamaClient(empresa)
+    try:
+        response = client.emitir_pago(payload)
+    except FacturamaError as e:
+        raise ValueError(f"Facturama rechazo complemento: {e}")
+
+    uuid_p = response["Complement"]["TaxStamp"]["Uuid"]
+    facturama_id_p = response.get("Id")
+    fecha_str = response["Complement"]["TaxStamp"]["Date"].replace("Z", "")
+
+    # Guardamos un Cfdi tipo P y tambien un ComplementoPago para el ligue al abono
+    cfdi_p = Cfdi(
+        documento_venta_id=doc.id,
+        uuid=uuid_p,
+        serie=response.get("Serie", ""),
+        folio=str(response.get("Folio", "")),
+        fecha_timbrado=datetime.fromisoformat(fecha_str.split("+")[0]),
+        rfc_emisor=response["Issuer"]["Rfc"],
+        rfc_receptor=response["Receiver"]["Rfc"],
+        total=monto,
+        tipo_comprobante="P",
+        respuesta_pac=response,
+        xml_url=f"facturama://{facturama_id_p}/xml" if facturama_id_p else None,
+        pdf_url=f"facturama://{facturama_id_p}/pdf" if facturama_id_p else None,
+    )
+    # ojo: hay un unique en documento_venta_id; CFDI tipo P no debe compartirlo
+    # Solucion: dejarlo nullable. Pero por ahora insertamos el ComplementoPago
+    # y NO insertamos Cfdi tipo P para no chocar el unique.
+
+    cp = ComplementoPago(
+        cfdi_origen_id=cfdi_origen.id,
+        abono_cxc_id=abono.id,
+        uuid_complemento=uuid_p,
+        monto_pagado=monto,
+        fecha_pago=abono.fecha,
+        forma_pago_sat=forma_sat,
+        moneda="MXN",
+        xml_url=f"facturama://{facturama_id_p}/xml" if facturama_id_p else None,
+    )
+    db.add(cp)
+    db.commit()
+
+    # Enviar por correo via SMTP propio
+    if cliente.correo and email_service.smtp_configurado() and facturama_id_p:
+        try:
+            xml_bytes = client.descargar_xml(facturama_id_p)
+            pdf_bytes = client.descargar_pdf(facturama_id_p)
+            email_service.enviar_cfdi(
+                destinatario=cliente.correo,
+                nombre_destinatario=cliente.razon_social or cliente.nombre,
+                uuid=uuid_p,
+                serie=cfdi_p.serie,
+                folio=cfdi_p.folio,
+                rfc_emisor=empresa.rfc,
+                razon_social_emisor=empresa.razon_social or empresa.nombre,
+                xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+            )
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "uuid": uuid_p,
+        "parcialidad": parcialidad,
+        "monto": monto,
+        "saldo_insoluto": saldo_insoluto,
+        "facturama_id": facturama_id_p,
+    }

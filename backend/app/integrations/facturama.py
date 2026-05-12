@@ -98,6 +98,10 @@ class FacturamaClient:
         }
         return self._post("/3/cfdis", payload)
 
+    def emitir_pago(self, payload: dict) -> dict:
+        """Emite un CFDI tipo P (Pago) a Facturama."""
+        return self._post("/3/cfdis", payload)
+
     def cancelar(self, cfdi_id: str, motivo: str, uuid_sustituye: str | None = None) -> dict:
         params = {"motive": motivo}
         if uuid_sustituye:
