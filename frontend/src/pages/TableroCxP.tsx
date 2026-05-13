@@ -279,7 +279,7 @@ export default function TableroCxP() {
                     <input className="input" type="number" step="0.01" value={panelDraft.venta_objetivo_mes}
                       onChange={(e) => setPanelDraft({ ...panelDraft, venta_objetivo_mes: +e.target.value })}
                       style={inpStyle} />
-                  ) : fmt(ventaMes)}
+                  ) : fmt(ventaActualMes)}
                 </td>
                 <td style={lblYellow}>Saldo</td>
                 <td style={valBlack}>
