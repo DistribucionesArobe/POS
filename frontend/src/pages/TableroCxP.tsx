@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
@@ -16,6 +17,8 @@ type CxP = {
   compra_id: number | null; compra_folio: string | null;
   folio_factura: string | null; fecha_recepcion: string | null;
   fecha_vencimiento: string | null; observaciones: string | null;
+  moneda?: string; tipo_cambio?: number | null;
+  monto_moneda_original?: number | null;
   monto_original: number; saldo: number; saldado: number;
   pagado: boolean; manual: boolean;
 };
@@ -24,6 +27,7 @@ type Tablero = {
   panel: {
     id?: number; anio: number; mes: number;
     venta_objetivo_mes: number; saldo_banco: number;
+    ingreso_egreso_banco: number;
     usd_mxn: number; notas: string | null;
   };
   kpis: {
@@ -38,6 +42,7 @@ type Tablero = {
 type DeudaProv = { total: number; filas: { proveedor_id: number; proveedor: string; saldo: number; pct: number }[] };
 
 export default function TableroCxP() {
+  const nav = useNavigate();
   const hoy = new Date();
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth() + 1);
@@ -154,6 +159,16 @@ export default function TableroCxP() {
     cargar();
   }
 
+  async function traerBanxico() {
+    try {
+      const r = await api.get("/api/cxp/tipo-cambio");
+      setPanelDraft({ ...panelDraft, usd_mxn: r.data.valor });
+      alert(`Tipo de cambio actualizado: ${r.data.valor}\nFuente: ${r.data.fuente}\nFecha: ${r.data.fecha}`);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   async function exportar() {
     const r = await api.get("/api/cxp/cartera-xlsx", {
       params: { anio, mes, incluir_pagadas: incluirPagadas },
@@ -177,19 +192,37 @@ export default function TableroCxP() {
     return new Date(c.fecha_vencimiento) < new Date();
   }
 
-  // Cálculos del panel estilo Excel (todos derivan de panel + KPIs)
+  // === Fórmulas estilo Excel del usuario ===
   const k = tablero?.kpis;
   const p = tablero?.panel;
-  const ventaMes = p?.venta_objetivo_mes || 0;
-  const saldo = p?.saldo_banco || 0;
-  const ingresoEgresoBanco = saldo; // alias - mismo concepto
-  const ventaPromDia = ventaMes && k ? ventaMes / k.dias_mes : 0;
-  const ventaMensualEst = ventaPromDia * (k?.dias_mes || 30);
+
+  // "Venta del mes" = lo vendido hasta hoy. Auto del POS, pero si el usuario
+  // capturó un valor manual en el panel, ese gana (override).
+  const ventaActualMes = (p?.venta_objetivo_mes && p.venta_objetivo_mes > 0)
+    ? p.venta_objetivo_mes
+    : (k?.venta_mes || 0);
+
+  const diaActual = k?.dia_actual || 1;
+  const diasMes = k?.dias_mes || 30;
+  const diasRestantes = Math.max(1, diasMes - diaActual + 1);
+
+  // Venta promedio día = lo vendido / día actual (real, no meta)
+  const ventaPromDia = ventaActualMes / diaActual;
+  // Venta mensual estimada = proyección al ritmo actual
+  const ventaMensualEst = ventaPromDia * diasMes;
+  // Restante a venta estimada (lo que falta vender este mes según proyección)
+  const restanteVentaEstimada = Math.max(0, ventaMensualEst - ventaActualMes);
+
   const facturasPorPagar = k?.cxp_total || 0;
-  const aVenderPorDia = facturasPorPagar / (k?.dias_restantes || 30);
-  const restanteVentaEstimada = ventaMensualEst - (k?.venta_mes || 0);
+  const saldo = p?.saldo_banco || 0; // saldo en banco hoy
+  const ingresoEgresoBanco = p?.ingreso_egreso_banco || 0; // capturable independiente
+
+  // A vender por día = lo que falta de venta estimada / días restantes
+  const aVenderPorDia = restanteVentaEstimada / diasRestantes;
   const restanteFacturasPagar = facturasPorPagar - saldo;
-  const pctNecesario = ventaMensualEst > 0 ? saldo / ventaMensualEst : 0;
+  // % $ necesario = saldo / facturas por pagar (cuánto del corto plazo tengo cubierto)
+  const pctNecesario = facturasPorPagar > 0 ? saldo / facturasPorPagar : 0;
+
   const usdMxn = p?.usd_mxn || 0;
   const deudasXCobrar = k?.cxc_total || 0;
   const pctVentaDeuda = facturasPorPagar > 0 ? ventaMensualEst / facturasPorPagar : 0;
@@ -273,7 +306,14 @@ export default function TableroCxP() {
               </tr>
               <tr>
                 <td style={lblGreen}>$ ingreso - egreso - banco</td>
-                <td style={valBlack}>{fmt(ingresoEgresoBanco)}</td>
+                <td style={valBlack}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.01"
+                      value={panelDraft.ingreso_egreso_banco}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, ingreso_egreso_banco: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmt(ingresoEgresoBanco)}
+                </td>
                 <td style={lblBlue}>Restante a venta estimada</td>
                 <td style={valBlack}>{fmt(restanteVentaEstimada)}</td>
                 <td style={lblBlue}>Restante facturas por pagar</td>
@@ -288,13 +328,27 @@ export default function TableroCxP() {
                 <td style={lblYellow}>USD/MXN</td>
                 <td style={valRed}>
                   {editandoPanel ? (
-                    <input className="input" type="number" step="0.0001" value={panelDraft.usd_mxn}
-                      onChange={(e) => setPanelDraft({ ...panelDraft, usd_mxn: +e.target.value })}
-                      style={inpStyle} />
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <input className="input" type="number" step="0.0001" value={panelDraft.usd_mxn}
+                        onChange={(e) => setPanelDraft({ ...panelDraft, usd_mxn: +e.target.value })}
+                        style={inpStyle} />
+                      <button type="button" onClick={traerBanxico}
+                        title="Obtener tipo de cambio desde Banxico (o fallback)"
+                        style={{ background: "#1f2937", color: "white", border: 0,
+                          padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                        🔄 Banxico
+                      </button>
+                    </div>
                   ) : fmtNum(usdMxn)}
                 </td>
-                <td style={lblRed}>Deudas x cobrar</td>
-                <td style={valBlack}>{fmt(deudasXCobrar)}</td>
+                <td style={lblRed} onClick={() => nav("/cartera")}
+                  title="Click para ver el detalle en Cartera"
+                  >Deudas x cobrar 🔗</td>
+                <td style={{ ...valBlack, cursor: "pointer" }}
+                  onClick={() => nav("/cartera")}
+                  title="Suma de saldos pendientes en Cartera">
+                  {fmt(deudasXCobrar)}
+                </td>
                 <td style={lblBlue}>DIFERENCIA</td>
                 <td style={{ ...valBlack, fontWeight: 800, color: diferencia < 0 ? "#dc2626" : "#16a34a" }}>
                   {fmt(diferencia)}
@@ -380,7 +434,14 @@ export default function TableroCxP() {
                   <td style={{ ...td, fontSize: 12, color: "var(--color-text-secondary)" }}>
                     {celdaEdit(c, "observaciones", c.observaciones || "")}
                   </td>
-                  <td style={{ ...td, textAlign: "right" }}>{fmt(c.monto_original)}</td>
+                  <td style={{ ...td, textAlign: "right" }}>
+                    {fmt(c.monto_original)}
+                    {c.moneda === "USD" && c.monto_moneda_original && (
+                      <div style={{ fontSize: 10, color: "#6b7280" }}>
+                        ≈ USD ${c.monto_moneda_original.toFixed(2)} @ {c.tipo_cambio}
+                      </div>
+                    )}
+                  </td>
                   <td style={{ ...td, textAlign: "right", color: "var(--color-text-muted)" }}>
                     {celdaEdit(c, "saldado", c.saldado > 0 ? fmt(c.saldado) : "", String(c.saldado))}
                   </td>
@@ -443,7 +504,9 @@ export default function TableroCxP() {
       )}
 
       {showCaptura && (
-        <CapturaCxPModal onClose={() => setShowCaptura(false)}
+        <CapturaCxPModal
+          tipoCambioDefault={usdMxn}
+          onClose={() => setShowCaptura(false)}
           onSaved={() => { setShowCaptura(false); cargar(); }} />
       )}
       {abonando && (
@@ -481,7 +544,9 @@ const td: React.CSSProperties = { padding: "8px 10px", borderBottom: "1px solid 
 const inpStyle: React.CSSProperties = { width: 110, padding: 4, fontSize: 12, textAlign: "right" };
 
 
-function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function CapturaCxPModal({ onClose, onSaved, tipoCambioDefault }: {
+  onClose: () => void; onSaved: () => void; tipoCambioDefault?: number;
+}) {
   const [proveedorNombre, setProveedorNombre] = useState("");
   const [folio, setFolio] = useState("");
   const [fechaRecep, setFechaRecep] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -489,11 +554,25 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [monto, setMonto] = useState(0);
   const [saldado, setSaldado] = useState(0);
   const [obs, setObs] = useState("");
+  const [moneda, setMoneda] = useState<"MXN" | "USD">("MXN");
+  const [tipoCambio, setTipoCambio] = useState(tipoCambioDefault || 0);
   const [busy, setBusy] = useState(false);
+
+  const equivalenteMxn = moneda === "USD" && tipoCambio > 0 ? monto * tipoCambio : 0;
+
+  async function traerBanxico() {
+    try {
+      const r = await api.get("/api/cxp/tipo-cambio");
+      setTipoCambio(r.data.valor);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
 
   async function guardar() {
     if (!proveedorNombre.trim()) return alert("Captura el proveedor");
     if (monto <= 0) return alert("El monto debe ser mayor a 0");
+    if (moneda === "USD" && tipoCambio <= 0) return alert("Captura el tipo de cambio para USD");
     setBusy(true);
     try {
       await api.post("/api/cxp/manual", {
@@ -504,6 +583,8 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         monto_original: monto,
         saldado: saldado || 0,
         observaciones: obs || null,
+        moneda,
+        tipo_cambio: moneda === "USD" ? tipoCambio : null,
       });
       onSaved();
     } catch (err: any) {
@@ -548,12 +629,40 @@ function CapturaCxPModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               placeholder="tablaroca, herramienta, pedido obra..." />
           </div>
           <div>
-            <label>Monto *</label>
+            <label>Moneda</label>
+            <select className="input" value={moneda} onChange={(e) => setMoneda(e.target.value as any)}>
+              <option value="MXN">MXN (Pesos)</option>
+              <option value="USD">USD (Dólares)</option>
+            </select>
+          </div>
+          {moneda === "USD" && (
+            <div>
+              <label>Tipo de cambio</label>
+              <div style={{ display: "flex", gap: 4 }}>
+                <input className="input" type="number" step="0.0001" value={tipoCambio}
+                  onChange={(e) => setTipoCambio(+e.target.value)}
+                  placeholder="17.6922" style={{ flex: 1 }} />
+                <button type="button" onClick={traerBanxico}
+                  style={{ background: "#1f2937", color: "white", border: 0,
+                    padding: "0 10px", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>
+                  🔄 Banxico
+                </button>
+              </div>
+            </div>
+          )}
+          {moneda === "MXN" && <div></div>}
+          <div>
+            <label>Monto * {moneda === "USD" && <span style={{ color: "#9ca3af", fontWeight: 400 }}>(USD)</span>}</label>
             <input className="input" type="number" step="0.01" value={monto}
               onChange={(e) => setMonto(+e.target.value)} />
+            {moneda === "USD" && equivalenteMxn > 0 && (
+              <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "2px 0 0" }}>
+                ≈ MXN ${equivalenteMxn.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+              </p>
+            )}
           </div>
           <div>
-            <label>Saldado (ya pagado)</label>
+            <label>Saldado (ya pagado) {moneda === "USD" && <span style={{ color: "#9ca3af", fontWeight: 400 }}>(USD)</span>}</label>
             <input className="input" type="number" step="0.01" value={saldado}
               onChange={(e) => setSaldado(+e.target.value)} />
           </div>

@@ -69,6 +69,13 @@ class CuentaPorPagar(Base):
     fecha_recepcion: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     observaciones: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Moneda + tipo de cambio. monto_original y saldo SIEMPRE estan en MXN
+    # para que los totales del tablero sean consistentes. Si la factura es
+    # USD, se guarda el monto original en USD aparte para referencia.
+    moneda: Mapped[str] = mapped_column(String(3), default="MXN")
+    tipo_cambio: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
+    monto_moneda_original: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+
     monto_original: Mapped[float] = mapped_column(Numeric(14, 2))
     saldo: Mapped[float] = mapped_column(Numeric(14, 2))
     fecha_vencimiento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -94,6 +101,7 @@ class PanelCxP(Base):
     # Editables tipo Excel
     venta_objetivo_mes: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     saldo_banco: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    ingreso_egreso_banco: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     usd_mxn: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
 

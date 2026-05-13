@@ -80,6 +80,9 @@ def cartera_proveedores(
             "folio_factura": cxp.folio_factura,
             "fecha_recepcion": cxp.fecha_recepcion.isoformat() if cxp.fecha_recepcion else None,
             "observaciones": cxp.observaciones,
+            "moneda": getattr(cxp, "moneda", "MXN") or "MXN",
+            "tipo_cambio": float(cxp.tipo_cambio) if getattr(cxp, "tipo_cambio", None) else None,
+            "monto_moneda_original": float(cxp.monto_moneda_original) if getattr(cxp, "monto_moneda_original", None) else None,
             "monto_original": float(cxp.monto_original),
             "saldo": float(cxp.saldo),
             "saldado": float(cxp.monto_original) - float(cxp.saldo),
@@ -103,6 +106,9 @@ class CxPManualIn(BaseModel):
     monto_original: float = Field(gt=0)
     saldado: float = Field(default=0, ge=0)
     observaciones: str | None = None
+    # Moneda: MXN o USD. Si USD, se requiere tipo_cambio.
+    moneda: str = "MXN"
+    tipo_cambio: float | None = None
 
 
 @router.post("/manual")
@@ -135,10 +141,27 @@ def crear_cxp_manual(
     else:
         raise HTTPException(400, "Captura proveedor_id o proveedor_nombre")
 
-    if payload.saldado > payload.monto_original:
+    # Procesar moneda + tipo de cambio
+    moneda = (payload.moneda or "MXN").upper()
+    if moneda not in ("MXN", "USD"):
+        raise HTTPException(400, "moneda debe ser MXN o USD")
+    if moneda == "USD" and (not payload.tipo_cambio or payload.tipo_cambio <= 0):
+        raise HTTPException(400, "Para moneda USD se requiere tipo_cambio")
+
+    # Conversion a MXN para los totales del tablero
+    if moneda == "USD":
+        monto_mxn = round(payload.monto_original * payload.tipo_cambio, 2)
+        saldado_mxn = round(payload.saldado * payload.tipo_cambio, 2)
+        monto_moneda_original = payload.monto_original  # en USD
+    else:
+        monto_mxn = payload.monto_original
+        saldado_mxn = payload.saldado
+        monto_moneda_original = None
+
+    if saldado_mxn > monto_mxn:
         raise HTTPException(400, "Saldado no puede exceder el monto original")
 
-    saldo = round(payload.monto_original - payload.saldado, 2)
+    saldo = round(monto_mxn - saldado_mxn, 2)
     cxp = CuentaPorPagar(
         empresa_id=empresa_id,
         proveedor_id=prov.id,
@@ -147,7 +170,10 @@ def crear_cxp_manual(
         fecha_recepcion=datetime.combine(payload.fecha_recepcion, datetime.min.time()) if payload.fecha_recepcion else datetime.utcnow(),
         fecha_vencimiento=datetime.combine(payload.fecha_vencimiento, datetime.min.time()) if payload.fecha_vencimiento else None,
         observaciones=payload.observaciones,
-        monto_original=payload.monto_original,
+        moneda=moneda,
+        tipo_cambio=payload.tipo_cambio if moneda == "USD" else None,
+        monto_moneda_original=monto_moneda_original,
+        monto_original=monto_mxn,
         saldo=saldo,
         pagado=saldo <= 0.01,
     )
@@ -220,6 +246,7 @@ class PanelIn(BaseModel):
     mes: int
     venta_objetivo_mes: float = 0
     saldo_banco: float = 0
+    ingreso_egreso_banco: float = 0
     usd_mxn: float = 0
     notas: str | None = None
 
@@ -242,13 +269,15 @@ def tablero_cxp(
     if not panel:
         panel_dict = {
             "anio": anio, "mes": mes,
-            "venta_objetivo_mes": 0, "saldo_banco": 0, "usd_mxn": 0, "notas": None,
+            "venta_objetivo_mes": 0, "saldo_banco": 0,
+            "ingreso_egreso_banco": 0, "usd_mxn": 0, "notas": None,
         }
     else:
         panel_dict = {
             "id": panel.id, "anio": panel.anio, "mes": panel.mes,
             "venta_objetivo_mes": float(panel.venta_objetivo_mes),
             "saldo_banco": float(panel.saldo_banco),
+            "ingreso_egreso_banco": float(getattr(panel, "ingreso_egreso_banco", 0) or 0),
             "usd_mxn": float(panel.usd_mxn),
             "notas": panel.notas,
             "actualizado_en": panel.actualizado_en.isoformat(),
@@ -409,11 +438,54 @@ def upsert_panel(
         db.add(panel)
     panel.venta_objetivo_mes = payload.venta_objetivo_mes
     panel.saldo_banco = payload.saldo_banco
+    panel.ingreso_egreso_banco = payload.ingreso_egreso_banco
     panel.usd_mxn = payload.usd_mxn
     panel.notas = payload.notas
     panel.actualizado_en = datetime.utcnow()
     db.commit()
     return {"ok": True}
+
+
+@router.get("/tipo-cambio")
+def tipo_cambio_usd_mxn():
+    """Obtiene tipo de cambio USD/MXN. Intenta Banxico SIE API (FIX oficial)
+    si hay token, si no usa fallback gratis (open.er-api.com)."""
+    import os, httpx
+
+    banxico_token = os.environ.get("BANXICO_TOKEN", "").strip()
+
+    if banxico_token:
+        # Serie SF63528 = Tipo de cambio FIX
+        url = "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF63528/datos/oportuno"
+        try:
+            r = httpx.get(url, headers={"Bmx-Token": banxico_token}, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            serie = data["bmx"]["series"][0]
+            dato = serie["datos"][0]
+            return {
+                "fuente": "Banxico FIX",
+                "fecha": dato["fecha"],
+                "valor": float(dato["dato"]),
+            }
+        except Exception as e:
+            # cae al fallback
+            pass
+
+    # Fallback: open.er-api.com (gratis, sin token)
+    try:
+        r = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        mxn = data["rates"]["MXN"]
+        ts = data.get("time_last_update_utc", "")
+        return {
+            "fuente": "open.er-api.com (no es FIX SAT)",
+            "fecha": ts,
+            "valor": float(mxn),
+        }
+    except Exception as e:
+        raise HTTPException(503, f"No se pudo obtener tipo de cambio: {e}")
 
 
 @router.get("/compras")
