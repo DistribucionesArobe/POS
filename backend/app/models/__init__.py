@@ -8,7 +8,10 @@ from app.models.kardex import MovimientoInventario  # noqa
 from app.models.venta import DocumentoVenta, ConceptoVenta  # noqa
 from app.models.pago import Pago  # noqa
 from app.models.cxc import CuentaPorCobrar, AbonoCxC  # noqa
-from app.models.cxp import CuentaPorPagar, AbonoCxP, Compra, ConceptoCompra, PanelCxP  # noqa
+from app.models.cxp import (  # noqa
+    CuentaPorPagar, AbonoCxP, Compra, ConceptoCompra, PanelCxP,
+    DeudaBancaria, ConceptoDeudaBancaria,
+)
 from app.models.cfdi import Cfdi, ComplementoPago  # noqa
 from app.models.cotizacion import Cotizacion  # noqa
 from app.models.corte_caja import CorteCaja  # noqa

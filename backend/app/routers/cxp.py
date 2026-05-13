@@ -1,5 +1,27 @@
 """Compras y cuentas por pagar - filtrado por empresa."""
 from datetime import datetime, date, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    TZ_MX = ZoneInfo("America/Mexico_City")
+except Exception:
+    TZ_MX = None
+
+
+def _hoy_mx() -> date:
+    """Fecha de hoy en zona horaria de Mexico (no UTC)."""
+    if TZ_MX:
+        return datetime.now(TZ_MX).date()
+    return datetime.utcnow().date()
+
+
+def _dias_habiles_restantes_semana(d: date) -> int:
+    """Cuenta dias laborales (lun-vie) restantes desde d INCLUSIVE hasta el viernes.
+    Mar=4, Vie=1, Sab/Dom=5 (toma la siguiente semana completa).
+    """
+    wd = d.weekday()  # 0=lun, 4=vie, 5=sab, 6=dom
+    if wd <= 4:
+        return 5 - wd
+    return 5  # fin de semana: cuenta lun-vie de la proxima semana
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, func
@@ -83,6 +105,7 @@ def cartera_proveedores(
             "moneda": getattr(cxp, "moneda", "MXN") or "MXN",
             "tipo_cambio": float(cxp.tipo_cambio) if getattr(cxp, "tipo_cambio", None) else None,
             "monto_moneda_original": float(cxp.monto_moneda_original) if getattr(cxp, "monto_moneda_original", None) else None,
+            "corto_plazo": bool(getattr(cxp, "corto_plazo", False)),
             "monto_original": float(cxp.monto_original),
             "saldo": float(cxp.saldo),
             "saldado": float(cxp.monto_original) - float(cxp.saldo),
@@ -216,6 +239,8 @@ def actualizar_cxp_manual(
             raise HTTPException(400, "Saldado no puede exceder el monto original")
         cxp.saldo = round(float(cxp.monto_original) - saldado, 2)
         cxp.pagado = cxp.saldo <= 0.01
+    if "corto_plazo" in payload:
+        cxp.corto_plazo = bool(payload["corto_plazo"])
     db.commit()
     return {"ok": True}
 
@@ -286,7 +311,7 @@ def tablero_cxp(
     # KPIs auto-calculados del POS
     ini_mes = datetime(anio, mes, 1)
     fin_mes = datetime(anio + 1, 1, 1) if mes == 12 else datetime(anio, mes + 1, 1)
-    hoy = datetime.utcnow().date()
+    hoy = _hoy_mx()  # zona horaria Mexico
     dias_mes = (fin_mes - ini_mes).days
     if ini_mes.date() <= hoy < fin_mes.date():
         dia_actual = (hoy - ini_mes.date()).days + 1
@@ -333,6 +358,20 @@ def tablero_cxp(
     )
     cxp_del_mes = float(cxp_del_mes or 0)
 
+    # CxP marcadas como corto plazo (las que el usuario va a pagar pronto)
+    cxp_corto_plazo = (
+        db.query(func.coalesce(func.sum(CuentaPorPagar.saldo), 0))
+        .outerjoin(Compra, Compra.id == CuentaPorPagar.compra_id)
+        .filter(or_(
+            CuentaPorPagar.empresa_id == empresa_id,
+            Compra.empresa_id == empresa_id,
+        ))
+        .filter(CuentaPorPagar.pagado == False)
+        .filter(CuentaPorPagar.corto_plazo == True)
+        .scalar()
+    )
+    cxp_corto_plazo = float(cxp_corto_plazo or 0)
+
     # Total CxC abierta
     cxc_total = (
         db.query(func.coalesce(func.sum(CuentaPorCobrar.saldo), 0))
@@ -352,12 +391,16 @@ def tablero_cxp(
     a_vender_por_dia = restante_meta / dias_restantes
     diferencia = (cxc_total + venta_estimada_mes) - cxp_total
 
+    # Dias habiles restantes hasta el viernes (para "a vender por dia")
+    dias_habiles_semana = _dias_habiles_restantes_semana(hoy)
+
     return {
         "panel": panel_dict,
         "kpis": {
             "dia_actual": dia_actual,
             "dias_mes": dias_mes,
             "dias_restantes": dias_restantes,
+            "dias_habiles_semana": dias_habiles_semana,
             "venta_mes": round(venta_mes, 2),
             "venta_promedio_dia": round(venta_promedio_dia, 2),
             "venta_estimada_mes": round(venta_estimada_mes, 2),
@@ -365,6 +408,7 @@ def tablero_cxp(
             "a_vender_por_dia": round(a_vender_por_dia, 2),
             "cxp_total": round(cxp_total, 2),
             "cxp_del_mes": round(cxp_del_mes, 2),
+            "cxp_corto_plazo": round(cxp_corto_plazo, 2),
             "cxc_total": round(cxc_total, 2),
             "diferencia": round(diferencia, 2),
         },
@@ -690,3 +734,162 @@ def export_cartera_proveedores_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="cxp_{suffix}.xlsx"'},
     )
+
+
+# ===== Deuda bancaria con conceptos editables =====
+
+@router.get("/deuda-bancaria")
+def listar_deuda_bancaria(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import DeudaBancaria
+    deudas = (
+        db.query(DeudaBancaria)
+        .filter(DeudaBancaria.empresa_id == empresa_id)
+        .filter(DeudaBancaria.activa == True)
+        .order_by(DeudaBancaria.id)
+        .all()
+    )
+    out = []
+    for d in deudas:
+        total = sum(float(c.monto) for c in d.conceptos)
+        out.append({
+            "id": d.id, "nombre": d.nombre, "referencia": d.referencia,
+            "notas": d.notas, "total": round(total, 2),
+            "conceptos": [
+                {
+                    "id": c.id, "concepto": c.concepto,
+                    "monto": float(c.monto), "orden": c.orden,
+                    "pct": (float(c.monto) / total * 100) if total > 0 else 0,
+                }
+                for c in d.conceptos
+            ],
+        })
+    return out
+
+
+class DeudaBancariaIn(BaseModel):
+    nombre: str
+    referencia: str | None = None
+    notas: str | None = None
+
+
+@router.post("/deuda-bancaria")
+def crear_deuda_bancaria(
+    payload: DeudaBancariaIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import DeudaBancaria
+    d = DeudaBancaria(
+        empresa_id=empresa_id,
+        nombre=payload.nombre.strip(),
+        referencia=(payload.referencia or "").strip() or None,
+        notas=payload.notas,
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    return {"id": d.id}
+
+
+@router.patch("/deuda-bancaria/{deuda_id}")
+def actualizar_deuda_bancaria(
+    deuda_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import DeudaBancaria
+    d = db.get(DeudaBancaria, deuda_id)
+    if not d or d.empresa_id != empresa_id:
+        raise HTTPException(404, "Deuda no existe")
+    for k in ("nombre", "referencia", "notas"):
+        if k in payload:
+            setattr(d, k, payload[k] or None if k != "nombre" else payload[k])
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/deuda-bancaria/{deuda_id}")
+def borrar_deuda_bancaria(
+    deuda_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import DeudaBancaria
+    d = db.get(DeudaBancaria, deuda_id)
+    if not d or d.empresa_id != empresa_id:
+        raise HTTPException(404, "Deuda no existe")
+    d.activa = False
+    db.commit()
+    return {"ok": True}
+
+
+class ConceptoDeudaIn(BaseModel):
+    concepto: str
+    monto: float = 0
+
+
+@router.post("/deuda-bancaria/{deuda_id}/conceptos")
+def crear_concepto_deuda(
+    deuda_id: int,
+    payload: ConceptoDeudaIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import DeudaBancaria, ConceptoDeudaBancaria
+    d = db.get(DeudaBancaria, deuda_id)
+    if not d or d.empresa_id != empresa_id:
+        raise HTTPException(404, "Deuda no existe")
+    orden = (db.query(func.coalesce(func.max(ConceptoDeudaBancaria.orden), 0))
+             .filter(ConceptoDeudaBancaria.deuda_id == deuda_id).scalar() or 0) + 1
+    c = ConceptoDeudaBancaria(
+        deuda_id=deuda_id, concepto=payload.concepto.strip(),
+        monto=payload.monto, orden=orden,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {"id": c.id}
+
+
+@router.patch("/deuda-bancaria/conceptos/{cid}")
+def actualizar_concepto_deuda(
+    cid: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import ConceptoDeudaBancaria, DeudaBancaria
+    c = db.get(ConceptoDeudaBancaria, cid)
+    if not c:
+        raise HTTPException(404, "Concepto no existe")
+    d = db.get(DeudaBancaria, c.deuda_id)
+    if d.empresa_id != empresa_id:
+        raise HTTPException(403, "Deuda de otra empresa")
+    if "concepto" in payload:
+        c.concepto = payload["concepto"]
+    if "monto" in payload:
+        c.monto = float(payload["monto"])
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/deuda-bancaria/conceptos/{cid}")
+def borrar_concepto_deuda(
+    cid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    from app.models import ConceptoDeudaBancaria, DeudaBancaria
+    c = db.get(ConceptoDeudaBancaria, cid)
+    if not c:
+        raise HTTPException(404, "Concepto no existe")
+    d = db.get(DeudaBancaria, c.deuda_id)
+    if d.empresa_id != empresa_id:
+        raise HTTPException(403, "Deuda de otra empresa")
+    db.delete(c)
+    db.commit()
+    return {"ok": True}

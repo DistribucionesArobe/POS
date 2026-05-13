@@ -80,12 +80,49 @@ class CuentaPorPagar(Base):
     saldo: Mapped[float] = mapped_column(Numeric(14, 2))
     fecha_vencimiento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     pagado: Mapped[bool] = mapped_column(default=False)
+    # Marcado manual del usuario: "voy a pagar esto en el corto plazo"
+    # El panel del mes suma SOLO estas para 'Facturas por pagar'.
+    corto_plazo: Mapped[bool] = mapped_column(default=False)
 
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     abonos: Mapped[list["AbonoCxP"]] = relationship(
         back_populates="cxp", cascade="all, delete-orphan"
     )
+
+
+class DeudaBancaria(Base):
+    """Deuda bancaria / crédito con su nombre y referencia.
+    Ej: 'ADEUDO BANORTE' ref '90725082'. Tiene conceptos editables (pagos)."""
+    __tablename__ = "deudas_bancarias"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+    nombre: Mapped[str] = mapped_column(String(120))
+    referencia: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activa: Mapped[bool] = mapped_column(default=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    conceptos = relationship(
+        "ConceptoDeudaBancaria", back_populates="deuda",
+        cascade="all, delete-orphan", order_by="ConceptoDeudaBancaria.orden",
+    )
+
+
+class ConceptoDeudaBancaria(Base):
+    """Linea individual dentro de una deuda bancaria (ej: 'PAGO 5 CHINA tabla')."""
+    __tablename__ = "conceptos_deuda_bancaria"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deuda_id: Mapped[int] = mapped_column(
+        ForeignKey("deudas_bancarias.id", ondelete="CASCADE"), index=True
+    )
+    concepto: Mapped[str] = mapped_column(String(255))
+    monto: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    orden: Mapped[int] = mapped_column(default=0)
+
+    deuda = relationship("DeudaBancaria", back_populates="conceptos")
 
 
 class PanelCxP(Base):

@@ -21,6 +21,7 @@ type CxP = {
   monto_moneda_original?: number | null;
   monto_original: number; saldo: number; saldado: number;
   pagado: boolean; manual: boolean;
+  corto_plazo?: boolean;
 };
 
 type Tablero = {
@@ -32,11 +33,18 @@ type Tablero = {
   };
   kpis: {
     dia_actual: number; dias_mes: number; dias_restantes: number;
+    dias_habiles_semana: number;
     venta_mes: number; venta_promedio_dia: number; venta_estimada_mes: number;
     restante_meta: number; a_vender_por_dia: number;
-    cxp_total: number; cxp_del_mes: number; cxc_total: number;
+    cxp_total: number; cxp_del_mes: number; cxp_corto_plazo: number; cxc_total: number;
     diferencia: number;
   };
+};
+
+type DeudaBancaria = {
+  id: number; nombre: string; referencia: string | null;
+  notas: string | null; total: number;
+  conceptos: { id: number; concepto: string; monto: number; orden: number; pct: number }[];
 };
 
 type DeudaProv = { total: number; filas: { proveedor_id: number; proveedor: string; saldo: number; pct: number }[] };
@@ -46,12 +54,16 @@ export default function TableroCxP() {
   const hoy = new Date();
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth() + 1);
+  // Por default: ver TODAS las CxP pendientes (replica el Excel del usuario)
+  // Si activa "Solo del mes", filtra por el selector arriba.
+  const [soloDelMes, setSoloDelMes] = useState(false);
   const [arrastrarVencidas, setArrastrarVencidas] = useState(true);
   const [incluirPagadas, setIncluirPagadas] = useState(false);
 
   const [tablero, setTablero] = useState<Tablero | null>(null);
   const [cxps, setCxps] = useState<CxP[]>([]);
   const [deudaProv, setDeudaProv] = useState<DeudaProv | null>(null);
+  const [deudasBanc, setDeudasBanc] = useState<DeudaBancaria[]>([]);
   const [showCaptura, setShowCaptura] = useState(false);
   const [editandoPanel, setEditandoPanel] = useState(false);
   const [panelDraft, setPanelDraft] = useState<any>(null);
@@ -135,23 +147,26 @@ export default function TableroCxP() {
   }
 
   async function cargar() {
-    const [t, c, d] = await Promise.all([
+    const [t, c, d, db] = await Promise.all([
       api.get("/api/cxp/tablero", { params: { anio, mes } }),
       api.get("/api/cxp/cartera", {
         params: {
-          anio, mes,
+          anio: soloDelMes ? anio : undefined,
+          mes: soloDelMes ? mes : undefined,
           incluir_pagadas: incluirPagadas,
           arrastrar_vencidas: arrastrarVencidas,
         },
       }),
       api.get("/api/cxp/deuda-por-proveedor"),
+      api.get("/api/cxp/deuda-bancaria"),
     ]);
     setTablero(t.data);
     setCxps(c.data);
     setDeudaProv(d.data);
+    setDeudasBanc(db.data);
   }
 
-  useEffect(() => { cargar(); }, [anio, mes, incluirPagadas, arrastrarVencidas]);
+  useEffect(() => { cargar(); }, [anio, mes, soloDelMes, incluirPagadas, arrastrarVencidas]);
 
   async function guardarPanel() {
     await api.post("/api/cxp/panel", panelDraft);
@@ -164,6 +179,15 @@ export default function TableroCxP() {
       const r = await api.get("/api/cxp/tipo-cambio");
       setPanelDraft({ ...panelDraft, usd_mxn: r.data.valor });
       alert(`Tipo de cambio actualizado: ${r.data.valor}\nFuente: ${r.data.fuente}\nFecha: ${r.data.fecha}`);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function toggleCortoPlazo(c: CxP) {
+    try {
+      await api.patch(`/api/cxp/manual/${c.cxp_id}`, { corto_plazo: !c.corto_plazo });
+      cargar();
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
     }
@@ -213,21 +237,24 @@ export default function TableroCxP() {
   // Restante a venta estimada (lo que falta vender este mes según proyección)
   const restanteVentaEstimada = Math.max(0, ventaMensualEst - ventaActualMes);
 
-  const facturasPorPagar = k?.cxp_total || 0;
-  const saldo = p?.saldo_banco || 0; // saldo en banco hoy
-  const ingresoEgresoBanco = p?.ingreso_egreso_banco || 0; // capturable independiente
+  // "Facturas por pagar" = SOLO las CxP marcadas como corto plazo
+  // (las que el usuario decide pagar pronto). Total general queda como referencia.
+  const facturasPorPagar = k?.cxp_corto_plazo || 0;
+  const totalProveedores = k?.cxp_total || 0; // todas las CxP abiertas
+  const saldo = p?.saldo_banco || 0;
+  const ingresoEgresoBanco = p?.ingreso_egreso_banco || 0;
 
-  // A vender por día = lo que falta de venta estimada / días restantes
-  const aVenderPorDia = restanteVentaEstimada / diasRestantes;
-  const restanteFacturasPagar = facturasPorPagar - saldo;
-  // % $ necesario = saldo / facturas por pagar (cuánto del corto plazo tengo cubierto)
+  // Restante facturas por pagar = lo que falta cubrir
+  const restanteFacturasPagar = Math.max(0, facturasPorPagar - saldo);
+  // A vender por día = restante facturas / días hábiles restantes esta semana
+  const diasHabilesSemana = k?.dias_habiles_semana || 5;
+  const aVenderPorDia = restanteFacturasPagar / diasHabilesSemana;
+
   const pctNecesario = facturasPorPagar > 0 ? saldo / facturasPorPagar : 0;
 
   const usdMxn = p?.usd_mxn || 0;
   const deudasXCobrar = k?.cxc_total || 0;
   const pctVentaDeuda = facturasPorPagar > 0 ? ventaMensualEst / facturasPorPagar : 0;
-  const totalProveedores = facturasPorPagar;
-  const diferencia = ventaMensualEst + deudasXCobrar - facturasPorPagar;
 
   return (
     <Layout title="Tablero de Cuentas por Pagar"
@@ -248,11 +275,19 @@ export default function TableroCxP() {
           </select>
           <input className="input" type="number" value={anio}
             onChange={(e) => setAnio(+e.target.value)} style={{ maxWidth: 100 }} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginLeft: 12 }}>
-            <input type="checkbox" checked={arrastrarVencidas}
-              onChange={(e) => setArrastrarVencidas(e.target.checked)} />
-            Arrastrar vencidas de meses anteriores
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", marginLeft: 12, fontWeight: 600 }}
+            title="Off (default): muestra TODAS las CxP pendientes. On: filtra solo las del mes seleccionado.">
+            <input type="checkbox" checked={soloDelMes}
+              onChange={(e) => setSoloDelMes(e.target.checked)} />
+            Solo del mes seleccionado
           </label>
+          {soloDelMes && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={arrastrarVencidas}
+                onChange={(e) => setArrastrarVencidas(e.target.checked)} />
+              Arrastrar vencidas anteriores
+            </label>
+          )}
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
             <input type="checkbox" checked={incluirPagadas}
               onChange={(e) => setIncluirPagadas(e.target.checked)} />
@@ -317,10 +352,7 @@ export default function TableroCxP() {
                 <td style={lblBlue}>Restante a venta estimada</td>
                 <td style={valBlack}>{fmt(restanteVentaEstimada)}</td>
                 <td style={lblBlue}>Restante facturas por pagar</td>
-                <td style={valBlack}>{fmt(restanteFacturasPagar)}</td>
-                <td colSpan={2} style={{ ...valBlack, color: diferencia < 0 ? "#dc2626" : "#16a34a" }}>
-                  {diferencia < 0 ? "-" : ""}{fmt(Math.abs(diferencia))}
-                </td>
+                <td colSpan={3} style={valBlack}>{fmt(restanteFacturasPagar)}</td>
               </tr>
               <tr>
                 <td style={lblGreen}>% $ necesario</td>
@@ -344,14 +376,10 @@ export default function TableroCxP() {
                 <td style={lblRed} onClick={() => nav("/cartera")}
                   title="Click para ver el detalle en Cartera"
                   >Deudas x cobrar 🔗</td>
-                <td style={{ ...valBlack, cursor: "pointer" }}
+                <td colSpan={3} style={{ ...valBlack, cursor: "pointer" }}
                   onClick={() => nav("/cartera")}
                   title="Suma de saldos pendientes en Cartera">
                   {fmt(deudasXCobrar)}
-                </td>
-                <td style={lblBlue}>DIFERENCIA</td>
-                <td style={{ ...valBlack, fontWeight: 800, color: diferencia < 0 ? "#dc2626" : "#16a34a" }}>
-                  {fmt(diferencia)}
                 </td>
               </tr>
               <tr>
@@ -398,6 +426,10 @@ export default function TableroCxP() {
               <th style={{ ...thOrange, textAlign: "right" }}>Monto</th>
               <th style={{ ...thOrange, textAlign: "right" }}>Saldado</th>
               <th style={{ ...thOrange, textAlign: "right" }}>Saldo</th>
+              <th style={{ ...thOrange, textAlign: "center", width: 70 }}
+                title="Marca las facturas que vas a pagar en el corto plazo. El panel suma SOLO estas en 'Facturas por pagar'.">
+                Corto plazo
+              </th>
               <th className="no-print" style={thOrange}></th>
             </tr>
           </thead>
@@ -449,6 +481,13 @@ export default function TableroCxP() {
                     color: c.pagado ? "var(--color-success)" : "var(--color-danger)" }}>
                     {c.pagado ? "✓ pagado" : fmt(c.saldo)}
                   </td>
+                  <td style={{ ...td, textAlign: "center" }}
+                    title={c.corto_plazo ? "Marcada como corto plazo (suma al panel)" : "Click para marcar como corto plazo"}>
+                    <input type="checkbox" checked={!!c.corto_plazo}
+                      disabled={c.pagado}
+                      onChange={() => toggleCortoPlazo(c)}
+                      style={{ cursor: c.pagado ? "not-allowed" : "pointer", transform: "scale(1.3)" }} />
+                  </td>
                   <td className="no-print" style={td}>
                     {!c.pagado && <button className="btn btn-sm" onClick={() => setAbonando(c)}>Abonar</button>}
                   </td>
@@ -460,48 +499,55 @@ export default function TableroCxP() {
               <td style={{ ...td, textAlign: "right" }}>{fmt(totalMonto)}</td>
               <td style={{ ...td, textAlign: "right" }}>{fmt(totalSaldado)}</td>
               <td style={{ ...td, textAlign: "right", fontSize: 14 }}>{fmt(totalSaldo)}</td>
+              <td style={{ ...td, textAlign: "center", fontSize: 11, fontWeight: 600 }}>
+                {cxps.filter((c) => c.corto_plazo && !c.pagado).length}
+              </td>
               <td className="no-print"></td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* SECCIÓN DEUDA POR PROVEEDOR */}
-      {deudaProv && (
-        <div className="card print-area">
-          <h3 className="card-header">Deuda por proveedor</h3>
-          <table style={{ width: "100%", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: "#1f2937", color: "white" }}>
-                <th style={{ ...thBlack, textAlign: "right", width: "20%" }}>DEUDA</th>
-                <th style={{ ...thBlack, textAlign: "right", width: "12%" }}>%</th>
-                <th style={thBlack}>Proveedor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deudaProv.filas.map((f) => (
-                <tr key={f.proveedor_id} style={{
-                  background: f.saldo > 0 ? "white" : "#f9fafb",
-                  color: f.saldo > 0 ? undefined : "#9ca3af",
-                }}>
-                  <td style={{ ...td, textAlign: "right", fontWeight: f.saldo > 0 ? 700 : 400 }}>
-                    {f.saldo > 0 ? fmt(f.saldo) : "—"}
-                  </td>
-                  <td style={{ ...td, textAlign: "right" }}>
-                    {f.saldo > 0 ? fmtPct(f.pct) : "0.00%"}
-                  </td>
-                  <td style={td}>{f.proveedor}</td>
+      {/* SECCIÓN DEUDA POR PROVEEDOR + DEUDA BANCARIA - grid 2 columnas */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {deudaProv && (
+          <div className="card print-area">
+            <h3 className="card-header">Deuda por proveedor</h3>
+            <table style={{ width: "100%", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#1f2937", color: "white" }}>
+                  <th style={{ ...thBlack, textAlign: "right", width: "30%" }}>DEUDA</th>
+                  <th style={{ ...thBlack, textAlign: "right", width: "15%" }}>%</th>
+                  <th style={thBlack}>Proveedor</th>
                 </tr>
-              ))}
-              <tr style={{ background: "#dbeafe", fontWeight: 800 }}>
-                <td style={{ ...td, textAlign: "right", fontSize: 14 }}>{fmt(deudaProv.total)}</td>
-                <td style={{ ...td, textAlign: "right" }}>100.00%</td>
-                <td style={td}>TOTAL</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {deudaProv.filas.map((f) => (
+                  <tr key={f.proveedor_id} style={{
+                    background: f.saldo > 0 ? "white" : "#f9fafb",
+                    color: f.saldo > 0 ? undefined : "#9ca3af",
+                  }}>
+                    <td style={{ ...td, textAlign: "right", fontWeight: f.saldo > 0 ? 700 : 400 }}>
+                      {f.saldo > 0 ? fmt(f.saldo) : "—"}
+                    </td>
+                    <td style={{ ...td, textAlign: "right" }}>
+                      {f.saldo > 0 ? fmtPct(f.pct) : "0.00%"}
+                    </td>
+                    <td style={td}>{f.proveedor}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "#dbeafe", fontWeight: 800 }}>
+                  <td style={{ ...td, textAlign: "right", fontSize: 14 }}>{fmt(deudaProv.total)}</td>
+                  <td style={{ ...td, textAlign: "right" }}>100.00%</td>
+                  <td style={td}>TOTAL</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <DeudaBancariaPanel deudas={deudasBanc} onChange={cargar} />
+      </div>
 
       {showCaptura && (
         <CapturaCxPModal
@@ -755,3 +801,199 @@ const modalCard: React.CSSProperties = {
   background: "white", maxWidth: 620, width: "92%",
   padding: 24, borderRadius: 12, maxHeight: "90vh", overflow: "auto",
 };
+
+
+// === Panel Deuda Bancaria (préstamos, créditos, mercancía en tránsito) ===
+function DeudaBancariaPanel({ deudas, onChange }: {
+  deudas: DeudaBancaria[];
+  onChange: () => void;
+}) {
+  const [creando, setCreando] = useState(false);
+  const [draftDeuda, setDraftDeuda] = useState({ nombre: "", referencia: "" });
+
+  async function crearDeuda() {
+    if (!draftDeuda.nombre.trim()) return;
+    try {
+      await api.post("/api/cxp/deuda-bancaria", draftDeuda);
+      setDraftDeuda({ nombre: "", referencia: "" });
+      setCreando(false);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function borrarDeuda(id: number, nombre: string) {
+    if (!confirm(`Borrar deuda "${nombre}" y todos sus conceptos?`)) return;
+    await api.delete(`/api/cxp/deuda-bancaria/${id}`);
+    onChange();
+  }
+
+  return (
+    <div className="card print-area">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h3 className="card-header" style={{ margin: 0 }}>Deuda bancaria</h3>
+        <button className="btn-icon no-print" onClick={() => setCreando(!creando)}>
+          {creando ? "Cancelar" : "+ Nueva"}
+        </button>
+      </div>
+
+      {creando && (
+        <div className="no-print" style={{ marginTop: 8, padding: 10, background: "var(--color-bg)", borderRadius: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6 }}>
+            <input className="input" placeholder="Nombre (ej. ADEUDO BANORTE)"
+              value={draftDeuda.nombre}
+              onChange={(e) => setDraftDeuda({ ...draftDeuda, nombre: e.target.value })} />
+            <input className="input" placeholder="Referencia (ej. 90725082)"
+              value={draftDeuda.referencia}
+              onChange={(e) => setDraftDeuda({ ...draftDeuda, referencia: e.target.value })} />
+            <button className="btn" onClick={crearDeuda}>Crear</button>
+          </div>
+        </div>
+      )}
+
+      {deudas.length === 0 ? (
+        <p style={{ color: "var(--color-text-muted)", fontSize: 13, padding: 16, textAlign: "center" }}>
+          Sin deudas bancarias registradas. Click "+ Nueva" para crear (ej. crédito Banorte, mercancía en tránsito).
+        </p>
+      ) : (
+        deudas.map((d) => (
+          <DeudaBlock key={d.id} deuda={d} onChange={onChange}
+            onBorrar={() => borrarDeuda(d.id, d.nombre)} />
+        ))
+      )}
+    </div>
+  );
+}
+
+
+function DeudaBlock({ deuda, onChange, onBorrar }: {
+  deuda: DeudaBancaria;
+  onChange: () => void;
+  onBorrar: () => void;
+}) {
+  const [editing, setEditing] = useState<{ id: number; field: string } | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [draftConcepto, setDraftConcepto] = useState({ concepto: "", monto: 0 });
+  const [agregando, setAgregando] = useState(false);
+
+  async function guardarEdit(c: { id: number; concepto: string; monto: number }) {
+    if (!editing) return;
+    const payload: any = {};
+    if (editing.field === "concepto") payload.concepto = editValue;
+    if (editing.field === "monto") payload.monto = +editValue;
+    try {
+      await api.patch(`/api/cxp/deuda-bancaria/conceptos/${c.id}`, payload);
+      setEditing(null);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function crearConcepto() {
+    if (!draftConcepto.concepto.trim()) return;
+    try {
+      await api.post(`/api/cxp/deuda-bancaria/${deuda.id}/conceptos`, draftConcepto);
+      setDraftConcepto({ concepto: "", monto: 0 });
+      setAgregando(false);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function borrarConcepto(id: number) {
+    if (!confirm("Borrar este concepto?")) return;
+    await api.delete(`/api/cxp/deuda-bancaria/conceptos/${id}`);
+    onChange();
+  }
+
+  return (
+    <div style={{ marginTop: 12, border: "1px solid var(--color-border)", borderRadius: 6, overflow: "hidden" }}>
+      <div style={{ background: "#1f2937", color: "white", padding: "8px 12px",
+        display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <strong style={{ fontSize: 13 }}>{deuda.nombre}</strong>
+          {deuda.referencia && <span style={{ marginLeft: 8, fontSize: 11, color: "#9ca3af" }}>{deuda.referencia}</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <strong style={{ fontSize: 14 }}>${deuda.total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</strong>
+          <button onClick={onBorrar} className="no-print"
+            style={{ background: "transparent", color: "#fca5a5", border: 0, cursor: "pointer", fontSize: 12 }}>×</button>
+        </div>
+      </div>
+      <table style={{ width: "100%", fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: "#fef9c3" }}>
+            <th style={{ ...thBlack, textAlign: "right", width: "30%" }}>Monto</th>
+            <th style={thBlack}>Concepto</th>
+            <th style={{ ...thBlack, textAlign: "right", width: "15%" }}>%</th>
+            <th className="no-print" style={{ ...thBlack, width: 30 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {deuda.conceptos.map((c) => (
+            <tr key={c.id}>
+              <td style={{ ...td, textAlign: "right", fontWeight: 600 }}
+                onDoubleClick={() => { setEditing({ id: c.id, field: "monto" }); setEditValue(String(c.monto)); }}>
+                {editing?.id === c.id && editing.field === "monto" ? (
+                  <input autoFocus type="number" step="0.01" value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => guardarEdit(c)}
+                    onKeyDown={(e) => { if (e.key === "Enter") guardarEdit(c); if (e.key === "Escape") setEditing(null); }}
+                    style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                ) : `$${c.monto.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`}
+              </td>
+              <td style={td}
+                onDoubleClick={() => { setEditing({ id: c.id, field: "concepto" }); setEditValue(c.concepto); }}>
+                {editing?.id === c.id && editing.field === "concepto" ? (
+                  <input autoFocus value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => guardarEdit(c)}
+                    onKeyDown={(e) => { if (e.key === "Enter") guardarEdit(c); if (e.key === "Escape") setEditing(null); }}
+                    style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                ) : c.concepto}
+              </td>
+              <td style={{ ...td, textAlign: "right" }}>{c.pct.toFixed(2)}%</td>
+              <td className="no-print" style={td}>
+                <button onClick={() => borrarConcepto(c.id)}
+                  style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer" }}>×</button>
+              </td>
+            </tr>
+          ))}
+          {agregando ? (
+            <tr style={{ background: "#fef9c3" }}>
+              <td style={td}>
+                <input className="input" type="number" step="0.01" value={draftConcepto.monto}
+                  onChange={(e) => setDraftConcepto({ ...draftConcepto, monto: +e.target.value })}
+                  placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+              </td>
+              <td style={td}>
+                <input className="input" value={draftConcepto.concepto} autoFocus
+                  onChange={(e) => setDraftConcepto({ ...draftConcepto, concepto: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") crearConcepto(); }}
+                  placeholder="PAGO 5 CHINA tabla" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+              </td>
+              <td style={td}></td>
+              <td className="no-print" style={td}>
+                <button onClick={crearConcepto}
+                  style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓</button>
+              </td>
+            </tr>
+          ) : (
+            <tr className="no-print">
+              <td colSpan={4} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+                <button onClick={() => setAgregando(true)}
+                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "4px 12px",
+                    borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                  + Agregar concepto
+                </button>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
