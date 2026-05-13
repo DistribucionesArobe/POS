@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ConceptoTarjeta, TarjetaTotal, TarjetaSubcuenta, Usuario
+from app.models import (
+    ConceptoTarjeta, TarjetaTotal, TarjetaSubcuenta, Usuario,
+    GastoPersonal, IngresoPersonal,
+)
 from app.services.security import get_active_empresa_id, require_admin
 
 router = APIRouter()
@@ -255,4 +258,140 @@ def borrar_subcuenta(
         raise HTTPException(404, "Subcuenta no existe")
     db.delete(s)
     db.commit()
+    return {"ok": True}
+
+
+# ===== Control de gastos personales (mensual) =====
+
+
+@router.get("/personales")
+def listar_personales(
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    gastos = (
+        db.query(GastoPersonal)
+        .filter(GastoPersonal.empresa_id == empresa_id)
+        .order_by(GastoPersonal.orden, GastoPersonal.id)
+        .all()
+    )
+    ingresos = (
+        db.query(IngresoPersonal)
+        .filter(IngresoPersonal.empresa_id == empresa_id)
+        .order_by(IngresoPersonal.orden, IngresoPersonal.id)
+        .all()
+    )
+    return {
+        "gastos": [
+            {"id": g.id, "dia": g.dia, "tipo": g.tipo, "concepto": g.concepto,
+             "monto": float(g.monto or 0), "orden": g.orden}
+            for g in gastos
+        ],
+        "ingresos": [
+            {"id": i.id, "fuente": i.fuente, "monto": float(i.monto or 0), "orden": i.orden}
+            for i in ingresos
+        ],
+    }
+
+
+@router.post("/personales/gastos")
+def crear_gasto(payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    siguiente = db.query(GastoPersonal).filter(GastoPersonal.empresa_id == empresa_id).count() + 1
+    g = GastoPersonal(
+        empresa_id=empresa_id,
+        dia=payload.get("dia"),
+        tipo=(payload.get("tipo") or None),
+        concepto=(payload.get("concepto") or None),
+        monto=float(payload.get("monto") or 0),
+        orden=siguiente,
+    )
+    db.add(g); db.commit(); db.refresh(g)
+    return {"id": g.id}
+
+
+@router.patch("/personales/gastos/{gid}")
+def actualizar_gasto(gid: int, payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    g = db.get(GastoPersonal, gid)
+    if not g or g.empresa_id != empresa_id:
+        raise HTTPException(404, "Gasto no existe")
+    if "dia" in payload:
+        try: g.dia = int(payload["dia"]) if payload["dia"] not in (None, "") else None
+        except (TypeError, ValueError): raise HTTPException(400, "Dia invalido")
+    if "tipo" in payload: g.tipo = (payload["tipo"] or None)
+    if "concepto" in payload: g.concepto = (payload["concepto"] or None)
+    if "monto" in payload:
+        try: g.monto = float(payload["monto"])
+        except (TypeError, ValueError): raise HTTPException(400, "Monto invalido")
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/personales/gastos/{gid}")
+def borrar_gasto(gid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    g = db.get(GastoPersonal, gid)
+    if not g or g.empresa_id != empresa_id:
+        raise HTTPException(404, "Gasto no existe")
+    db.delete(g); db.commit()
+    return {"ok": True}
+
+
+@router.post("/personales/ingresos")
+def crear_ingreso(payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    siguiente = db.query(IngresoPersonal).filter(IngresoPersonal.empresa_id == empresa_id).count() + 1
+    i = IngresoPersonal(
+        empresa_id=empresa_id,
+        fuente=(payload.get("fuente") or "Ingreso").strip(),
+        monto=float(payload.get("monto") or 0),
+        orden=siguiente,
+    )
+    db.add(i); db.commit(); db.refresh(i)
+    return {"id": i.id}
+
+
+@router.patch("/personales/ingresos/{iid}")
+def actualizar_ingreso(iid: int, payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    i = db.get(IngresoPersonal, iid)
+    if not i or i.empresa_id != empresa_id:
+        raise HTTPException(404, "Ingreso no existe")
+    if "fuente" in payload:
+        f = (payload["fuente"] or "").strip()
+        if f: i.fuente = f
+    if "monto" in payload:
+        try: i.monto = float(payload["monto"])
+        except (TypeError, ValueError): raise HTTPException(400, "Monto invalido")
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/personales/ingresos/{iid}")
+def borrar_ingreso(iid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    i = db.get(IngresoPersonal, iid)
+    if not i or i.empresa_id != empresa_id:
+        raise HTTPException(404, "Ingreso no existe")
+    db.delete(i); db.commit()
     return {"ok": True}

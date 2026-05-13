@@ -18,6 +18,17 @@ type Subcuenta = {
   orden: number;
 };
 
+type GastoP = {
+  id: number;
+  dia: number | null;
+  tipo: string | null;
+  concepto: string | null;
+  monto: number;
+  orden: number;
+};
+
+type IngresoP = { id: number; fuente: string; monto: number; orden: number };
+
 type SubSeccion = {
   key: "amex_padel" | "amex_aceromax" | "banorte_padel" | "banorte_aceromax";
   titulo: string;
@@ -30,6 +41,8 @@ const fmt = (n: number) =>
 export default function TarjetasCredito() {
   const [datos, setDatos] = useState<Concepto[]>([]);
   const [subcuentas, setSubcuentas] = useState<Subcuenta[]>([]);
+  const [gastosP, setGastosP] = useState<GastoP[]>([]);
+  const [ingresosP, setIngresosP] = useState<IngresoP[]>([]);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
 
@@ -37,12 +50,15 @@ export default function TarjetasCredito() {
     setCargando(true);
     setErrorCarga(null);
     try {
-      const [rConceptos, rSubcuentas] = await Promise.all([
+      const [rConceptos, rSubcuentas, rPersonales] = await Promise.all([
         api.get("/api/tarjetas"),
         api.get("/api/tarjetas/subcuentas"),
+        api.get("/api/tarjetas/personales"),
       ]);
       setDatos(rConceptos.data || []);
       setSubcuentas(rSubcuentas.data || []);
+      setGastosP(rPersonales.data?.gastos || []);
+      setIngresosP(rPersonales.data?.ingresos || []);
     } catch (err: any) {
       const code = err.response?.status;
       if (code === 403) setErrorCarga("Solo administradores pueden ver esta sección.");
@@ -51,6 +67,8 @@ export default function TarjetasCredito() {
       else setErrorCarga(`Error ${code}: ${err.response?.data?.detail || err.message}`);
       setDatos([]);
       setSubcuentas([]);
+      setGastosP([]);
+      setIngresosP([]);
     } finally {
       setCargando(false);
     }
@@ -113,6 +131,8 @@ export default function TarjetasCredito() {
           datos={datos}
           onChange={cargar}
         />
+
+        <PanelPersonal gastos={gastosP} ingresos={ingresosP} onChange={cargar} />
       </div>
 
       {cargando && <p style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 8 }}>Cargando...</p>}
@@ -453,6 +473,284 @@ function SubPanel({ sub, datos, onChange }: {
           </tr>
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+function PanelPersonal({ gastos, ingresos, onChange }: {
+  gastos: GastoP[];
+  ingresos: IngresoP[];
+  onChange: () => void;
+}) {
+  const [editing, setEditing] = useState<{ tipo: "g" | "i"; id: number; campo: string } | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [agregandoG, setAgregandoG] = useState(false);
+  const [draftG, setDraftG] = useState<{ dia: string; tipo: string; concepto: string; monto: number }>({ dia: "", tipo: "Banorte", concepto: "", monto: 0 });
+  const [agregandoI, setAgregandoI] = useState(false);
+  const [draftI, setDraftI] = useState({ fuente: "", monto: 0 });
+
+  const totalGastos = gastos.reduce((a, g) => a + g.monto, 0);
+  const totalIngresos = ingresos.reduce((a, i) => a + i.monto, 0);
+  const libre = totalIngresos - totalGastos;
+
+  async function guardarG(g: GastoP) {
+    if (!editing || editing.tipo !== "g") return;
+    const payload: any = {};
+    if (editing.campo === "dia") payload.dia = editValue || null;
+    else if (editing.campo === "monto") {
+      const n = +editValue;
+      if (isNaN(n) || n < 0) return alert("Monto inválido");
+      payload.monto = n;
+    } else payload[editing.campo] = editValue;
+    try {
+      await api.patch(`/api/tarjetas/personales/gastos/${g.id}`, payload);
+      setEditing(null); onChange();
+    } catch (err: any) { alert("Error: " + (err.response?.data?.detail || err.message)); }
+  }
+
+  async function guardarI(i: IngresoP) {
+    if (!editing || editing.tipo !== "i") return;
+    const payload: any = {};
+    if (editing.campo === "monto") {
+      const n = +editValue;
+      if (isNaN(n) || n < 0) return alert("Monto inválido");
+      payload.monto = n;
+    } else payload[editing.campo] = editValue;
+    try {
+      await api.patch(`/api/tarjetas/personales/ingresos/${i.id}`, payload);
+      setEditing(null); onChange();
+    } catch (err: any) { alert("Error: " + (err.response?.data?.detail || err.message)); }
+  }
+
+  async function crearG() {
+    try {
+      await api.post("/api/tarjetas/personales/gastos", {
+        dia: draftG.dia ? +draftG.dia : null,
+        tipo: draftG.tipo || null,
+        concepto: draftG.concepto || null,
+        monto: draftG.monto,
+      });
+      setDraftG({ dia: "", tipo: "Banorte", concepto: "", monto: 0 });
+      setAgregandoG(false); onChange();
+    } catch (err: any) { alert("Error: " + (err.response?.data?.detail || err.message)); }
+  }
+
+  async function crearI() {
+    if (!draftI.fuente.trim()) return;
+    try {
+      await api.post("/api/tarjetas/personales/ingresos", draftI);
+      setDraftI({ fuente: "", monto: 0 });
+      setAgregandoI(false); onChange();
+    } catch (err: any) { alert("Error: " + (err.response?.data?.detail || err.message)); }
+  }
+
+  async function borrarG(id: number) {
+    if (!confirm("Borrar este gasto?")) return;
+    await api.delete(`/api/tarjetas/personales/gastos/${id}`); onChange();
+  }
+  async function borrarI(id: number) {
+    if (!confirm("Borrar este ingreso?")) return;
+    await api.delete(`/api/tarjetas/personales/ingresos/${id}`); onChange();
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{
+        background: "#0ea5e9", color: "white", padding: "10px 18px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <strong style={{ fontSize: 16, letterSpacing: "0.05em" }}>PERSONAL · Control de gastos mensuales</strong>
+        <span style={{ fontSize: 11, opacity: 0.85 }}>doble click para editar</span>
+      </div>
+
+      <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+        {/* Tabla de gastos por dia */}
+        <div>
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#dbeafe" }}>
+                <th style={{ ...thBlack, width: 50 }}>DIA</th>
+                <th style={{ ...thBlack, width: 110 }}>TIPO</th>
+                <th style={thBlack}>CONCEPTO</th>
+                <th style={{ ...thBlack, textAlign: "right", width: 110 }}>MONTO</th>
+                <th style={{ ...thBlack, width: 28 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {gastos.length === 0 && !agregandoG && (
+                <tr><td colSpan={5} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>Sin gastos. Click "+ Agregar".</td></tr>
+              )}
+              {gastos.map((g) => (
+                <tr key={g.id}>
+                  {(["dia", "tipo", "concepto", "monto"] as const).map((campo) => {
+                    const val: any = (g as any)[campo];
+                    const editandoEste = editing?.tipo === "g" && editing.id === g.id && editing.campo === campo;
+                    const display = campo === "monto" ? fmt(val || 0) : (val ?? "");
+                    const align = (campo === "monto" || campo === "dia") ? "right" : "left";
+                    return (
+                      <td key={campo} style={{ ...td, textAlign: align, cursor: "pointer", fontWeight: campo === "monto" ? 600 : 400 }}
+                        onDoubleClick={() => { setEditing({ tipo: "g", id: g.id, campo }); setEditValue(val == null ? "" : String(val)); }}>
+                        {editandoEste ? (
+                          <input autoFocus
+                            type={campo === "monto" || campo === "dia" ? "number" : "text"}
+                            step={campo === "monto" ? "0.01" : "1"}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={() => guardarG(g)}
+                            onKeyDown={(e) => { if (e.key === "Enter") guardarG(g); if (e.key === "Escape") setEditing(null); }}
+                            style={{ width: "100%", padding: 4, fontSize: 12, textAlign: align }} />
+                        ) : (display === "" ? <span style={{ color: "#cbd5e1" }}>—</span> : display)}
+                      </td>
+                    );
+                  })}
+                  <td style={td}>
+                    <button onClick={() => borrarG(g.id)}
+                      style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer", fontSize: 14 }}>×</button>
+                  </td>
+                </tr>
+              ))}
+              {agregandoG && (
+                <tr style={{ background: "#fef9c3" }}>
+                  <td style={td}>
+                    <input type="number" autoFocus value={draftG.dia}
+                      onChange={(e) => setDraftG({ ...draftG, dia: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearG(); }}
+                      placeholder="15" style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                  </td>
+                  <td style={td}>
+                    <input value={draftG.tipo}
+                      onChange={(e) => setDraftG({ ...draftG, tipo: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearG(); }}
+                      placeholder="Banorte" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                  </td>
+                  <td style={td}>
+                    <input value={draftG.concepto}
+                      onChange={(e) => setDraftG({ ...draftG, concepto: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearG(); }}
+                      placeholder="(opcional)" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                  </td>
+                  <td style={td}>
+                    <input type="number" step="0.01" value={draftG.monto}
+                      onChange={(e) => setDraftG({ ...draftG, monto: +e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearG(); }}
+                      placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                  </td>
+                  <td style={td}>
+                    <button onClick={crearG}
+                      style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "2px 6px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓</button>
+                  </td>
+                </tr>
+              )}
+              <tr>
+                <td colSpan={5} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+                  {!agregandoG && (
+                    <button onClick={() => setAgregandoG(true)}
+                      style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "3px 14px", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>+ Agregar</button>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Resumen + ingresos */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{
+            background: "#fef3c7", border: "1px solid #fde68a", padding: 12, borderRadius: 6,
+            display: "flex", flexDirection: "column", gap: 6,
+          }}>
+            <ResumenFila label="GASTOS"  valor={totalGastos}   color="#991b1b" />
+            <ResumenFila label="INGRESO" valor={totalIngresos} color="#065f46" />
+            <div style={{ borderTop: "1px dashed #d97706", paddingTop: 6 }}>
+              <ResumenFila label="LIBRE" valor={libre} color={libre < 0 ? "#991b1b" : "#1e40af"} grande />
+            </div>
+          </div>
+
+          {/* Mini tabla de ingresos */}
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#dcfce7" }}>
+                <th style={thBlack}>FUENTE</th>
+                <th style={{ ...thBlack, textAlign: "right", width: 110 }}>MONTO</th>
+                <th style={{ ...thBlack, width: 28 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ingresos.length === 0 && !agregandoI && (
+                <tr><td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 8 }}>Sin ingresos</td></tr>
+              )}
+              {ingresos.map((i) => (
+                <tr key={i.id}>
+                  {(["fuente", "monto"] as const).map((campo) => {
+                    const val: any = (i as any)[campo];
+                    const editandoEste = editing?.tipo === "i" && editing.id === i.id && editing.campo === campo;
+                    const display = campo === "monto" ? fmt(val || 0) : val;
+                    const align = campo === "monto" ? "right" : "left";
+                    return (
+                      <td key={campo} style={{ ...td, textAlign: align, cursor: "pointer", fontWeight: campo === "monto" ? 600 : 400 }}
+                        onDoubleClick={() => { setEditing({ tipo: "i", id: i.id, campo }); setEditValue(String(val ?? "")); }}>
+                        {editandoEste ? (
+                          <input autoFocus
+                            type={campo === "monto" ? "number" : "text"}
+                            step={campo === "monto" ? "0.01" : undefined}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={() => guardarI(i)}
+                            onKeyDown={(e) => { if (e.key === "Enter") guardarI(i); if (e.key === "Escape") setEditing(null); }}
+                            style={{ width: "100%", padding: 4, fontSize: 12, textAlign: align }} />
+                        ) : display}
+                      </td>
+                    );
+                  })}
+                  <td style={td}>
+                    <button onClick={() => borrarI(i.id)}
+                      style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer", fontSize: 14 }}>×</button>
+                  </td>
+                </tr>
+              ))}
+              {agregandoI && (
+                <tr style={{ background: "#fef9c3" }}>
+                  <td style={td}>
+                    <input autoFocus value={draftI.fuente}
+                      onChange={(e) => setDraftI({ ...draftI, fuente: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearI(); }}
+                      placeholder="Sueldo" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                  </td>
+                  <td style={td}>
+                    <input type="number" step="0.01" value={draftI.monto}
+                      onChange={(e) => setDraftI({ ...draftI, monto: +e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") crearI(); }}
+                      placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                  </td>
+                  <td style={td}>
+                    <button onClick={crearI}
+                      style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "2px 6px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓</button>
+                  </td>
+                </tr>
+              )}
+              <tr>
+                <td colSpan={3} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+                  {!agregandoI && (
+                    <button onClick={() => setAgregandoI(true)}
+                      style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "3px 14px", borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>+ Ingreso</button>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ResumenFila({ label, valor, color, grande }: { label: string; valor: number; color: string; grande?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <span style={{ fontSize: grande ? 14 : 11, color: "#475569", fontWeight: grande ? 700 : 500, letterSpacing: "0.04em" }}>{label}</span>
+      <span style={{ fontSize: grande ? 22 : 16, fontWeight: 700, color }}>{fmt(valor)}</span>
     </div>
   );
 }
