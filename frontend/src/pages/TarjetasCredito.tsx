@@ -10,24 +10,20 @@ type Concepto = {
   orden: number;
 };
 
-type SeccionDef = {
-  key: "amex_negocios" | "amex_reembolsos" | "banorte_padel" | "banorte_aceromax";
+type Totales = { amex: number; banorte: number };
+
+type SubSeccion = {
+  key: "amex_padel" | "amex_aceromax" | "banorte_padel" | "banorte_aceromax";
   titulo: string;
-  subtitulo?: string;
   color: string;
 };
 
-const SECCIONES: SeccionDef[] = [
-  { key: "amex_negocios",    titulo: "AMEX",      subtitulo: "Negocios",              color: "#0f172a" },
-  { key: "amex_reembolsos",  titulo: "AMEX",      subtitulo: "Reembolsos personales", color: "#475569" },
-  { key: "banorte_padel",    titulo: "Banorte",   subtitulo: "Gastos Padel",          color: "#b91c1c" },
-  { key: "banorte_aceromax", titulo: "Banorte",   subtitulo: "Aceromax",              color: "#dc2626" },
-];
-
-const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (n: number) =>
+  "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function TarjetasCredito() {
   const [datos, setDatos] = useState<Concepto[]>([]);
+  const [totales, setTotales] = useState<Totales>({ amex: 0, banorte: 0 });
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
 
@@ -35,19 +31,18 @@ export default function TarjetasCredito() {
     setCargando(true);
     setErrorCarga(null);
     try {
-      const r = await api.get("/api/tarjetas");
-      setDatos(r.data || []);
+      const [rConceptos, rTotales] = await Promise.all([
+        api.get("/api/tarjetas"),
+        api.get("/api/tarjetas/totales"),
+      ]);
+      setDatos(rConceptos.data || []);
+      setTotales(rTotales.data || { amex: 0, banorte: 0 });
     } catch (err: any) {
       const code = err.response?.status;
-      if (code === 403) {
-        setErrorCarga("Solo administradores pueden ver esta sección.");
-      } else if (code === 404) {
-        setErrorCarga("Endpoint /api/tarjetas no existe. El backend aún no se redespliega - espera ~2 min.");
-      } else if (!err.response) {
-        setErrorCarga("No se pudo contactar al backend (Network Error). Probable: backend reiniciándose en Render, o falta correr migrate_tarjetas.sql.");
-      } else {
-        setErrorCarga(`Error ${code}: ${err.response?.data?.detail || err.message}`);
-      }
+      if (code === 403) setErrorCarga("Solo administradores pueden ver esta sección.");
+      else if (code === 404) setErrorCarga("Endpoint /api/tarjetas no existe. Backend aún no se redespliega - espera ~2 min.");
+      else if (!err.response) setErrorCarga("No se pudo contactar al backend. Probable: backend reiniciándose o falta correr migrate_tarjetas.sql.");
+      else setErrorCarga(`Error ${code}: ${err.response?.data?.detail || err.message}`);
       setDatos([]);
     } finally {
       setCargando(false);
@@ -56,13 +51,13 @@ export default function TarjetasCredito() {
 
   useEffect(() => { cargar(); }, []);
 
-  const totalAmex = datos
-    .filter((d) => d.seccion === "amex_negocios" || d.seccion === "amex_reembolsos")
-    .reduce((a, c) => a + c.monto, 0);
-  const totalBanorte = datos
-    .filter((d) => d.seccion === "banorte_padel" || d.seccion === "banorte_aceromax")
-    .reduce((a, c) => a + c.monto, 0);
-  const totalGlobal = totalAmex + totalBanorte;
+  const sumaSeccion = (seccion: string) =>
+    datos.filter((d) => d.seccion === seccion).reduce((a, c) => a + c.monto, 0);
+
+  const gastosAmex = sumaSeccion("amex_padel") + sumaSeccion("amex_aceromax");
+  const gastosBanorte = sumaSeccion("banorte_padel") + sumaSeccion("banorte_aceromax");
+  const saldoAmex = totales.amex - gastosAmex;
+  const saldoBanorte = totales.banorte - gastosBanorte;
 
   return (
     <Layout title="Tarjetas de crédito · Control de gastos">
@@ -74,46 +69,171 @@ export default function TarjetasCredito() {
           <strong>No se pudieron cargar las tarjetas.</strong> {errorCarga}
         </div>
       )}
-      {/* Resumen */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-        <ResumenChip label="TOTAL AMEX"    valor={totalAmex}    color="#0f172a" />
-        <ResumenChip label="TOTAL BANORTE" valor={totalBanorte} color="#dc2626" />
-        <ResumenChip label="TOTAL GENERAL" valor={totalGlobal}  color="#1e40af" />
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <TarjetaCard
+          tarjeta="amex"
+          titulo="AMEX"
+          colorHeader="#0f172a"
+          total={totales.amex}
+          gastos={gastosAmex}
+          saldoPendiente={saldoAmex}
+          subSecciones={[
+            { key: "amex_padel",    titulo: "Padel",    color: "#0ea5e9" },
+            { key: "amex_aceromax", titulo: "Aceromax", color: "#475569" },
+          ]}
+          datos={datos}
+          onChange={cargar}
+        />
+
+        <TarjetaCard
+          tarjeta="banorte"
+          titulo="Banorte"
+          colorHeader="#dc2626"
+          total={totales.banorte}
+          gastos={gastosBanorte}
+          saldoPendiente={saldoBanorte}
+          subSecciones={[
+            { key: "banorte_padel",    titulo: "Padel",    color: "#0ea5e9" },
+            { key: "banorte_aceromax", titulo: "Aceromax", color: "#b91c1c" },
+          ]}
+          datos={datos}
+          onChange={cargar}
+        />
       </div>
 
-      {/* Layout: 3 columnas - AMEX (stack) | Banorte Padel | Banorte Aceromax */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <SeccionPanel def={SECCIONES[0]} datos={datos.filter((d) => d.seccion === "amex_negocios")} onChange={cargar} />
-          <SeccionPanel def={SECCIONES[1]} datos={datos.filter((d) => d.seccion === "amex_reembolsos")} onChange={cargar} />
-        </div>
-        <SeccionPanel def={SECCIONES[2]} datos={datos.filter((d) => d.seccion === "banorte_padel")} onChange={cargar} />
-        <SeccionPanel def={SECCIONES[3]} datos={datos.filter((d) => d.seccion === "banorte_aceromax")} onChange={cargar} />
-      </div>
-
-      {cargando && (
-        <p style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 8 }}>Cargando...</p>
-      )}
+      {cargando && <p style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 8 }}>Cargando...</p>}
     </Layout>
   );
 }
 
 
-function ResumenChip({ label, valor, color }: { label: string; valor: number; color: string }) {
+function TarjetaCard({
+  tarjeta, titulo, colorHeader, total, gastos, saldoPendiente, subSecciones, datos, onChange,
+}: {
+  tarjeta: "amex" | "banorte";
+  titulo: string;
+  colorHeader: string;
+  total: number;
+  gastos: number;
+  saldoPendiente: number;
+  subSecciones: SubSeccion[];
+  datos: Concepto[];
+  onChange: () => void;
+}) {
+  const [editandoTotal, setEditandoTotal] = useState(false);
+  const [draftTotal, setDraftTotal] = useState("");
+
+  async function guardarTotal() {
+    const n = +draftTotal;
+    if (isNaN(n) || n < 0) { setEditandoTotal(false); return; }
+    try {
+      await api.put(`/api/tarjetas/totales/${tarjeta}`, { total: n });
+      setEditandoTotal(false);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   return (
-    <div style={{
-      background: color, color: "white", padding: "12px 16px", borderRadius: 8,
-      display: "flex", flexDirection: "column", gap: 4,
-    }}>
-      <span style={{ fontSize: 11, opacity: 0.8, letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ fontSize: 22, fontWeight: 700 }}>{fmt(valor)}</span>
+    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      {/* Header con totales */}
+      <div style={{
+        background: colorHeader, color: "white", padding: "14px 18px",
+        display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 24, alignItems: "center",
+      }}>
+        <strong style={{ fontSize: 18, letterSpacing: "0.04em" }}>{titulo}</strong>
+
+        <DatoHeader
+          label="TOTAL DEUDA"
+          valor={total}
+          editable
+          editando={editandoTotal}
+          onEditar={() => { setDraftTotal(String(total)); setEditandoTotal(true); }}
+          draft={draftTotal}
+          onChangeDraft={setDraftTotal}
+          onGuardar={guardarTotal}
+          onCancelar={() => setEditandoTotal(false)}
+        />
+
+        <DatoHeader label="GASTOS NEGOCIOS" valor={gastos} />
+
+        <DatoHeader
+          label="SALDO PENDIENTE"
+          valor={saldoPendiente}
+          color={saldoPendiente < 0 ? "#fecaca" : "white"}
+        />
+      </div>
+
+      {/* Sub-secciones lado a lado */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+        {subSecciones.map((s, i) => (
+          <div key={s.key} style={{ borderLeft: i > 0 ? "1px solid #e5e7eb" : "none" }}>
+            <SubPanel
+              sub={s}
+              datos={datos.filter((d) => d.seccion === s.key)}
+              onChange={onChange}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 
-function SeccionPanel({ def, datos, onChange }: {
-  def: SeccionDef;
+function DatoHeader({
+  label, valor, color, editable, editando, onEditar, draft, onChangeDraft, onGuardar, onCancelar,
+}: {
+  label: string;
+  valor: number;
+  color?: string;
+  editable?: boolean;
+  editando?: boolean;
+  onEditar?: () => void;
+  draft?: string;
+  onChangeDraft?: (v: string) => void;
+  onGuardar?: () => void;
+  onCancelar?: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 140 }}>
+      <span style={{ fontSize: 10, opacity: 0.7, letterSpacing: "0.05em" }}>{label}</span>
+      {editando ? (
+        <input
+          autoFocus
+          type="number"
+          step="0.01"
+          value={draft}
+          onChange={(e) => onChangeDraft?.(e.target.value)}
+          onBlur={onGuardar}
+          onKeyDown={(e) => { if (e.key === "Enter") onGuardar?.(); if (e.key === "Escape") onCancelar?.(); }}
+          style={{
+            background: "rgba(255,255,255,0.15)", color: "white", border: "1px solid rgba(255,255,255,0.4)",
+            padding: "4px 6px", fontSize: 16, fontWeight: 700, width: 140, textAlign: "right",
+          }}
+        />
+      ) : (
+        <span
+          onDoubleClick={editable ? onEditar : undefined}
+          title={editable ? "Doble click para editar" : undefined}
+          style={{
+            fontSize: 18, fontWeight: 700, color: color || "white",
+            cursor: editable ? "pointer" : "default",
+            textDecoration: editable ? "underline dotted rgba(255,255,255,0.4)" : "none",
+          }}
+        >
+          {fmt(valor)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+
+function SubPanel({ sub, datos, onChange }: {
+  sub: SubSeccion;
   datos: Concepto[];
   onChange: () => void;
 }) {
@@ -141,18 +261,13 @@ function SeccionPanel({ def, datos, onChange }: {
       const code = err.response?.status;
       const body = err.response?.data?.detail || err.response?.data || err.message;
       alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
-      console.error("Tarjetas error:", err);
     }
   }
 
   async function crear() {
     if (!draft.concepto.trim()) return;
     try {
-      await api.post("/api/tarjetas", {
-        seccion: def.key,
-        concepto: draft.concepto,
-        monto: draft.monto,
-      });
+      await api.post("/api/tarjetas", { seccion: sub.key, concepto: draft.concepto, monto: draft.monto });
       setDraft({ concepto: "", monto: 0 });
       setAgregando(false);
       onChange();
@@ -160,7 +275,6 @@ function SeccionPanel({ def, datos, onChange }: {
       const code = err.response?.status;
       const body = err.response?.data?.detail || err.response?.data || err.message;
       alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
-      console.error("Tarjetas error:", err);
     }
   }
 
@@ -170,26 +284,18 @@ function SeccionPanel({ def, datos, onChange }: {
       await api.delete(`/api/tarjetas/${id}`);
       onChange();
     } catch (err: any) {
-      const code = err.response?.status;
-      const body = err.response?.data?.detail || err.response?.data || err.message;
-      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
-      console.error("Tarjetas error:", err);
+      alert("Error: " + (err.response?.data?.detail || err.message));
     }
   }
 
   return (
-    <div className="card" style={{ display: "flex", flexDirection: "column" }}>
+    <div style={{ padding: 12 }}>
       <div style={{
-        background: def.color, color: "white", padding: "10px 14px", borderRadius: 6,
-        display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: sub.color, color: "white", padding: "6px 10px", borderRadius: 4, marginBottom: 6,
       }}>
-        <div>
-          <strong style={{ fontSize: 14 }}>{def.titulo}</strong>
-          {def.subtitulo && (
-            <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>{def.subtitulo}</span>
-          )}
-        </div>
-        <strong style={{ fontSize: 14 }}>{fmt(total)}</strong>
+        <strong style={{ fontSize: 12, letterSpacing: "0.04em" }}>{sub.titulo}</strong>
+        <strong style={{ fontSize: 13 }}>{fmt(total)}</strong>
       </div>
 
       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
@@ -203,7 +309,7 @@ function SeccionPanel({ def, datos, onChange }: {
         <tbody>
           {datos.length === 0 && !agregando && (
             <tr>
-              <td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 12 }}>
+              <td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>
                 Sin movimientos
               </td>
             </tr>
@@ -261,8 +367,8 @@ function SeccionPanel({ def, datos, onChange }: {
             <td colSpan={3} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
               {!agregando && (
                 <button onClick={() => setAgregando(true)}
-                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "4px 14px",
-                    borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "3px 12px",
+                    borderRadius: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
                   + Agregar
                 </button>
               )}
@@ -276,9 +382,9 @@ function SeccionPanel({ def, datos, onChange }: {
 
 
 const thBlack: React.CSSProperties = {
-  padding: "6px 8px",
+  padding: "5px 8px",
   textAlign: "left",
-  fontSize: 11,
+  fontSize: 10,
   textTransform: "uppercase",
   letterSpacing: "0.04em",
   color: "#1f2937",
@@ -286,6 +392,6 @@ const thBlack: React.CSSProperties = {
 };
 
 const td: React.CSSProperties = {
-  padding: "6px 8px",
+  padding: "5px 8px",
   borderBottom: "1px solid #f1f5f9",
 };

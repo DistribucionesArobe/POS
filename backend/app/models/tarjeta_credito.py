@@ -25,3 +25,15 @@ class ConceptoTarjeta(Base):
     monto: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     orden: Mapped[int] = mapped_column(Integer, default=0)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TarjetaTotal(Base):
+    """Total de deuda por tarjeta (AMEX, Banorte). Saldo pendiente se calcula
+    como total - suma de conceptos de la tarjeta."""
+    __tablename__ = "tarjeta_totales"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+    tarjeta: Mapped[str] = mapped_column(String(32), index=True)  # amex | banorte
+    total_deuda: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

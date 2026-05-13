@@ -1,14 +1,17 @@
 """CRUD de conceptos de tarjetas de credito. Solo admin."""
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ConceptoTarjeta, Usuario
+from app.models import ConceptoTarjeta, TarjetaTotal, Usuario
 from app.services.security import get_active_empresa_id, require_admin
 
 router = APIRouter()
 
-SECCIONES = {"amex_negocios", "amex_reembolsos", "banorte_padel", "banorte_aceromax"}
+# 4 secciones: cada tarjeta (AMEX, Banorte) tiene dos negocios (Padel, Aceromax)
+SECCIONES = {"amex_padel", "amex_aceromax", "banorte_padel", "banorte_aceromax"}
+TARJETAS = {"amex", "banorte"}
 
 
 @router.get("")
@@ -106,3 +109,55 @@ def borrar(
     db.delete(c)
     db.commit()
     return {"ok": True}
+
+
+# ===== Totales de deuda por tarjeta (AMEX, Banorte) =====
+
+
+@router.get("/totales")
+def listar_totales(
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(TarjetaTotal)
+        .filter(TarjetaTotal.empresa_id == empresa_id)
+        .all()
+    )
+    # Devuelve dict tarjeta -> total. Si no hay registro, 0.
+    out = {t: 0.0 for t in TARJETAS}
+    for r in rows:
+        if r.tarjeta in out:
+            out[r.tarjeta] = float(r.total_deuda or 0)
+    return out
+
+
+@router.put("/totales/{tarjeta}")
+def actualizar_total(
+    tarjeta: str,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    tarjeta = (tarjeta or "").strip().lower()
+    if tarjeta not in TARJETAS:
+        raise HTTPException(400, f"Tarjeta invalida. Usa: {sorted(TARJETAS)}")
+    try:
+        total = float(payload.get("total") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Total invalido")
+    row = (
+        db.query(TarjetaTotal)
+        .filter(TarjetaTotal.empresa_id == empresa_id, TarjetaTotal.tarjeta == tarjeta)
+        .first()
+    )
+    if row:
+        row.total_deuda = total
+        row.actualizado_en = datetime.utcnow()
+    else:
+        row = TarjetaTotal(empresa_id=empresa_id, tarjeta=tarjeta, total_deuda=total)
+        db.add(row)
+    db.commit()
+    return {"tarjeta": tarjeta, "total": total}
