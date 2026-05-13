@@ -133,6 +133,15 @@ export default function Sidebar() {
             <span>{it.label}</span>
           </Link>
         ))}
+        {(rol === "admin" || superAdmin) && (
+          <Link
+            to="/activos"
+            className={`sidebar-link ${loc.pathname === "/activos" ? "active" : ""}`}
+          >
+            {Icon.package}
+            <span>Activos</span>
+          </Link>
+        )}
         {superAdmin && (
           <Link
             to="/empresas"

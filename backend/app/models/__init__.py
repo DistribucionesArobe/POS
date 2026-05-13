@@ -15,3 +15,4 @@ from app.models.cxp import (  # noqa
 from app.models.cfdi import Cfdi, ComplementoPago  # noqa
 from app.models.cotizacion import Cotizacion  # noqa
 from app.models.corte_caja import CorteCaja  # noqa
+from app.models.activo import Activo  # noqa
