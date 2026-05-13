@@ -53,6 +53,7 @@ import Reportes from "./pages/Reportes";
 import ReporteDiario from "./pages/ReporteDiario";
 import TableroCxP from "./pages/TableroCxP";
 import Activos from "./pages/Activos";
+import TarjetasCredito from "./pages/TarjetasCredito";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -80,6 +81,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/reportes/diario" element={<ReporteDiario />} />
           <Route path="/cxp-tablero" element={<TableroCxP />} />
           <Route path="/activos" element={<Activos />} />
+          <Route path="/tarjetas" element={<TarjetasCredito />} />
           <Route path="/corte" element={<CorteCaja />} />
           <Route path="/productos" element={<Productos />} />
           <Route path="/clientes" element={<Clientes />} />

@@ -142,6 +142,15 @@ export default function Sidebar() {
             <span>Activos</span>
           </Link>
         )}
+        {(rol === "admin" || superAdmin) && (
+          <Link
+            to="/tarjetas"
+            className={`sidebar-link ${loc.pathname === "/tarjetas" ? "active" : ""}`}
+          >
+            {Icon.dollar}
+            <span>Tarjetas crédito</span>
+          </Link>
+        )}
         {superAdmin && (
           <Link
             to="/empresas"

@@ -20,6 +20,7 @@ from app.routers import (
     autofactura,
     cotizaciones,
     activos,
+    tarjetas,
 )
 
 settings = get_settings()
@@ -66,3 +67,4 @@ app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["whatsapp"])
 app.include_router(autofactura.router, prefix="/api/public/facturar", tags=["autofactura"])
 app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["cotizaciones"])
 app.include_router(activos.router, prefix="/api/activos", tags=["activos"])
+app.include_router(tarjetas.router, prefix="/api/tarjetas", tags=["tarjetas"])
