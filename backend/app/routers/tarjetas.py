@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ConceptoTarjeta, TarjetaTotal, Usuario
+from app.models import ConceptoTarjeta, TarjetaTotal, TarjetaSubcuenta, Usuario
 from app.services.security import get_active_empresa_id, require_admin
 
 router = APIRouter()
@@ -161,3 +161,98 @@ def actualizar_total(
         db.add(row)
     db.commit()
     return {"tarjeta": tarjeta, "total": total}
+
+
+# ===== Sub-cuentas de tarjetas (Infinite, Platinum, etc.) =====
+# La TOTAL DEUDA mostrada en el header es la suma de las subcuentas de cada tarjeta.
+
+
+@router.get("/subcuentas")
+def listar_subcuentas(
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(TarjetaSubcuenta)
+        .filter(TarjetaSubcuenta.empresa_id == empresa_id)
+        .order_by(TarjetaSubcuenta.tarjeta, TarjetaSubcuenta.orden, TarjetaSubcuenta.id)
+        .all()
+    )
+    return [
+        {
+            "id": s.id, "tarjeta": s.tarjeta, "nombre": s.nombre,
+            "monto": float(s.monto or 0), "orden": s.orden,
+        }
+        for s in rows
+    ]
+
+
+@router.post("/subcuentas")
+def crear_subcuenta(
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    tarjeta = (payload.get("tarjeta") or "").strip().lower()
+    if tarjeta not in TARJETAS:
+        raise HTTPException(400, f"Tarjeta invalida. Usa: {sorted(TARJETAS)}")
+    nombre = (payload.get("nombre") or "").strip()
+    if not nombre:
+        raise HTTPException(400, "Nombre requerido")
+    try:
+        monto = float(payload.get("monto") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Monto invalido")
+    siguiente = (
+        db.query(TarjetaSubcuenta)
+        .filter(TarjetaSubcuenta.empresa_id == empresa_id, TarjetaSubcuenta.tarjeta == tarjeta)
+        .count()
+    ) + 1
+    s = TarjetaSubcuenta(
+        empresa_id=empresa_id, tarjeta=tarjeta, nombre=nombre, monto=monto, orden=siguiente,
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return {"id": s.id, "tarjeta": s.tarjeta, "nombre": s.nombre, "monto": float(s.monto), "orden": s.orden}
+
+
+@router.patch("/subcuentas/{sid}")
+def actualizar_subcuenta(
+    sid: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    s = db.get(TarjetaSubcuenta, sid)
+    if not s or s.empresa_id != empresa_id:
+        raise HTTPException(404, "Subcuenta no existe")
+    if "nombre" in payload:
+        nuevo = (payload["nombre"] or "").strip()
+        if nuevo:
+            s.nombre = nuevo
+    if "monto" in payload:
+        try:
+            s.monto = float(payload["monto"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Monto invalido")
+    db.commit()
+    return {"ok": True, "id": s.id}
+
+
+@router.delete("/subcuentas/{sid}")
+def borrar_subcuenta(
+    sid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    s = db.get(TarjetaSubcuenta, sid)
+    if not s or s.empresa_id != empresa_id:
+        raise HTTPException(404, "Subcuenta no existe")
+    db.delete(s)
+    db.commit()
+    return {"ok": True}

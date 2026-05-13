@@ -28,12 +28,30 @@ class ConceptoTarjeta(Base):
 
 
 class TarjetaTotal(Base):
-    """Total de deuda por tarjeta (AMEX, Banorte). Saldo pendiente se calcula
-    como total - suma de conceptos de la tarjeta."""
+    """Legacy. Mantenido por compatibilidad; el modelo activo es TarjetaSubcuenta."""
     __tablename__ = "tarjeta_totales"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
-    tarjeta: Mapped[str] = mapped_column(String(32), index=True)  # amex | banorte
+    tarjeta: Mapped[str] = mapped_column(String(32), index=True)
     total_deuda: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TarjetaSubcuenta(Base):
+    """Sub-cuentas dentro de una tarjeta. La TOTAL DEUDA mostrada en el header
+    se calcula como la suma de los montos de todas las subcuentas de esa tarjeta.
+
+    Ejemplos:
+    - Banorte: Infinite 4682 ($170,673) + Platinum 1269 ($10,337)
+    - AMEX:    AMEX ($109,000) o multiples si tiene varias tarjetas
+    """
+    __tablename__ = "tarjeta_subcuentas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+    tarjeta: Mapped[str] = mapped_column(String(32), index=True)  # amex | banorte
+    nombre: Mapped[str] = mapped_column(String(120))
+    monto: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    orden: Mapped[int] = mapped_column(default=0)
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
