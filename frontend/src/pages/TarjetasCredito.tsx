@@ -29,15 +29,24 @@ const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigi
 export default function TarjetasCredito() {
   const [datos, setDatos] = useState<Concepto[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
 
   async function cargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       const r = await api.get("/api/tarjetas");
       setDatos(r.data || []);
     } catch (err: any) {
-      if (err.response?.status === 403) {
-        alert("Solo administradores.");
+      const code = err.response?.status;
+      if (code === 403) {
+        setErrorCarga("Solo administradores pueden ver esta sección.");
+      } else if (code === 404) {
+        setErrorCarga("Endpoint /api/tarjetas no existe. El backend aún no se redespliega - espera ~2 min.");
+      } else if (!err.response) {
+        setErrorCarga("No se pudo contactar al backend (Network Error). Probable: backend reiniciándose en Render, o falta correr migrate_tarjetas.sql.");
+      } else {
+        setErrorCarga(`Error ${code}: ${err.response?.data?.detail || err.message}`);
       }
       setDatos([]);
     } finally {
@@ -57,6 +66,14 @@ export default function TarjetasCredito() {
 
   return (
     <Layout title="Tarjetas de crédito · Control de gastos">
+      {errorCarga && (
+        <div style={{
+          background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b",
+          padding: "10px 14px", borderRadius: 6, marginBottom: 12, fontSize: 13,
+        }}>
+          <strong>No se pudieron cargar las tarjetas.</strong> {errorCarga}
+        </div>
+      )}
       {/* Resumen */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
         <ResumenChip label="TOTAL AMEX"    valor={totalAmex}    color="#0f172a" />
@@ -121,7 +138,10 @@ function SeccionPanel({ def, datos, onChange }: {
       setEditing(null);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Tarjetas error:", err);
     }
   }
 
@@ -137,7 +157,10 @@ function SeccionPanel({ def, datos, onChange }: {
       setAgregando(false);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Tarjetas error:", err);
     }
   }
 
@@ -147,7 +170,10 @@ function SeccionPanel({ def, datos, onChange }: {
       await api.delete(`/api/tarjetas/${id}`);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Tarjetas error:", err);
     }
   }
 
