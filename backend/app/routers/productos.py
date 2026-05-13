@@ -157,6 +157,7 @@ def listar_productos(
                     "stock_actual": float(v.stock_actual),
                     "stock_minimo": float(v.stock_minimo),
                     "activo": v.activo,
+                    "favorito_caja": v.favorito_caja,
                 }
                 for v in p.variantes
             ],
@@ -290,6 +291,51 @@ def actualizar_clave_sat(
     p.clave_prod_serv_sat = payload.get("clave")
     db.commit()
     return {"ok": True}
+
+
+@router.get("/favoritos-caja")
+def listar_favoritos_caja(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Lista las variantes marcadas como favoritas para mostrar en Caja."""
+    rows = (
+        db.query(VarianteProducto, Producto)
+        .join(Producto, Producto.id == VarianteProducto.producto_id)
+        .filter(Producto.empresa_id == empresa_id)
+        .filter(VarianteProducto.favorito_caja == True)
+        .filter(VarianteProducto.activo == True)
+        .order_by(Producto.nombre)
+        .all()
+    )
+    return [
+        {
+            "id": v.id, "sku": v.sku,
+            "nombre": f"{p.nombre} - {v.presentacion}",
+            "precio": float(v.precio_publico),
+            "stock": float(v.stock_actual),
+        }
+        for v, p in rows
+    ]
+
+
+@router.patch("/variantes/{variante_id}/favorito")
+def toggle_favorito(
+    variante_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Marca o desmarca una variante como favorita en Caja."""
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+    v.favorito_caja = bool(payload.get("favorito", False))
+    db.commit()
+    return {"ok": True, "favorito": v.favorito_caja}
 
 
 @router.patch("/variantes/{variante_id}/precio")

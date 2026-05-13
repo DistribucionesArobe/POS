@@ -63,5 +63,7 @@ class VarianteProducto(Base):
     factor_division: Mapped[int] = mapped_column(default=1)
 
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Marcado para mostrarse como boton rapido en Caja
+    favorito_caja: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     producto: Mapped[Producto] = relationship(back_populates="variantes")

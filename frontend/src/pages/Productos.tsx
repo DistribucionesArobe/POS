@@ -7,6 +7,7 @@ type Variante = {
   precio_publico: number; precio_mayoreo: number | null;
   costo_promedio: number; stock_actual: number; stock_minimo: number;
   activo: boolean;
+  favorito_caja?: boolean;
 };
 type ProductoT = {
   id: number; nombre: string; categoria: string | null; marca: string | null;
@@ -121,6 +122,25 @@ export default function Productos() {
       precio_publico: parseFloat(nuevo),
     });
     cargar();
+  }
+
+  async function toggleFavorito(v: Variante) {
+    const nuevo = !v.favorito_caja;
+    // Optimistic update local
+    setProductos((prev) =>
+      prev.map((p) => ({
+        ...p,
+        variantes: p.variantes.map((vv) =>
+          vv.id === v.id ? { ...vv, favorito_caja: nuevo } : vv
+        ),
+      }))
+    );
+    try {
+      await api.patch(`/api/productos/variantes/${v.id}/favorito`, { favorito: nuevo });
+    } catch (err: any) {
+      alert("No se pudo actualizar favorito: " + (err.response?.data?.detail || err.message));
+      cargar();
+    }
   }
 
   async function desactivar(varianteId: number) {
@@ -449,6 +469,7 @@ export default function Productos() {
                     <table>
                       <thead>
                         <tr>
+                          <th style={{ width: 32 }} title="Favorito en Caja">⭐</th>
                           <th>Producto</th><th>SKU</th><th>Presentacion</th>
                           <th>Unidad</th>
                           <th style={{ textAlign: "right" }}>Precio</th>
@@ -461,6 +482,23 @@ export default function Productos() {
                         {prods.flatMap((p) => [
                           ...p.variantes.map((v) => (
                             <tr key={v.id} style={{ opacity: v.activo ? 1 : 0.4 }}>
+                              <td style={{ textAlign: "center" }}>
+                                <button
+                                  className="btn-icon"
+                                  onClick={() => toggleFavorito(v)}
+                                  title={v.favorito_caja ? "Quitar de favoritos en Caja" : "Marcar favorito en Caja"}
+                                  style={{
+                                    fontSize: 18,
+                                    color: v.favorito_caja ? "#f5a623" : "#ccc",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                  }}
+                                >
+                                  {v.favorito_caja ? "★" : "☆"}
+                                </button>
+                              </td>
                               <td>{p.nombre}</td>
                               <td><code>{v.sku}</code></td>
                               <td>{v.presentacion}</td>
@@ -483,7 +521,7 @@ export default function Productos() {
                             </tr>
                           )),
                           <tr key={`add-${p.id}`} style={{ background: "#fafbfc" }}>
-                            <td colSpan={8}>
+                            <td colSpan={9}>
                               {varProductoId === p.id ? (
                                 <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 4 }}>
                                   <input className="input" placeholder="SKU" value={nuevaVar.sku} style={{ width: 160 }} onChange={(e) => setNuevaVar({ ...nuevaVar, sku: e.target.value })} />

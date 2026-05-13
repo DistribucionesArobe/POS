@@ -43,6 +43,7 @@ export default function Caja() {
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [procesando, setProcesando] = useState(false);
   const [empresaActiva, setEmpresaActiva] = useState<{ id: number; nombre: string } | null>(null);
+  const [favoritos, setFavoritos] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -51,8 +52,18 @@ export default function Caja() {
       const ea = localStorage.getItem("empresa_activa");
       if (ea) setEmpresaActiva(JSON.parse(ea));
     } catch {}
+    cargarFavoritos();
     focus();
   }, []);
+
+  async function cargarFavoritos() {
+    try {
+      const r = await api.get("/api/productos/favoritos-caja");
+      setFavoritos(r.data || []);
+    } catch {
+      setFavoritos([]);
+    }
+  }
 
   function focus() {
     setTimeout(() => inputRef.current?.focus(), 80);
@@ -383,6 +394,61 @@ export default function Caja() {
               ))}
               <div style={{ padding: 8, textAlign: "center", fontSize: 12, color: "var(--color-text-muted)" }}>
                 Click para agregar
+              </div>
+            </div>
+          )}
+
+          {/* Panel de favoritos rapidos */}
+          {favoritos.length > 0 && sugerencias.length === 0 && (
+            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px dashed var(--color-border)" }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>⭐ Favoritos · click para agregar</span>
+                <span style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 10 }}>
+                  Marca con ★ en Productos
+                </span>
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 8,
+                maxHeight: 240,
+                overflow: "auto",
+              }}>
+                {favoritos.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => agregar(f)}
+                    title={`${f.sku} · stock ${f.stock}`}
+                    style={{
+                      background: "white",
+                      border: "2px solid var(--color-primary)",
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      transition: "transform 0.08s, box-shadow 0.08s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                      e.currentTarget.style.boxShadow = "0 4px 10px rgba(0,0,0,0.08)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "none";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)", lineHeight: 1.2 }}>
+                      {f.nombre}
+                    </span>
+                    <span style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                      <span style={{ color: "var(--color-primary)", fontWeight: 700 }}>{fmt(f.precio)}</span>
+                      <span style={{ color: "var(--color-text-muted)" }}>stk {f.stock}</span>
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
           )}

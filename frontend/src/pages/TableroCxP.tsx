@@ -803,85 +803,43 @@ const modalCard: React.CSSProperties = {
 };
 
 
-// === Panel Deuda Bancaria (préstamos, créditos, mercancía en tránsito) ===
+// === Panel Deuda Bancaria - lista plana tipo Excel ===
+// Aplana todos los conceptos de todas las deudas en una sola tabla.
+// Monto editable doble click para registrar abonos parciales.
 function DeudaBancariaPanel({ deudas, onChange }: {
   deudas: DeudaBancaria[];
   onChange: () => void;
 }) {
-  const [creando, setCreando] = useState(false);
-  const [draftDeuda, setDraftDeuda] = useState({ nombre: "", referencia: "" });
-
-  async function crearDeuda() {
-    if (!draftDeuda.nombre.trim()) return;
-    try {
-      await api.post("/api/cxp/deuda-bancaria", draftDeuda);
-      setDraftDeuda({ nombre: "", referencia: "" });
-      setCreando(false);
-      onChange();
-    } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
-    }
-  }
-
-  async function borrarDeuda(id: number, nombre: string) {
-    if (!confirm(`Borrar deuda "${nombre}" y todos sus conceptos?`)) return;
-    await api.delete(`/api/cxp/deuda-bancaria/${id}`);
-    onChange();
-  }
-
-  return (
-    <div className="card print-area">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3 className="card-header" style={{ margin: 0 }}>Deuda bancaria</h3>
-        <button className="btn-icon no-print" onClick={() => setCreando(!creando)}>
-          {creando ? "Cancelar" : "+ Nueva"}
-        </button>
-      </div>
-
-      {creando && (
-        <div className="no-print" style={{ marginTop: 8, padding: 10, background: "var(--color-bg)", borderRadius: 6 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6 }}>
-            <input className="input" placeholder="Nombre (ej. ADEUDO BANORTE)"
-              value={draftDeuda.nombre}
-              onChange={(e) => setDraftDeuda({ ...draftDeuda, nombre: e.target.value })} />
-            <input className="input" placeholder="Referencia (ej. 90725082)"
-              value={draftDeuda.referencia}
-              onChange={(e) => setDraftDeuda({ ...draftDeuda, referencia: e.target.value })} />
-            <button className="btn" onClick={crearDeuda}>Crear</button>
-          </div>
-        </div>
-      )}
-
-      {deudas.length === 0 ? (
-        <p style={{ color: "var(--color-text-muted)", fontSize: 13, padding: 16, textAlign: "center" }}>
-          Sin deudas bancarias registradas. Click "+ Nueva" para crear (ej. crédito Banorte, mercancía en tránsito).
-        </p>
-      ) : (
-        deudas.map((d) => (
-          <DeudaBlock key={d.id} deuda={d} onChange={onChange}
-            onBorrar={() => borrarDeuda(d.id, d.nombre)} />
-        ))
-      )}
-    </div>
-  );
-}
-
-
-function DeudaBlock({ deuda, onChange, onBorrar }: {
-  deuda: DeudaBancaria;
-  onChange: () => void;
-  onBorrar: () => void;
-}) {
   const [editing, setEditing] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [draftConcepto, setDraftConcepto] = useState({ concepto: "", monto: 0 });
+  const [draft, setDraft] = useState({ concepto: "", monto: 0 });
   const [agregando, setAgregando] = useState(false);
+
+  // Aplana todos los conceptos
+  const filas = deudas.flatMap((d) =>
+    d.conceptos.map((c) => ({ ...c, deuda_id: d.id, deuda_nombre: d.nombre }))
+  );
+  const totalGlobal = filas.reduce((a, f) => a + (f.monto || 0), 0);
+
+  async function ensureDeudaId(): Promise<number> {
+    // Si ya existe alguna deuda, usa la primera como contenedor.
+    if (deudas.length > 0) return deudas[0].id;
+    const r = await api.post("/api/cxp/deuda-bancaria", {
+      nombre: "Deuda bancaria",
+      referencia: "",
+    });
+    return r.data.id;
+  }
 
   async function guardarEdit(c: { id: number; concepto: string; monto: number }) {
     if (!editing) return;
     const payload: any = {};
     if (editing.field === "concepto") payload.concepto = editValue;
-    if (editing.field === "monto") payload.monto = +editValue;
+    if (editing.field === "monto") {
+      const n = +editValue;
+      if (isNaN(n) || n < 0) return alert("Monto inválido");
+      payload.monto = n;
+    }
     try {
       await api.patch(`/api/cxp/deuda-bancaria/conceptos/${c.id}`, payload);
       setEditing(null);
@@ -892,10 +850,11 @@ function DeudaBlock({ deuda, onChange, onBorrar }: {
   }
 
   async function crearConcepto() {
-    if (!draftConcepto.concepto.trim()) return;
+    if (!draft.concepto.trim()) return;
     try {
-      await api.post(`/api/cxp/deuda-bancaria/${deuda.id}/conceptos`, draftConcepto);
-      setDraftConcepto({ concepto: "", monto: 0 });
+      const deudaId = await ensureDeudaId();
+      await api.post(`/api/cxp/deuda-bancaria/${deudaId}/conceptos`, draft);
+      setDraft({ concepto: "", monto: 0 });
       setAgregando(false);
       onChange();
     } catch (err: any) {
@@ -910,33 +869,38 @@ function DeudaBlock({ deuda, onChange, onBorrar }: {
   }
 
   return (
-    <div style={{ marginTop: 12, border: "1px solid var(--color-border)", borderRadius: 6, overflow: "hidden" }}>
-      <div style={{ background: "#1f2937", color: "white", padding: "8px 12px",
-        display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <strong style={{ fontSize: 13 }}>{deuda.nombre}</strong>
-          {deuda.referencia && <span style={{ marginLeft: 8, fontSize: 11, color: "#9ca3af" }}>{deuda.referencia}</span>}
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <strong style={{ fontSize: 14 }}>${deuda.total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</strong>
-          <button onClick={onBorrar} className="no-print"
-            style={{ background: "transparent", color: "#fca5a5", border: 0, cursor: "pointer", fontSize: 12 }}>×</button>
+    <div className="card print-area">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <h3 className="card-header" style={{ margin: 0 }}>Deuda bancaria</h3>
+        <div style={{
+          background: "#1f2937", color: "white", padding: "6px 14px", borderRadius: 6,
+          fontSize: 14, fontWeight: 700,
+        }}>
+          TOTAL: ${totalGlobal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
         </div>
       </div>
-      <table style={{ width: "100%", fontSize: 12 }}>
+
+      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#fef9c3" }}>
             <th style={{ ...thBlack, textAlign: "right", width: "30%" }}>Monto</th>
             <th style={thBlack}>Concepto</th>
-            <th style={{ ...thBlack, textAlign: "right", width: "15%" }}>%</th>
             <th className="no-print" style={{ ...thBlack, width: 30 }}></th>
           </tr>
         </thead>
         <tbody>
-          {deuda.conceptos.map((c) => (
+          {filas.length === 0 && !agregando && (
+            <tr>
+              <td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 12 }}>
+                Sin deuda bancaria. Click "+ Agregar" para registrar (ej. PAGO 5 CHINA, FLETE, BANORTE).
+              </td>
+            </tr>
+          )}
+          {filas.map((c) => (
             <tr key={c.id}>
-              <td style={{ ...td, textAlign: "right", fontWeight: 600 }}
-                onDoubleClick={() => { setEditing({ id: c.id, field: "monto" }); setEditValue(String(c.monto)); }}>
+              <td style={{ ...td, textAlign: "right", fontWeight: 600, cursor: "pointer" }}
+                onDoubleClick={() => { setEditing({ id: c.id, field: "monto" }); setEditValue(String(c.monto)); }}
+                title="Doble click para editar (registrar abono)">
                 {editing?.id === c.id && editing.field === "monto" ? (
                   <input autoFocus type="number" step="0.01" value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
@@ -945,8 +909,9 @@ function DeudaBlock({ deuda, onChange, onBorrar }: {
                     style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
                 ) : `$${c.monto.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`}
               </td>
-              <td style={td}
-                onDoubleClick={() => { setEditing({ id: c.id, field: "concepto" }); setEditValue(c.concepto); }}>
+              <td style={{ ...td, cursor: "pointer" }}
+                onDoubleClick={() => { setEditing({ id: c.id, field: "concepto" }); setEditValue(c.concepto); }}
+                title="Doble click para editar">
                 {editing?.id === c.id && editing.field === "concepto" ? (
                   <input autoFocus value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
@@ -955,43 +920,42 @@ function DeudaBlock({ deuda, onChange, onBorrar }: {
                     style={{ width: "100%", padding: 4, fontSize: 12 }} />
                 ) : c.concepto}
               </td>
-              <td style={{ ...td, textAlign: "right" }}>{c.pct.toFixed(2)}%</td>
               <td className="no-print" style={td}>
                 <button onClick={() => borrarConcepto(c.id)}
                   style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer" }}>×</button>
               </td>
             </tr>
           ))}
-          {agregando ? (
+          {agregando && (
             <tr style={{ background: "#fef9c3" }}>
               <td style={td}>
-                <input className="input" type="number" step="0.01" value={draftConcepto.monto}
-                  onChange={(e) => setDraftConcepto({ ...draftConcepto, monto: +e.target.value })}
-                  placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                <input className="input" type="number" step="0.01" value={draft.monto}
+                  onChange={(e) => setDraft({ ...draft, monto: +e.target.value })}
+                  placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
               </td>
               <td style={td}>
-                <input className="input" value={draftConcepto.concepto} autoFocus
-                  onChange={(e) => setDraftConcepto({ ...draftConcepto, concepto: e.target.value })}
-                  onKeyDown={(e) => { if (e.key === "Enter") crearConcepto(); }}
-                  placeholder="PAGO 5 CHINA tabla" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                <input className="input" value={draft.concepto} autoFocus
+                  onChange={(e) => setDraft({ ...draft, concepto: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") crearConcepto(); if (e.key === "Escape") { setAgregando(false); setDraft({ concepto: "", monto: 0 }); } }}
+                  placeholder="ej. PAGO 5 CHINA tabla" style={{ width: "100%", padding: 4, fontSize: 12 }} />
               </td>
-              <td style={td}></td>
               <td className="no-print" style={td}>
                 <button onClick={crearConcepto}
                   style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓</button>
               </td>
             </tr>
-          ) : (
-            <tr className="no-print">
-              <td colSpan={4} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
-                <button onClick={() => setAgregando(true)}
-                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "4px 12px",
-                    borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
-                  + Agregar concepto
-                </button>
-              </td>
-            </tr>
           )}
+          <tr className="no-print">
+            <td colSpan={3} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+              {!agregando && (
+                <button onClick={() => setAgregando(true)}
+                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "4px 14px",
+                    borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                  + Agregar
+                </button>
+              )}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
