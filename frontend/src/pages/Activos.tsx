@@ -48,15 +48,24 @@ const CATEGORIAS: Cat[] = [
 export default function Activos() {
   const [datos, setDatos] = useState<Activo[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
 
   async function cargar() {
     setCargando(true);
+    setErrorCarga(null);
     try {
       const r = await api.get("/api/activos");
       setDatos(r.data || []);
     } catch (err: any) {
-      if (err.response?.status === 403) {
-        alert("Solo administradores pueden ver Activos.");
+      const code = err.response?.status;
+      if (code === 403) {
+        setErrorCarga("Solo administradores pueden ver esta sección.");
+      } else if (code === 404) {
+        setErrorCarga("Endpoint /api/activos no existe. El backend aún no se redespliega - espera ~2 min.");
+      } else if (!err.response) {
+        setErrorCarga("No se pudo contactar al backend (Network Error). Probable: backend reiniciándose en Render, o falta correr migrate_activos.sql.");
+      } else {
+        setErrorCarga(`Error ${code}: ${err.response?.data?.detail || err.message}`);
       }
       setDatos([]);
     } finally {
@@ -70,6 +79,14 @@ export default function Activos() {
 
   return (
     <Layout title="Activos · Datos internos del negocio">
+      {errorCarga && (
+        <div style={{
+          background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b",
+          padding: "10px 14px", borderRadius: 6, marginBottom: 12, fontSize: 13,
+        }}>
+          <strong>No se pudieron cargar los activos.</strong> {errorCarga}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <SeccionActivos cat={CATEGORIAS[0]} datos={datos.filter((d) => d.categoria === "vehiculo")} onChange={cargar} />
         <SeccionActivos cat={CATEGORIAS[1]} datos={datos.filter((d) => d.categoria === "gasolina")} onChange={cargar} />
@@ -99,7 +116,10 @@ function SeccionActivos({ cat, datos, onChange }: { cat: Cat; datos: Activo[]; o
       setEditing(null);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Activos error:", err);
     }
   }
 
@@ -112,7 +132,10 @@ function SeccionActivos({ cat, datos, onChange }: { cat: Cat; datos: Activo[]; o
       setAgregando(false);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Activos error:", err);
     }
   }
 
@@ -122,7 +145,10 @@ function SeccionActivos({ cat, datos, onChange }: { cat: Cat; datos: Activo[]; o
       await api.delete(`/api/activos/${id}`);
       onChange();
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      const code = err.response?.status;
+      const body = err.response?.data?.detail || err.response?.data || err.message;
+      alert(`Error${code ? " " + code : ""}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      console.error("Activos error:", err);
     }
   }
 
