@@ -45,6 +45,17 @@ export default function TarjetasCredito() {
   const [ingresosP, setIngresosP] = useState<IngresoP[]>([]);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  // IDs de conceptos seleccionados (estado local en frontend, no se persiste)
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+
+  function toggleSeleccionado(id: number) {
+    setSeleccionados((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+  function limpiarSeleccion() { setSeleccionados(new Set()); }
 
   async function cargar() {
     setCargando(true);
@@ -88,6 +99,16 @@ export default function TarjetasCredito() {
   const saldoAmex = totalAmex - gastosAmex;
   const saldoBanorte = totalBanorte - gastosBanorte;
 
+  // Suma de items seleccionados (por tarjeta y total)
+  const sumaSeleccionPorTarjeta = (tarjetaPrefix: string) =>
+    datos
+      .filter((d) => d.seccion.startsWith(tarjetaPrefix) && seleccionados.has(d.id))
+      .reduce((a, c) => a + c.monto, 0);
+  const seleccionAmex = sumaSeleccionPorTarjeta("amex_");
+  const seleccionBanorte = sumaSeleccionPorTarjeta("banorte_");
+  const seleccionTotal = seleccionAmex + seleccionBanorte;
+  const cantidadSeleccionados = seleccionados.size;
+
   return (
     <Layout title="Tarjetas de crédito · Control de gastos">
       {errorCarga && (
@@ -99,6 +120,30 @@ export default function TarjetasCredito() {
         </div>
       )}
 
+      {/* Barra de seleccion sticky arriba */}
+      {cantidadSeleccionados > 0 && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 10,
+          background: "#fef3c7", border: "1px solid #f59e0b",
+          padding: "10px 16px", borderRadius: 8, marginBottom: 12,
+          display: "flex", alignItems: "center", gap: 18, fontSize: 14,
+        }}>
+          <strong style={{ color: "#92400e", fontSize: 13, letterSpacing: "0.04em" }}>
+            ✓ {cantidadSeleccionados} SELECCIONADO{cantidadSeleccionados > 1 ? "S" : ""}
+          </strong>
+          <ChipSeleccion label="AMEX"    valor={seleccionAmex} />
+          <ChipSeleccion label="Banorte" valor={seleccionBanorte} />
+          <span style={{ flex: 1 }} />
+          <strong style={{ color: "#1e40af", fontSize: 22 }}>{fmt(seleccionTotal)}</strong>
+          <button onClick={limpiarSeleccion}
+            style={{
+              background: "transparent", border: "1px solid #92400e",
+              color: "#92400e", padding: "4px 10px", borderRadius: 4,
+              cursor: "pointer", fontSize: 12,
+            }}>Limpiar</button>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <TarjetaCard
           tarjeta="amex"
@@ -107,6 +152,7 @@ export default function TarjetasCredito() {
           total={totalAmex}
           gastos={gastosAmex}
           saldoPendiente={saldoAmex}
+          seleccionado={seleccionAmex}
           subcuentas={subcuentas.filter((s) => s.tarjeta === "amex")}
           subSecciones={[
             { key: "amex_padel",    titulo: "Padel",    color: "#0ea5e9" },
@@ -114,6 +160,8 @@ export default function TarjetasCredito() {
           ]}
           datos={datos}
           onChange={cargar}
+          seleccionados={seleccionados}
+          onToggleSeleccion={toggleSeleccionado}
         />
 
         <TarjetaCard
@@ -123,6 +171,7 @@ export default function TarjetasCredito() {
           total={totalBanorte}
           gastos={gastosBanorte}
           saldoPendiente={saldoBanorte}
+          seleccionado={seleccionBanorte}
           subcuentas={subcuentas.filter((s) => s.tarjeta === "banorte")}
           subSecciones={[
             { key: "banorte_padel",    titulo: "Padel",    color: "#0ea5e9" },
@@ -130,6 +179,8 @@ export default function TarjetasCredito() {
           ]}
           datos={datos}
           onChange={cargar}
+          seleccionados={seleccionados}
+          onToggleSeleccion={toggleSeleccionado}
         />
 
         <PanelPersonal gastos={gastosP} ingresos={ingresosP} onChange={cargar} />
@@ -142,7 +193,8 @@ export default function TarjetasCredito() {
 
 
 function TarjetaCard({
-  tarjeta, titulo, colorHeader, total, gastos, saldoPendiente, subcuentas, subSecciones, datos, onChange,
+  tarjeta, titulo, colorHeader, total, gastos, saldoPendiente, seleccionado,
+  subcuentas, subSecciones, datos, onChange, seleccionados, onToggleSeleccion,
 }: {
   tarjeta: "amex" | "banorte";
   titulo: string;
@@ -150,17 +202,20 @@ function TarjetaCard({
   total: number;
   gastos: number;
   saldoPendiente: number;
+  seleccionado: number;
   subcuentas: Subcuenta[];
   subSecciones: SubSeccion[];
   datos: Concepto[];
   onChange: () => void;
+  seleccionados: Set<number>;
+  onToggleSeleccion: (id: number) => void;
 }) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       {/* Header con titulo + subcuentas (Infinite/Platinum) + totales */}
       <div style={{
         background: colorHeader, color: "white", padding: "14px 18px",
-        display: "grid", gridTemplateColumns: "auto 1fr auto auto auto", gap: 24, alignItems: "center",
+        display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto", gap: 20, alignItems: "center",
       }}>
         <strong style={{ fontSize: 18, letterSpacing: "0.04em" }}>{titulo}</strong>
 
@@ -173,6 +228,11 @@ function TarjetaCard({
           valor={saldoPendiente}
           color={saldoPendiente < 0 ? "#fecaca" : "white"}
         />
+        <DatoHeader
+          label="SELECCIONADO"
+          valor={seleccionado}
+          color={seleccionado > 0 ? "#fde68a" : "rgba(255,255,255,0.55)"}
+        />
       </div>
 
       {/* Sub-secciones lado a lado */}
@@ -183,11 +243,28 @@ function TarjetaCard({
               sub={s}
               datos={datos.filter((d) => d.seccion === s.key)}
               onChange={onChange}
+              seleccionados={seleccionados}
+              onToggleSeleccion={onToggleSeleccion}
             />
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+
+function ChipSeleccion({ label, valor }: { label: string; valor: number }) {
+  if (valor === 0) return null;
+  return (
+    <span style={{
+      display: "inline-flex", gap: 6, alignItems: "baseline",
+      background: "white", padding: "3px 10px", borderRadius: 4,
+      border: "1px solid #f59e0b",
+    }}>
+      <span style={{ fontSize: 11, color: "#92400e", letterSpacing: "0.04em" }}>{label}</span>
+      <strong style={{ fontSize: 13, color: "#0f172a" }}>{fmt(valor)}</strong>
+    </span>
   );
 }
 
@@ -329,10 +406,12 @@ function DatoHeader({ label, valor, color }: { label: string; valor: number; col
 }
 
 
-function SubPanel({ sub, datos, onChange }: {
+function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
   sub: SubSeccion;
   datos: Concepto[];
   onChange: () => void;
+  seleccionados: Set<number>;
+  onToggleSeleccion: (id: number) => void;
 }) {
   const [editing, setEditing] = useState<{ id: number; campo: string } | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -340,6 +419,9 @@ function SubPanel({ sub, datos, onChange }: {
   const [agregando, setAgregando] = useState(false);
 
   const total = datos.reduce((a, c) => a + c.monto, 0);
+  const totalSeleccionado = datos
+    .filter((c) => seleccionados.has(c.id))
+    .reduce((a, c) => a + c.monto, 0);
 
   async function guardar(c: Concepto) {
     if (!editing) return;
@@ -391,13 +473,21 @@ function SubPanel({ sub, datos, onChange }: {
         display: "flex", justifyContent: "space-between", alignItems: "center",
         background: sub.color, color: "white", padding: "6px 10px", borderRadius: 4, marginBottom: 6,
       }}>
-        <strong style={{ fontSize: 12, letterSpacing: "0.04em" }}>{sub.titulo}</strong>
+        <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+          <strong style={{ fontSize: 12, letterSpacing: "0.04em" }}>{sub.titulo}</strong>
+          {totalSeleccionado > 0 && (
+            <span style={{ fontSize: 10, background: "rgba(255,255,255,0.25)", padding: "1px 6px", borderRadius: 3 }}>
+              sel {fmt(totalSeleccionado)}
+            </span>
+          )}
+        </div>
         <strong style={{ fontSize: 13 }}>{fmt(total)}</strong>
       </div>
 
       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#fef9c3" }}>
+            <th style={{ ...thBlack, width: 26 }}></th>
             <th style={{ ...thBlack, textAlign: "right", width: "40%" }}>Monto</th>
             <th style={thBlack}>Concepto</th>
             <th style={{ ...thBlack, width: 28 }}></th>
@@ -406,43 +496,52 @@ function SubPanel({ sub, datos, onChange }: {
         <tbody>
           {datos.length === 0 && !agregando && (
             <tr>
-              <td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>
+              <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>
                 Sin movimientos
               </td>
             </tr>
           )}
-          {datos.map((c) => (
-            <tr key={c.id}>
-              <td style={{ ...td, textAlign: "right", fontWeight: 600, cursor: "pointer" }}
-                onDoubleClick={() => { setEditing({ id: c.id, campo: "monto" }); setEditValue(String(c.monto)); }}
-                title="Doble click para editar">
-                {editing?.id === c.id && editing.campo === "monto" ? (
-                  <input autoFocus type="number" step="0.01" value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => guardar(c)}
-                    onKeyDown={(e) => { if (e.key === "Enter") guardar(c); if (e.key === "Escape") setEditing(null); }}
-                    style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
-                ) : fmt(c.monto)}
-              </td>
-              <td style={{ ...td, cursor: "pointer" }}
-                onDoubleClick={() => { setEditing({ id: c.id, campo: "concepto" }); setEditValue(c.concepto); }}
-                title="Doble click para editar">
-                {editing?.id === c.id && editing.campo === "concepto" ? (
-                  <input autoFocus value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => guardar(c)}
-                    onKeyDown={(e) => { if (e.key === "Enter") guardar(c); if (e.key === "Escape") setEditing(null); }}
-                    style={{ width: "100%", padding: 4, fontSize: 12 }} />
-                ) : c.concepto}
-              </td>
-              <td style={td}>
-                <button onClick={() => borrar(c.id)}
-                  style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer", fontSize: 14 }}>×</button>
-              </td>
-            </tr>
-          ))}
+          {datos.map((c) => {
+            const checked = seleccionados.has(c.id);
+            return (
+              <tr key={c.id} style={checked ? { background: "#fef9c3" } : undefined}>
+                <td style={{ ...td, textAlign: "center" }}>
+                  <input type="checkbox" checked={checked}
+                    onChange={() => onToggleSeleccion(c.id)}
+                    style={{ cursor: "pointer", margin: 0 }} />
+                </td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 600, cursor: "pointer" }}
+                  onDoubleClick={() => { setEditing({ id: c.id, campo: "monto" }); setEditValue(String(c.monto)); }}
+                  title="Doble click para editar">
+                  {editing?.id === c.id && editing.campo === "monto" ? (
+                    <input autoFocus type="number" step="0.01" value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => guardar(c)}
+                      onKeyDown={(e) => { if (e.key === "Enter") guardar(c); if (e.key === "Escape") setEditing(null); }}
+                      style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                  ) : fmt(c.monto)}
+                </td>
+                <td style={{ ...td, cursor: "pointer" }}
+                  onDoubleClick={() => { setEditing({ id: c.id, campo: "concepto" }); setEditValue(c.concepto); }}
+                  title="Doble click para editar">
+                  {editing?.id === c.id && editing.campo === "concepto" ? (
+                    <input autoFocus value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => guardar(c)}
+                      onKeyDown={(e) => { if (e.key === "Enter") guardar(c); if (e.key === "Escape") setEditing(null); }}
+                      style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                  ) : c.concepto}
+                </td>
+                <td style={td}>
+                  <button onClick={() => borrar(c.id)}
+                    style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer", fontSize: 14 }}>×</button>
+                </td>
+              </tr>
+            );
+          })}
           {agregando && (
             <tr style={{ background: "#fef9c3" }}>
+              <td style={td}></td>
               <td style={td}>
                 <input type="number" step="0.01" value={draft.monto}
                   onChange={(e) => setDraft({ ...draft, monto: +e.target.value })}
@@ -461,7 +560,7 @@ function SubPanel({ sub, datos, onChange }: {
             </tr>
           )}
           <tr>
-            <td colSpan={3} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+            <td colSpan={4} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
               {!agregando && (
                 <button onClick={() => setAgregando(true)}
                   style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "3px 12px",
