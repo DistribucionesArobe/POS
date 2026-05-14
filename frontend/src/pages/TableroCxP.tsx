@@ -124,9 +124,15 @@ export default function TableroCxP() {
   function celdaEdit(c: CxP, field: string, valorVisible: string, valorEdit?: string) {
     const isEditing = editing?.id === c.cxp_id && editing.field === field;
     if (!isEditing) {
+      const esMonetario = field === "saldado" || field === "monto";
       return (
         <span onDoubleClick={() => iniciarEdit(c, field, valorEdit ?? valorVisible)}
-          style={{ cursor: "pointer" }} title="Doble click para editar">
+          style={{
+            cursor: "pointer",
+            textDecoration: esMonetario && valorVisible ? "underline dotted #94a3b8" : "none",
+            textUnderlineOffset: 3,
+          }}
+          title="Doble click para editar">
           {valorVisible || <span style={{ color: "#cbd5e1" }}>—</span>}
         </span>
       );
@@ -479,7 +485,11 @@ export default function TableroCxP() {
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700,
                     color: c.pagado ? "var(--color-success)" : "var(--color-danger)" }}>
-                    {c.pagado ? "✓ pagado" : fmt(c.saldo)}
+                    {c.pagado ? (
+                      <span onDoubleClick={() => iniciarEdit(c, "saldado", String(c.saldado))}
+                        style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+                        title="Doble click para corregir el saldado">✓ pagado</span>
+                    ) : fmt(c.saldo)}
                   </td>
                   <td style={{ ...td, textAlign: "center" }}
                     title={c.corto_plazo ? "Marcada como corto plazo (suma al panel)" : "Click para marcar como corto plazo"}>
@@ -489,7 +499,16 @@ export default function TableroCxP() {
                       style={{ cursor: c.pagado ? "not-allowed" : "pointer", transform: "scale(1.3)" }} />
                   </td>
                   <td className="no-print" style={td}>
-                    {!c.pagado && <button className="btn btn-sm" onClick={() => setAbonando(c)}>Abonar</button>}
+                    {c.pagado ? (
+                      <button className="btn btn-sm"
+                        style={{ background: "#f1f5f9", color: "#0f172a", border: "1px solid #cbd5e1" }}
+                        onClick={() => iniciarEdit(c, "saldado", String(c.saldado))}
+                        title="Corregir el monto saldado">
+                        Editar pago
+                      </button>
+                    ) : (
+                      <button className="btn btn-sm" onClick={() => setAbonando(c)}>Abonar</button>
+                    )}
                   </td>
                 </tr>
               );
