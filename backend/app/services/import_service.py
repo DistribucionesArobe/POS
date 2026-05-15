@@ -96,6 +96,10 @@ def importar_productos(db: Session, file_bytes: bytes, empresa_id: int) -> dict:
     creados = 0
     actualizados = 0
     errores: list[str] = []
+    # Commit por lotes para evitar OOM / timeout en uploads grandes (5k+ filas).
+    # Cada 300 filas vaciamos la sesion al DB. Antes el commit unico al final con
+    # 5000 productos + 5000 movimientos kardex se pasaba de RAM en Render starter.
+    BATCH = 300
 
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         try:
@@ -167,8 +171,29 @@ def importar_productos(db: Session, file_bytes: bytes, empresa_id: int) -> dict:
             creados += 1
         except Exception as e:
             errores.append(f"Fila {row_idx}: {e}")
+            # Si rompe la transaccion, hay que rollback y limpiar el batch.
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
-    db.commit()
+        # Commit por lotes
+        if (creados + actualizados) > 0 and (creados + actualizados) % BATCH == 0:
+            try:
+                db.commit()
+                # Limpia identity map para liberar RAM (los objetos siguen en DB)
+                db.expunge_all()
+            except Exception as e:
+                errores.append(f"Lote alrededor de fila {row_idx}: {e}")
+                db.rollback()
+
+    # Commit final del batch parcial
+    try:
+        db.commit()
+    except Exception as e:
+        errores.append(f"Commit final: {e}")
+        db.rollback()
+
     return {
         "creados": creados,
         "actualizados": actualizados,
