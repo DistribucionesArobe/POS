@@ -92,8 +92,8 @@ def parsear_xlsx(file_bytes: bytes) -> list[dict]:
 
 def parsear_imagen(file_bytes: bytes, mime_type: str) -> list[dict]:
     """Usa Claude Vision para extraer lineas de una imagen/PDF."""
-    from app.integrations.anthropic_client import AnthropicClient
-    client = AnthropicClient()
+    from app.integrations.anthropic_client import ClaudeClient
+    client = ClaudeClient()
     raw = client.parsear_cotizacion_imagen(file_bytes, mime_type=mime_type)
     # Normalizar
     out = []
