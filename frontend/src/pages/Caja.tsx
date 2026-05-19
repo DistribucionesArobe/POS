@@ -45,6 +45,10 @@ export default function Caja() {
   const [empresaActiva, setEmpresaActiva] = useState<{ id: number; nombre: string } | null>(null);
   const [favoritos, setFavoritos] = useState<any[]>([]);
   const [showImportar, setShowImportar] = useState(false);
+  // Monedero del cliente activo
+  const [puntosCliente, setPuntosCliente] = useState<number>(0);
+  const [minCanje, setMinCanje] = useState<number>(200);
+  const [puntosACanjear, setPuntosACanjear] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -65,6 +69,30 @@ export default function Caja() {
       setFavoritos([]);
     }
   }
+
+  async function cargarSaldoMonedero(clienteId: number) {
+    // Solo si no es Publico en General (id=1)
+    if (!clienteId || clienteId === 1) {
+      setPuntosCliente(0);
+      setPuntosACanjear(0);
+      return;
+    }
+    try {
+      const r = await api.get(`/api/monedero/saldo/${clienteId}`);
+      setPuntosCliente(r.data?.saldo || 0);
+      setMinCanje(r.data?.min_canje || 200);
+    } catch {
+      // Si la empresa no tiene monedero activo o el endpoint falla, dejamos saldo en 0
+      setPuntosCliente(0);
+    }
+    setPuntosACanjear(0);
+  }
+
+  // Refresca saldo cada vez que cambia el cliente
+  useEffect(() => {
+    cargarSaldoMonedero(cliente.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cliente.id]);
 
   function focus() {
     setTimeout(() => inputRef.current?.focus(), 80);
@@ -170,7 +198,13 @@ export default function Caja() {
   }
 
   const sumaPagos = +pagos.reduce((a, p) => a + (p.monto || 0), 0).toFixed(2);
-  const faltante = +(total - sumaPagos).toFixed(2);
+  // Canje valido solo si >= minCanje y aplica al tipo
+  const canjeValido = puntosACanjear >= minCanje
+    && (tipoSel === "TICKET" || tipoSel === "REMISION")
+    && cliente.id !== 1;
+  const canjeMonto = canjeValido ? Math.min(puntosACanjear, Math.floor(total)) : 0;
+  const totalAPagar = +(total - canjeMonto).toFixed(2);
+  const faltante = +(totalAPagar - sumaPagos).toFixed(2);
   const usaSplit = pagos.length > 1;
 
   function setPago(idx: number, patch: Partial<PagoRow>) {
@@ -191,11 +225,11 @@ export default function Caja() {
     // Validar pagos solo si se cobra al contado (PUE).
     // REMISION y FACTURA PPD son a credito, se cobraran despues desde Cartera.
     if (!esCredito) {
-      if (sumaPagos < total - 0.01) {
-        alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
+      if (sumaPagos < totalAPagar - 0.01) {
+        alert(`Faltan ${fmt(totalAPagar - sumaPagos)} por cubrir`);
         return;
       }
-      if (pagos.some((p) => p.monto <= 0)) {
+      if (pagos.some((p) => p.monto <= 0) && totalAPagar > 0) {
         alert("Cada método de pago debe ser mayor a $0");
         return;
       }
@@ -203,6 +237,17 @@ export default function Caja() {
     if (tipo === "FACTURA" && !cliente.rfc) {
       alert("Para facturar el cliente necesita RFC. Click 'cambiar' en el campo Cliente.");
       return;
+    }
+    // Validacion adicional canje
+    if (canjeMonto > 0) {
+      if (canjeMonto > puntosCliente) {
+        alert(`Saldo insuficiente. Solo tienes ${puntosCliente} puntos.`);
+        return;
+      }
+      if (puntosACanjear > 0 && puntosACanjear < minCanje) {
+        alert(`Mínimo de canje: ${minCanje} puntos.`);
+        return;
+      }
     }
     setProcesando(true);
     const payload: any = {
@@ -215,13 +260,32 @@ export default function Caja() {
       })),
     };
     if (!esCredito) {
-      payload.pagos = pagos.map((p) => ({
-        forma_pago_sat: p.forma_pago_sat, monto: +p.monto,
-      }));
+      const pagosFinales = pagos
+        .filter((p) => p.monto > 0)
+        .map((p) => ({ forma_pago_sat: p.forma_pago_sat, monto: +p.monto }));
+      // Si hay canje, agregamos un pago tipo Monedero (05) que cubre la parte del canje
+      if (canjeMonto > 0) {
+        pagosFinales.push({ forma_pago_sat: "05", monto: canjeMonto });
+      }
+      payload.pagos = pagosFinales;
     }
     try {
       const r = await api.post("/api/ventas", payload);
       const ventaId = r.data.id;
+
+      // Registrar canje de monedero si aplica (solo TICKET/REMISION)
+      if (canjeMonto > 0) {
+        try {
+          await api.post("/api/monedero/canje", {
+            cliente_id: cliente.id,
+            puntos: canjeMonto,
+            documento_venta_id: ventaId,
+          });
+        } catch (err: any) {
+          // No bloquea la venta - solo loggea
+          console.error("Error registrando canje:", err);
+        }
+      }
 
       // Si es FACTURA, timbrar al toque
       let cfdiOk: any = null;
@@ -249,8 +313,8 @@ export default function Caja() {
       } catch {}
 
       // Cambio si pagó de más
-      const cambioLinea = sumaPagos > total + 0.01
-        ? `\n\n💵 CAMBIO A DAR: ${fmt(sumaPagos - total)}`
+      const cambioLinea = sumaPagos > totalAPagar + 0.01
+        ? `\n\n💵 CAMBIO A DAR: ${fmt(sumaPagos - totalAPagar)}`
         : "";
 
       if (cfdiOk) {
@@ -269,6 +333,11 @@ export default function Caja() {
       setSugerencias([]);
       setPagos([{ forma_pago_sat: "01", monto: 0 }]);
       setTipoSel("TICKET");
+      setPuntosACanjear(0);
+      // Refresca saldo del cliente (despues del canje y de la ganancia automatica)
+      if (cliente.id !== 1) {
+        setTimeout(() => cargarSaldoMonedero(cliente.id), 300);
+      }
       focus();
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
@@ -352,6 +421,15 @@ export default function Caja() {
               {cliente.nombre}{cliente.rfc ? ` · ${cliente.rfc}` : ""} ✎
             </button> <span style={{ opacity: 0.6 }}>(F2)</span>
           </span>
+          {puntosCliente > 0 && (
+            <span style={{
+              fontSize: 12, padding: "4px 10px", borderRadius: 4,
+              background: "#065f46", color: "white", fontWeight: 600,
+              marginLeft: 8,
+            }} title={`Saldo del monedero · mínimo de canje ${minCanje} pts`}>
+              💰 {puntosCliente.toLocaleString("es-MX")} pts · ${puntosCliente.toLocaleString("es-MX")}
+            </span>
+          )}
         </div>
         <button onClick={() => salirDeCaja()}
           style={{
@@ -608,6 +686,58 @@ export default function Caja() {
                 <strong> Cartera → Abonar</strong>{tipoSel === "FACTURA_PPD" ? ", donde podrás emitir el complemento de pago." : "."}
               </div>
             )}
+
+            {/* Canje de puntos: solo TICKET o REMISION con cliente real y saldo */}
+            {puntosCliente > 0 && (tipoSel === "TICKET" || tipoSel === "REMISION") && cliente.id !== 1 && (
+              <div style={{ marginTop: 16, padding: 14, background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <strong style={{ fontSize: 14, color: "#065f46" }}>💰 Canjear puntos del monedero</strong>
+                  <span style={{ fontSize: 12, color: "#065f46" }}>
+                    Saldo: <strong>{puntosCliente.toLocaleString("es-MX")} pts</strong> ({fmt(puntosCliente)})
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 8, alignItems: "center" }}>
+                  <input type="number" min={0} step={1}
+                    value={puntosACanjear || ""}
+                    placeholder={`Puntos a canjear (mín ${minCanje})`}
+                    onChange={(e) => {
+                      const n = Math.max(0, Math.floor(+e.target.value || 0));
+                      const maxCanje = Math.min(puntosCliente, Math.floor(total));
+                      setPuntosACanjear(Math.min(n, maxCanje));
+                    }}
+                    style={{ padding: 8, fontSize: 16, fontWeight: 600, textAlign: "right",
+                      border: "1px solid #86efac", borderRadius: 4 }} />
+                  <button onClick={() => {
+                    const maxCanje = Math.min(puntosCliente, Math.floor(total));
+                    setPuntosACanjear(maxCanje);
+                  }} type="button"
+                    style={{ background: "white", border: "1px solid #86efac", color: "#065f46",
+                      padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                    Máximo
+                  </button>
+                  <button onClick={() => setPuntosACanjear(0)} type="button"
+                    style={{ background: "transparent", border: "1px solid #cbd5e1", color: "#475569",
+                      padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                    Limpiar
+                  </button>
+                  <strong style={{ fontSize: 16, color: "#065f46" }}>
+                    -{fmt(puntosACanjear)}
+                  </strong>
+                </div>
+                {puntosACanjear > 0 && puntosACanjear < minCanje && (
+                  <div style={{ fontSize: 11, color: "#dc2626", marginTop: 6 }}>
+                    Mínimo de canje: {minCanje} puntos
+                  </div>
+                )}
+                {puntosACanjear >= minCanje && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 8, fontWeight: 600 }}>
+                    <span style={{ color: "#065f46" }}>Total después del canje:</span>
+                    <span style={{ color: "#065f46", fontSize: 20 }}>{fmt(Math.max(0, total - puntosACanjear))}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {!esCredito && (
               <div style={{ marginTop: 16, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -629,7 +759,7 @@ export default function Caja() {
                     <input ref={idx === 0 ? recibidoRef : undefined} className="input" type="number" step="0.01"
                       value={p.monto}
                       onChange={(e) => setPago(idx, { monto: +e.target.value })}
-                      onKeyDown={(e) => e.key === "Enter" && sumaPagos >= total - 0.01 && cobrar()}
+                      onKeyDown={(e) => e.key === "Enter" && sumaPagos >= totalAPagar - 0.01 && cobrar()}
                       style={{ fontSize: 16, padding: 10, textAlign: "right", fontWeight: 600 }} />
                     {pagos.length > 1 && (
                       <button onClick={() => quitarPago(idx)}
@@ -671,7 +801,7 @@ export default function Caja() {
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
               <button onClick={cobrar}
-                disabled={procesando || (!esCredito && sumaPagos < total - 0.01)}
+                disabled={procesando || (!esCredito && sumaPagos < totalAPagar - 0.01)}
                 style={{
                   flex: 1, padding: 18, fontSize: 18, fontWeight: 700, color: "white",
                   background: procesando ? "#94a3b8" : "var(--color-primary)",
