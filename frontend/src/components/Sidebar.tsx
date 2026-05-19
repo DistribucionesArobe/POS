@@ -26,6 +26,7 @@ const items = [
   { to: "/compras", label: "Compras y CxP", icon: Icon.package },
   { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar },
   { to: "/cartera", label: "Cartera", icon: Icon.dollar },
+  { to: "/monedero", label: "Monedero", icon: Icon.dollar },
   { to: "/corte", label: "Corte de caja", icon: Icon.dollar },
   { to: "/reportes", label: "Reportes", icon: Icon.list },
 ];

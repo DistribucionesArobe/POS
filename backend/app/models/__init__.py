@@ -18,3 +18,4 @@ from app.models.corte_caja import CorteCaja  # noqa
 from app.models.activo import Activo  # noqa
 from app.models.tarjeta_credito import ConceptoTarjeta, TarjetaTotal, TarjetaSubcuenta  # noqa
 from app.models.gastos_personales import GastoPersonal, IngresoPersonal  # noqa
+from app.models.monedero import MonederoMovimiento  # noqa

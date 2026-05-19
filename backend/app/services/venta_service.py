@@ -123,6 +123,22 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         )
         db.add(cxc)
 
+    # Acumular puntos de monedero (solo si la empresa lo tiene activo y el cliente
+    # es identificado). No rompe la venta si falla.
+    try:
+        from app.routers.monedero import acumular_puntos_por_venta
+        acumular_puntos_por_venta(
+            db=db,
+            empresa_id=empresa_id,
+            cliente_id=payload.cliente_id,
+            documento_id=doc.id,
+            subtotal=subtotal,
+            tipo_documento=payload.tipo,
+        )
+    except Exception:
+        # Silenciar errores del monedero - no debe bloquear la venta
+        pass
+
     db.commit()
     db.refresh(doc)
     return doc

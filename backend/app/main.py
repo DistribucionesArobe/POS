@@ -21,6 +21,7 @@ from app.routers import (
     cotizaciones,
     activos,
     tarjetas,
+    monedero,
 )
 
 settings = get_settings()
@@ -68,3 +69,4 @@ app.include_router(autofactura.router, prefix="/api/public/facturar", tags=["aut
 app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["cotizaciones"])
 app.include_router(activos.router, prefix="/api/activos", tags=["activos"])
 app.include_router(tarjetas.router, prefix="/api/tarjetas", tags=["tarjetas"])
+app.include_router(monedero.router, prefix="/api/monedero", tags=["monedero"])
