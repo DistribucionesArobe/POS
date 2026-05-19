@@ -121,6 +121,40 @@ export default function Caja() {
     focus();
   }
 
+  async function salirDeCaja() {
+    if (items.length === 0) { nav("/"); return; }
+    const opcion = window.confirm(
+      `Tienes ${items.length} producto(s) en el carrito.\n\n` +
+      "OK = Guardar como COTIZACIÓN antes de salir (puedes seguirla después)\n" +
+      "Cancelar = Salir sin guardar (perderás el carrito)"
+    );
+    if (opcion === false) {
+      // Cancelar = salir sin guardar
+      if (!window.confirm("¿Seguro que quieres salir sin guardar? Se perderán los items.")) return;
+      nav("/");
+      return;
+    }
+    // Guardar como cotizacion
+    try {
+      const payload = {
+        cliente_id: cliente.id === 1 ? null : cliente.id, // 1 = Publico en General
+        nombre_libre: cliente.id === 1 ? null : cliente.nombre,
+        vigencia_dias: 15,
+        conceptos: items.map((i) => ({
+          variante_id: i.variante_id,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio,
+        })),
+        notas: "Guardada desde Caja al salir",
+      };
+      const r = await api.post("/api/cotizaciones", payload);
+      alert(`Cotización guardada con folio ${r.data.folio}\nLa encuentras en el módulo Cotizaciones.`);
+      nav("/cotizaciones");
+    } catch (err: any) {
+      alert("Error al guardar cotización: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   function cambiarCantidad(idx: number, nueva: number) {
     if (nueva <= 0) return eliminar(idx);
     const c = [...items];
@@ -319,7 +353,7 @@ export default function Caja() {
             </button> <span style={{ opacity: 0.6 }}>(F2)</span>
           </span>
         </div>
-        <button onClick={() => nav("/")}
+        <button onClick={() => salirDeCaja()}
           style={{
             background: "transparent", color: "white", border: "1px solid #334155",
             padding: "6px 14px", borderRadius: 6, cursor: "pointer", fontSize: 13,
@@ -749,6 +783,8 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
   const [lineas, setLineas] = useState<LineaCot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usarPrecioCatalogo, setUsarPrecioCatalogo] = useState(false);
+  // Si esta marcado, los precios de la cotizacion ya incluyen IVA -> dividir / 1.16
+  const [preciosConIva, setPreciosConIva] = useState(false);
   // Selecciono que lineas voy a agregar (por index) - solo las matcheadas activadas
   const [omitidos, setOmitidos] = useState<Set<number>>(new Set());
   // Index de la linea con el form de creacion abierto
@@ -800,6 +836,12 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
     setCreandoIdx(null);
   }
 
+  function ajustarPrecio(p: number): number {
+    // Si los precios en la cotizacion ya traen IVA, le dividimos 1.16 para obtener
+    // el precio subtotal (que es como el sistema maneja precios internos).
+    return preciosConIva ? +(p / 1.16).toFixed(4) : p;
+  }
+
   function agregarTodos() {
     if (!lineas) return;
     const items: Item[] = [];
@@ -807,14 +849,14 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
       const l = lineas[i];
       if (omitidos.has(i)) continue;
       if (!l.match_variante_id) continue;
-      const precio = usarPrecioCatalogo && l.match_precio_catalogo != null
-        ? l.match_precio_catalogo
-        : l.precio;
+      const precioBase = usarPrecioCatalogo && l.match_precio_catalogo != null
+        ? l.match_precio_catalogo  // precio catalogo siempre se asume subtotal
+        : ajustarPrecio(l.precio); // precio cotizacion segun toggle IVA
       items.push({
         variante_id: l.match_variante_id,
         sku: l.match_sku || "",
         nombre: l.match_nombre || l.descripcion,
-        precio,
+        precio: precioBase,
         cantidad: l.cantidad,
         stock: l.match_stock || 0,
       });
@@ -829,7 +871,9 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
   const matched = lineas?.filter((l) => l.match_variante_id) || [];
   const unmatched = lineas?.filter((l) => !l.match_variante_id) || [];
   const totalMatched = matched.reduce((a, l) => a + (l.cantidad * (
-    usarPrecioCatalogo && l.match_precio_catalogo != null ? l.match_precio_catalogo : l.precio
+    usarPrecioCatalogo && l.match_precio_catalogo != null
+      ? l.match_precio_catalogo
+      : ajustarPrecio(l.precio)
   )), 0);
 
   return (
@@ -890,11 +934,18 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
               <ChipResumen label="Total a agregar" valor={fmt(totalMatched)} color="#1e40af" />
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 10, color: "var(--color-text-muted)" }}>
-              <input type="checkbox" checked={usarPrecioCatalogo}
-                onChange={(e) => setUsarPrecioCatalogo(e.target.checked)} />
-              Usar precio del catálogo en lugar del precio de la cotización
-            </label>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 10, fontSize: 12, color: "var(--color-text-muted)" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={usarPrecioCatalogo}
+                  onChange={(e) => setUsarPrecioCatalogo(e.target.checked)} />
+                Usar precio del catálogo en lugar del de la cotización
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={preciosConIva}
+                  onChange={(e) => setPreciosConIva(e.target.checked)} />
+                Los precios de la cotización <strong>YA INCLUYEN IVA</strong> (dividir entre 1.16)
+              </label>
+            </div>
 
             <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
               <thead>

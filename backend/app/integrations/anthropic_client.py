@@ -180,6 +180,42 @@ REGLAS:
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
 
+    def parsear_csf(self, file_bytes: bytes, mime_type: str = "application/pdf") -> dict:
+        """Vision: extrae datos fiscales de una Constancia de Situacion Fiscal del SAT."""
+        b64 = base64.b64encode(file_bytes).decode()
+        if mime_type == "application/pdf":
+            source_block = {"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": b64,
+            }}
+        else:
+            source_block = {"type": "image", "source": {
+                "type": "base64", "media_type": mime_type, "data": b64,
+            }}
+        msg = self.client.messages.create(
+            model=self.model,
+            max_tokens=800,
+            messages=[{"role": "user", "content": [
+                source_block,
+                {"type": "text", "text": (
+                    "Esta es una Constancia de Situacion Fiscal (CSF) del SAT mexicano. "
+                    "Extrae los datos y devuelve SOLO un JSON sin markdown con estas llaves: "
+                    "rfc (string, 12 o 13 chars), "
+                    "razon_social (string, mayusculas tal cual aparece), "
+                    "regimen_fiscal (string, 3 digitos - el codigo SAT, ej '601', '603', '612', '626'. "
+                    "Mapeo: 'Personas Morales con Fines no Lucrativos'=603, 'General de Ley'=601, "
+                    "'PF Actividad Empresarial'=612, 'RESICO'=626, 'Sueldos'=605, 'Asalariados'=605), "
+                    "codigo_postal (string, 5 digitos del domicilio fiscal), "
+                    "tipo_persona (string, 'fisica' o 'moral' - moral si tiene 12 chars RFC, fisica si 13), "
+                    "nombre_comercial (string|null). "
+                    "Si algun campo no es legible, usa null. Sin texto adicional."
+                )},
+            ]}],
+        )
+        text = msg.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").lstrip("json").strip()
+        return json.loads(text)
+
     def parsear_comprobante_pago(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """Vision: extrae datos estructurados de un comprobante de transferencia."""
         b64 = base64.b64encode(image_bytes).decode()

@@ -1,6 +1,6 @@
 """Clientes - CRUD filtrado por empresa."""
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,37 @@ from app.schemas.cliente import ClienteIn, ClienteUpdate
 from app.services.security import get_active_empresa_id
 
 router = APIRouter()
+
+
+@router.post("/parsear-csf")
+async def parsear_csf(
+    file: UploadFile = File(...),
+    _empresa_id: int = Depends(get_active_empresa_id),
+):
+    """Recibe PDF/imagen de una Constancia de Situacion Fiscal del SAT
+    y devuelve los datos fiscales extraidos via Claude Vision."""
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Archivo vacio")
+
+    if filename.endswith(".pdf") or content_type == "application/pdf":
+        mime = "application/pdf"
+    elif content_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        mime = content_type if content_type.startswith("image/") else (
+            "image/png" if filename.endswith(".png") else
+            "image/webp" if filename.endswith(".webp") else "image/jpeg"
+        )
+    else:
+        raise HTTPException(400, f"Tipo no soportado: {filename}")
+
+    from app.integrations.anthropic_client import ClaudeClient
+    try:
+        client = ClaudeClient()
+        return client.parsear_csf(file_bytes, mime_type=mime)
+    except Exception as e:
+        raise HTTPException(500, f"No pude leer la CSF: {e}")
 
 
 @router.get("")

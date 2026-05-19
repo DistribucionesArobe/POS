@@ -23,7 +23,35 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
     whatsapp: "", uso_cfdi_default: "G03",
   });
   const [creando, setCreando] = useState(false);
+  const [parseandoCsf, setParseandoCsf] = useState(false);
+  const [csfError, setCsfError] = useState<string | null>(null);
   const inputBuscarRef = useRef<HTMLInputElement>(null);
+
+  async function subirCsf(file: File) {
+    setParseandoCsf(true);
+    setCsfError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post("/api/clientes/parsear-csf", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000,
+      });
+      const data = r.data || {};
+      setNuevo({
+        ...nuevo,
+        nombre: data.razon_social || nuevo.nombre,
+        razon_social: data.razon_social || nuevo.razon_social,
+        rfc: (data.rfc || nuevo.rfc || "").toUpperCase(),
+        codigo_postal: data.codigo_postal || nuevo.codigo_postal,
+        regimen_fiscal: data.regimen_fiscal || nuevo.regimen_fiscal,
+      });
+    } catch (err: any) {
+      setCsfError(err.response?.data?.detail || err.message);
+    } finally {
+      setParseandoCsf(false);
+    }
+  }
 
   useEffect(() => {
     setTimeout(() => inputBuscarRef.current?.focus(), 80);
@@ -118,6 +146,26 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
             <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-secondary)" }}>
               {requiereRfc ? "Captura datos fiscales completos para CFDI." : "Datos mínimos: nombre."}
             </p>
+
+            {/* Subir Constancia de Situacion Fiscal */}
+            <div style={{
+              padding: 10, background: "#eff6ff", borderRadius: 6, border: "1px dashed #93c5fd",
+              display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            }}>
+              <label style={{ fontSize: 12, color: "#1e40af", fontWeight: 600, cursor: "pointer" }}>
+                📎 Subir Constancia (CSF) para auto-llenar
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) subirCsf(f); }}
+                  style={{ display: "none" }} disabled={parseandoCsf} />
+              </label>
+              {parseandoCsf && <span style={{ fontSize: 11, color: "#6b7280" }}>Procesando con IA…</span>}
+              {csfError && <span style={{ fontSize: 11, color: "#991b1b" }}>{csfError}</span>}
+              {!parseandoCsf && !csfError && (
+                <span style={{ fontSize: 11, color: "#6b7280" }}>
+                  Lee RFC / Razón social / Régimen / CP del PDF
+                </span>
+              )}
+            </div>
             <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label>Nombre / Razón social *</label>
@@ -150,10 +198,25 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
                     <label>Régimen fiscal</label>
                     <select className="input" value={nuevo.regimen_fiscal}
                       onChange={(e) => setNuevo({ ...nuevo, regimen_fiscal: e.target.value })}>
-                      <option value="601">601 - General PM</option>
+                      <option value="601">601 - General de Ley (PM)</option>
+                      <option value="603">603 - PM Fines no Lucrativos</option>
+                      <option value="605">605 - Sueldos y Salarios</option>
+                      <option value="606">606 - Arrendamiento</option>
+                      <option value="607">607 - Enajenación de bienes</option>
+                      <option value="608">608 - Demás ingresos</option>
+                      <option value="610">610 - Residentes extranjero</option>
+                      <option value="611">611 - Dividendos</option>
                       <option value="612">612 - PF Act. empresarial</option>
+                      <option value="614">614 - Intereses</option>
+                      <option value="615">615 - Premios</option>
                       <option value="616">616 - Sin obligaciones</option>
-                      <option value="626">626 - RESICO</option>
+                      <option value="620">620 - Sociedades cooperativas</option>
+                      <option value="621">621 - Incorporación Fiscal</option>
+                      <option value="622">622 - Agricultura/ganadería</option>
+                      <option value="623">623 - Opcional grupos</option>
+                      <option value="624">624 - Coordinados</option>
+                      <option value="625">625 - Plataformas tecnológicas</option>
+                      <option value="626">626 - RESICO (PF/PM)</option>
                     </select>
                   </div>
                   <div>
