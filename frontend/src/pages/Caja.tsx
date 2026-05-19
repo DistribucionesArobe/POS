@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import ClientePicker from "../components/ClientePicker";
@@ -751,6 +751,8 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
   const [usarPrecioCatalogo, setUsarPrecioCatalogo] = useState(false);
   // Selecciono que lineas voy a agregar (por index) - solo las matcheadas activadas
   const [omitidos, setOmitidos] = useState<Set<number>>(new Set());
+  // Index de la linea con el form de creacion abierto
+  const [creandoIdx, setCreandoIdx] = useState<number | null>(null);
 
   async function procesar() {
     if (!archivo) return;
@@ -777,6 +779,25 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
       if (n.has(i)) n.delete(i); else n.add(i);
       return n;
     });
+  }
+
+  function onProductoCreado(idx: number, varianteId: number, sku: string, nombreFinal: string, precioFinal: number) {
+    // Marca la linea como matcheada con la nueva variante creada
+    setLineas((prev) => {
+      if (!prev) return prev;
+      const n = [...prev];
+      n[idx] = {
+        ...n[idx],
+        match_variante_id: varianteId,
+        match_sku: sku,
+        match_nombre: nombreFinal,
+        match_precio_catalogo: precioFinal,
+        match_stock: 0,
+        match_score: 1.0,
+      };
+      return n;
+    });
+    setCreandoIdx(null);
   }
 
   function agregarTodos() {
@@ -891,43 +912,61 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
                   const omitido = omitidos.has(i);
                   const sinMatch = !l.match_variante_id;
                   return (
-                    <tr key={i} style={{
-                      background: omitido ? "#f3f4f6" : sinMatch ? "#fef3c7" : "white",
-                      opacity: omitido ? 0.5 : 1,
-                    }}>
-                      <td style={{ ...tdMini, textAlign: "center" }}>
-                        {sinMatch ? (
-                          <span title="No match en catálogo">⚠</span>
-                        ) : (
-                          <input type="checkbox" checked={!omitido}
-                            onChange={() => toggleOmitir(i)}
-                            style={{ cursor: "pointer" }} />
-                        )}
-                      </td>
-                      <td style={tdMini}>
-                        <div>{l.descripcion}</div>
-                        {l.unidad && <div style={{ fontSize: 10, color: "#6b7280" }}>{l.unidad}</div>}
-                      </td>
-                      <td style={{ ...tdMini, textAlign: "right", fontWeight: 600 }}>{l.cantidad}</td>
-                      <td style={{ ...tdMini, textAlign: "right" }}>{fmt(l.precio)}</td>
-                      <td style={tdMini}>
-                        {l.match_nombre ? (
-                          <>
-                            <div style={{ fontSize: 11 }}>{l.match_nombre}</div>
-                            <div style={{ fontSize: 10, color: "#6b7280" }}>
-                              SKU {l.match_sku} · score {l.match_score} · stock {l.match_stock ?? 0}
-                            </div>
-                          </>
-                        ) : (
-                          <span style={{ color: "#92400e", fontSize: 11 }}>
-                            Crear primero en Productos para incluirlo
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ ...tdMini, textAlign: "right", color: "#475569" }}>
-                        {l.match_precio_catalogo != null ? fmt(l.match_precio_catalogo) : "—"}
-                      </td>
-                    </tr>
+                    <React.Fragment key={i}>
+                      <tr style={{
+                        background: omitido ? "#f3f4f6" : sinMatch ? "#fef3c7" : "white",
+                        opacity: omitido ? 0.5 : 1,
+                      }}>
+                        <td style={{ ...tdMini, textAlign: "center" }}>
+                          {sinMatch ? (
+                            <span title="No match en catálogo">⚠</span>
+                          ) : (
+                            <input type="checkbox" checked={!omitido}
+                              onChange={() => toggleOmitir(i)}
+                              style={{ cursor: "pointer" }} />
+                          )}
+                        </td>
+                        <td style={tdMini}>
+                          <div>{l.descripcion}</div>
+                          {l.unidad && <div style={{ fontSize: 10, color: "#6b7280" }}>{l.unidad}</div>}
+                        </td>
+                        <td style={{ ...tdMini, textAlign: "right", fontWeight: 600 }}>{l.cantidad}</td>
+                        <td style={{ ...tdMini, textAlign: "right" }}>{fmt(l.precio)}</td>
+                        <td style={tdMini}>
+                          {l.match_nombre ? (
+                            <>
+                              <div style={{ fontSize: 11 }}>{l.match_nombre}</div>
+                              <div style={{ fontSize: 10, color: "#6b7280" }}>
+                                SKU {l.match_sku} · score {l.match_score} · stock {l.match_stock ?? 0}
+                              </div>
+                            </>
+                          ) : (
+                            <button onClick={() => setCreandoIdx(creandoIdx === i ? null : i)}
+                              style={{
+                                background: creandoIdx === i ? "#92400e" : "var(--color-primary)",
+                                color: "white", border: 0, padding: "4px 10px",
+                                borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600,
+                              }}>
+                              {creandoIdx === i ? "Cancelar" : "+ Crear producto"}
+                            </button>
+                          )}
+                        </td>
+                        <td style={{ ...tdMini, textAlign: "right", color: "#475569" }}>
+                          {l.match_precio_catalogo != null ? fmt(l.match_precio_catalogo) : "—"}
+                        </td>
+                      </tr>
+                      {creandoIdx === i && sinMatch && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: 0, background: "#eff6ff" }}>
+                            <FormCrearProducto
+                              linea={l}
+                              onCancelar={() => setCreandoIdx(null)}
+                              onCreado={(varianteId, sku, nombre, precio) => onProductoCreado(i, varianteId, sku, nombre, precio)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -979,4 +1018,212 @@ const thMini: React.CSSProperties = {
 };
 const tdMini: React.CSSProperties = {
   padding: "6px 8px", borderBottom: "1px solid #f1f5f9", fontSize: 12,
+};
+
+
+// Mapeo unidad descriptiva -> clave SAT c_ClaveUnidad
+function unidadToClaveSat(unidad: string): { unidad: string; clave: string } {
+  const u = (unidad || "").trim().toLowerCase();
+  if (!u) return { unidad: "PZA", clave: "H87" };
+  if (u.startsWith("kit")) return { unidad: "KIT", clave: "XKI" };
+  if (u.startsWith("paq")) return { unidad: "PAQUETE", clave: "XPK" };
+  if (u.startsWith("caja")) return { unidad: "CAJA", clave: "XBX" };
+  if (u.startsWith("bult")) return { unidad: "BULTO", clave: "XBG" };
+  if (u.startsWith("kg") || u.includes("kilo")) return { unidad: "KG", clave: "KGM" };
+  if (u === "m" || u.includes("metro")) return { unidad: "M", clave: "MTR" };
+  if (u.startsWith("lt") || u.includes("litro") || u === "l") return { unidad: "LT", clave: "LTR" };
+  if (u.startsWith("ton")) return { unidad: "TON", clave: "TNE" };
+  // Default: pieza
+  return { unidad: "PZA", clave: "H87" };
+}
+
+
+function FormCrearProducto({ linea, onCancelar, onCreado }: {
+  linea: LineaCot;
+  onCancelar: () => void;
+  onCreado: (varianteId: number, sku: string, nombre: string, precio: number) => void;
+}) {
+  const unidadInicial = unidadToClaveSat(linea.unidad);
+  // SKU sugerido: primeras letras de cada palabra + timestamp corto
+  const skuSugerido = (() => {
+    const palabras = linea.descripcion
+      .toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 1)
+      .slice(0, 4);
+    const prefijo = palabras.map((p) => p.slice(0, 3)).join("-");
+    const sufijo = Date.now().toString().slice(-4);
+    return `${prefijo}-${sufijo}`.slice(0, 30);
+  })();
+
+  const [nombre, setNombre] = useState(linea.descripcion);
+  const [sku, setSku] = useState(skuSugerido);
+  const [precio, setPrecio] = useState(linea.precio);
+  const [costo, setCosto] = useState(0);
+  const [unidad, setUnidad] = useState(unidadInicial.unidad);
+  const [claveUnidad, setClaveUnidad] = useState(unidadInicial.clave);
+  const [claveSat, setClaveSat] = useState("");
+  const [satConfianza, setSatConfianza] = useState<string | null>(null);
+  const [satDescripcion, setSatDescripcion] = useState<string | null>(null);
+  const [sugiriendo, setSugiriendo] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function sugerirSat() {
+    setSugiriendo(true);
+    setError(null);
+    try {
+      const r = await api.post("/api/productos/sugerir-clave-sat", {
+        nombre, categoria: null, marca: null,
+      });
+      setClaveSat(r.data.clave || "");
+      setSatConfianza(r.data.confianza || null);
+      setSatDescripcion(r.data.descripcion || null);
+    } catch (err: any) {
+      setError("No pude sugerir clave SAT: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSugiriendo(false);
+    }
+  }
+
+  async function guardar() {
+    if (!nombre.trim() || !sku.trim()) {
+      setError("Nombre y SKU son obligatorios");
+      return;
+    }
+    if (!claveSat || claveSat.length !== 8) {
+      setError("Necesitas una clave SAT de 8 dígitos (usa el botón 'Sugerir')");
+      return;
+    }
+    setGuardando(true);
+    setError(null);
+    try {
+      const r = await api.post("/api/productos/simple", {
+        nombre: nombre.trim(),
+        sku: sku.trim(),
+        presentacion: "Default",
+        unidad,
+        clave_unidad_sat: claveUnidad,
+        precio_publico: precio,
+        costo_promedio: costo,
+        stock_minimo: 0,
+        categoria: null,
+        marca: null,
+        clave_prod_serv_sat: claveSat,
+      });
+      onCreado(r.data.variante_id, r.data.sku, nombre.trim(), precio);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  // Sugerir SAT al abrir
+  useEffect(() => {
+    sugerirSat();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const colorConfianza = satConfianza === "alta" ? "#065f46"
+    : satConfianza === "media" ? "#92400e" : "#991b1b";
+
+  return (
+    <div style={{ padding: 12, border: "1px solid #93c5fd", borderTop: 0, fontSize: 12 }}>
+      <div style={{ fontSize: 11, color: "#1e40af", marginBottom: 8, fontWeight: 600 }}>
+        Crear producto nuevo en el catálogo
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 100px 100px", gap: 8, marginBottom: 8 }}>
+        <Campo label="Nombre">
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)}
+            style={inputStyle} />
+        </Campo>
+        <Campo label="SKU">
+          <input value={sku} onChange={(e) => setSku(e.target.value)}
+            style={inputStyle} />
+        </Campo>
+        <Campo label="Precio">
+          <input type="number" step="0.01" value={precio}
+            onChange={(e) => setPrecio(+e.target.value)}
+            style={{ ...inputStyle, textAlign: "right" }} />
+        </Campo>
+        <Campo label="Costo">
+          <input type="number" step="0.01" value={costo}
+            onChange={(e) => setCosto(+e.target.value)}
+            style={{ ...inputStyle, textAlign: "right" }} />
+        </Campo>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "140px 110px 1fr 140px", gap: 8, marginBottom: 10 }}>
+        <Campo label="Unidad">
+          <input value={unidad} onChange={(e) => setUnidad(e.target.value)}
+            style={inputStyle} />
+        </Campo>
+        <Campo label="Clave unidad SAT">
+          <input value={claveUnidad} onChange={(e) => setClaveUnidad(e.target.value)}
+            style={inputStyle} title="H87=Pza, XKI=Kit, XPK=Paquete, KGM=Kg, MTR=Metro, LTR=Litro" />
+        </Campo>
+        <Campo label="Clave SAT (8 dígitos)">
+          <div style={{ display: "flex", gap: 4 }}>
+            <input value={claveSat} onChange={(e) => setClaveSat(e.target.value)}
+              maxLength={8} placeholder="ej. 42272003"
+              style={{ ...inputStyle, fontFamily: "monospace", width: 100 }} />
+            <button onClick={sugerirSat} disabled={sugiriendo} type="button"
+              style={{
+                background: "#1e40af", color: "white", border: 0,
+                padding: "4px 10px", borderRadius: 4, fontSize: 11,
+                cursor: sugiriendo ? "wait" : "pointer", whiteSpace: "nowrap",
+              }}>
+              {sugiriendo ? "..." : "🤖 Sugerir IA"}
+            </button>
+            {satDescripcion && (
+              <div style={{ fontSize: 10, color: colorConfianza, alignSelf: "center" }}>
+                <strong>{satConfianza?.toUpperCase()}</strong> · {satDescripcion}
+              </div>
+            )}
+          </div>
+        </Campo>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
+          <button onClick={onCancelar} type="button" disabled={guardando}
+            style={{ background: "transparent", border: "1px solid #cbd5e1", padding: "5px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} type="button" disabled={guardando}
+            style={{
+              background: guardando ? "#94a3b8" : "var(--color-primary)",
+              color: "white", border: 0, padding: "5px 14px",
+              borderRadius: 4, fontSize: 11, fontWeight: 600,
+              cursor: guardando ? "wait" : "pointer",
+            }}>
+            {guardando ? "Guardando..." : "✓ Crear"}
+          </button>
+        </div>
+      </div>
+      {error && (
+        <div style={{
+          background: "#fee2e2", color: "#991b1b", padding: 6, borderRadius: 4,
+          fontSize: 11, marginTop: 4,
+        }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+
+const inputStyle: React.CSSProperties = {
+  padding: "4px 6px", fontSize: 12,
+  border: "1px solid #cbd5e1", borderRadius: 3,
+  width: "100%",
 };
