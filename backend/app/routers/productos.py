@@ -153,18 +153,8 @@ async def parsear_cotizacion(
             )
             lineas = cotizacion_parser.parsear_imagen(file_bytes, mime)
         elif filename.endswith(".pdf") or content_type == "application/pdf":
-            # Convertir primera pagina de PDF a imagen via pypdfium2 (mas ligero que poppler)
-            try:
-                import pypdfium2 as pdfium
-                pdf = pdfium.PdfDocument(file_bytes)
-                page = pdf[0]
-                pil_img = page.render(scale=2).to_pil()
-                from io import BytesIO
-                buf = BytesIO()
-                pil_img.save(buf, format="PNG")
-                lineas = cotizacion_parser.parsear_imagen(buf.getvalue(), "image/png")
-            except ImportError:
-                raise HTTPException(500, "Falta pypdfium2 - sube imagen o xlsx en su lugar")
+            # Claude soporta PDFs nativamente, no requiere conversion local
+            lineas = cotizacion_parser.parsear_imagen(file_bytes, "application/pdf")
         else:
             raise HTTPException(400, f"Tipo de archivo no soportado: {filename}")
     except ValueError as e:

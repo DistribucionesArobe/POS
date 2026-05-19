@@ -137,18 +137,28 @@ REGLAS:
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
 
-    def parsear_cotizacion_imagen(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> list[dict]:
-        """Vision: extrae las lineas de una cotizacion (descripcion, unidad, cantidad, precio)."""
-        b64 = base64.b64encode(image_bytes).decode()
+    def parsear_cotizacion_imagen(self, file_bytes: bytes, mime_type: str = "image/jpeg") -> list[dict]:
+        """Vision: extrae lineas de cotizacion. Acepta image/* o application/pdf."""
+        b64 = base64.b64encode(file_bytes).decode()
+        # Claude soporta PDFs nativamente con type=document
+        if mime_type == "application/pdf":
+            source_block = {
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+            }
+        else:
+            source_block = {
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime_type, "data": b64},
+            }
+
         msg = self.client.messages.create(
             model=self.model,
             max_tokens=4000,
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "image", "source": {
-                        "type": "base64", "media_type": mime_type, "data": b64,
-                    }},
+                    source_block,
                     {"type": "text", "text": (
                         "Esta es una cotizacion/orden de compra mexicana. "
                         "Extrae CADA linea de producto y devuelve SOLO un JSON array sin markdown, "
