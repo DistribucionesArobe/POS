@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import Producto, VarianteProducto
 from app.schemas.producto import ProductoIn, ProductoSimpleIn, VarianteIn, PrecioUpdate
-from app.services import import_service
+from app.services import import_service, cotizacion_parser
 from app.services.security import get_active_empresa_id
 
 router = APIRouter()
@@ -127,6 +127,63 @@ async def importar_excel(
         return import_service.importar_productos(db, file_bytes, empresa_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/parsear-cotizacion")
+async def parsear_cotizacion(
+    file: UploadFile = File(...),
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Recibe XLSX o imagen/PDF, extrae lineas y las matchea contra el catalogo."""
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+    file_bytes = await file.read()
+
+    if not file_bytes:
+        raise HTTPException(400, "Archivo vacio")
+
+    try:
+        if filename.endswith((".xlsx", ".xlsm")):
+            lineas = cotizacion_parser.parsear_xlsx(file_bytes)
+        elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")) or content_type.startswith("image/"):
+            mime = content_type if content_type.startswith("image/") else (
+                "image/png" if filename.endswith(".png") else
+                "image/webp" if filename.endswith(".webp") else "image/jpeg"
+            )
+            lineas = cotizacion_parser.parsear_imagen(file_bytes, mime)
+        elif filename.endswith(".pdf") or content_type == "application/pdf":
+            # Convertir primera pagina de PDF a imagen via pypdfium2 (mas ligero que poppler)
+            try:
+                import pypdfium2 as pdfium
+                pdf = pdfium.PdfDocument(file_bytes)
+                page = pdf[0]
+                pil_img = page.render(scale=2).to_pil()
+                from io import BytesIO
+                buf = BytesIO()
+                pil_img.save(buf, format="PNG")
+                lineas = cotizacion_parser.parsear_imagen(buf.getvalue(), "image/png")
+            except ImportError:
+                raise HTTPException(500, "Falta pypdfium2 - sube imagen o xlsx en su lugar")
+        else:
+            raise HTTPException(400, f"Tipo de archivo no soportado: {filename}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"No pude leer el archivo: {e}")
+
+    if not lineas:
+        return {"lineas": [], "total_lineas": 0, "total_monto": 0.0}
+
+    enriquecidas = cotizacion_parser.matchear_lineas(db, empresa_id, lineas)
+    total_monto = sum((l.get("monto") or 0) for l in enriquecidas)
+    return {
+        "lineas": enriquecidas,
+        "total_lineas": len(enriquecidas),
+        "matched": sum(1 for l in enriquecidas if l.get("match_variante_id")),
+        "no_matched": sum(1 for l in enriquecidas if not l.get("match_variante_id")),
+        "total_monto": round(total_monto, 2),
+    }
 
 
 @router.get("")

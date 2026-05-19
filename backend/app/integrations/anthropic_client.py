@@ -137,6 +137,39 @@ REGLAS:
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
 
+    def parsear_cotizacion_imagen(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> list[dict]:
+        """Vision: extrae las lineas de una cotizacion (descripcion, unidad, cantidad, precio)."""
+        b64 = base64.b64encode(image_bytes).decode()
+        msg = self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": mime_type, "data": b64,
+                    }},
+                    {"type": "text", "text": (
+                        "Esta es una cotizacion/orden de compra mexicana. "
+                        "Extrae CADA linea de producto y devuelve SOLO un JSON array sin markdown, "
+                        "un objeto por linea con estas llaves: "
+                        "descripcion (string), unidad (string ej Pieza/Kit/Paquete/Kg), "
+                        "cantidad (number), precio (number, precio unitario), monto (number, total de la linea). "
+                        "REGLAS: "
+                        "1. No incluyas subtotales, IVA, totales, ni filas de resumen. "
+                        "2. Solo las filas de productos reales. "
+                        "3. Si la cotizacion tiene 9 productos, devuelve 9 objetos. "
+                        "4. Numeros sin signos de pesos, sin comas. "
+                        "5. Si un campo no es legible, usa null."
+                    )},
+                ],
+            }],
+        )
+        text = msg.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").lstrip("json").strip()
+        return json.loads(text)
+
     def parsear_comprobante_pago(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """Vision: extrae datos estructurados de un comprobante de transferencia."""
         b64 = base64.b64encode(image_bytes).decode()

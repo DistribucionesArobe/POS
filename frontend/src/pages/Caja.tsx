@@ -44,6 +44,7 @@ export default function Caja() {
   const [procesando, setProcesando] = useState(false);
   const [empresaActiva, setEmpresaActiva] = useState<{ id: number; nombre: string } | null>(null);
   const [favoritos, setFavoritos] = useState<any[]>([]);
+  const [showImportar, setShowImportar] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -345,6 +346,7 @@ export default function Caja() {
 
         <span style={{ fontSize: 11, color: "#64748b", marginRight: 4 }}>Otros:</span>
         <QuickBtn k="F2" label="Cliente" color="transparent" onClick={() => setShowClientePicker(true)} />
+        <QuickBtn k="" label="📎 Importar cotización" color="transparent" onClick={() => setShowImportar(true)} />
         <QuickBtn k="F9" label="🗑 Limpiar" color="transparent"
           onClick={() => { if (items.length > 0 && confirm("Limpiar venta?")) setItems([]); }} />
       </div>
@@ -663,6 +665,25 @@ export default function Caja() {
           onSelect={(c) => { setCliente(c); setShowClientePicker(false); focus(); }}
         />
       )}
+
+      {/* Modal importar cotizacion */}
+      {showImportar && (
+        <ImportarCotizacionModal
+          onClose={() => { setShowImportar(false); focus(); }}
+          onAgregar={(items_nuevos) => {
+            // Mergea con items existentes (suma cantidades si ya estaba)
+            const merged = [...items];
+            for (const nuevo of items_nuevos) {
+              const idx = merged.findIndex((i) => i.variante_id === nuevo.variante_id);
+              if (idx >= 0) merged[idx].cantidad += nuevo.cantidad;
+              else merged.push(nuevo);
+            }
+            setItems(merged);
+            setShowImportar(false);
+            focus();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -690,12 +711,272 @@ function QuickBtn({ k, label, color, onClick }: {
         border: filled ? "none" : "1px solid #334155",
         borderRadius: 6, cursor: "pointer",
       }}>
-      <span style={{
-        background: filled ? "rgba(0,0,0,0.25)" : "#1e293b",
-        padding: "1px 6px", borderRadius: 3, fontSize: 10,
-        fontFamily: "monospace",
-      }}>{k}</span>
+      {k && (
+        <span style={{
+          background: filled ? "rgba(0,0,0,0.25)" : "#1e293b",
+          padding: "1px 6px", borderRadius: 3, fontSize: 10,
+          fontFamily: "monospace",
+        }}>{k}</span>
+      )}
       <span>{label}</span>
     </button>
   );
 }
+
+
+// ===== Modal: importar cotizacion desde XLSX o imagen/PDF =====
+
+type LineaCot = {
+  descripcion: string;
+  unidad: string;
+  cantidad: number;
+  precio: number;
+  monto: number;
+  match_variante_id: number | null;
+  match_score: number;
+  match_nombre: string | null;
+  match_sku: string | null;
+  match_precio_catalogo: number | null;
+  match_stock: number | null;
+};
+
+function ImportarCotizacionModal({ onClose, onAgregar }: {
+  onClose: () => void;
+  onAgregar: (items: Item[]) => void;
+}) {
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [procesando, setProcesando] = useState(false);
+  const [lineas, setLineas] = useState<LineaCot[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [usarPrecioCatalogo, setUsarPrecioCatalogo] = useState(false);
+  // Selecciono que lineas voy a agregar (por index) - solo las matcheadas activadas
+  const [omitidos, setOmitidos] = useState<Set<number>>(new Set());
+
+  async function procesar() {
+    if (!archivo) return;
+    setProcesando(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", archivo);
+      const r = await api.post("/api/productos/parsear-cotizacion", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000,
+      });
+      setLineas(r.data.lineas || []);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  function toggleOmitir(i: number) {
+    setOmitidos((prev) => {
+      const n = new Set(prev);
+      if (n.has(i)) n.delete(i); else n.add(i);
+      return n;
+    });
+  }
+
+  function agregarTodos() {
+    if (!lineas) return;
+    const items: Item[] = [];
+    for (let i = 0; i < lineas.length; i++) {
+      const l = lineas[i];
+      if (omitidos.has(i)) continue;
+      if (!l.match_variante_id) continue;
+      const precio = usarPrecioCatalogo && l.match_precio_catalogo != null
+        ? l.match_precio_catalogo
+        : l.precio;
+      items.push({
+        variante_id: l.match_variante_id,
+        sku: l.match_sku || "",
+        nombre: l.match_nombre || l.descripcion,
+        precio,
+        cantidad: l.cantidad,
+        stock: l.match_stock || 0,
+      });
+    }
+    if (items.length === 0) {
+      alert("No hay líneas matcheadas para agregar.");
+      return;
+    }
+    onAgregar(items);
+  }
+
+  const matched = lineas?.filter((l) => l.match_variante_id) || [];
+  const unmatched = lineas?.filter((l) => !l.match_variante_id) || [];
+  const totalMatched = matched.reduce((a, l) => a + (l.cantidad * (
+    usarPrecioCatalogo && l.match_precio_catalogo != null ? l.match_precio_catalogo : l.precio
+  )), 0);
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 20,
+        width: "90%", maxWidth: 1000, maxHeight: "90vh", overflow: "auto",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>📎 Importar cotización</h2>
+          <button onClick={onClose} style={{ background: "transparent", border: 0, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+
+        {!lineas ? (
+          <div style={{ padding: 30 }}>
+            <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16 }}>
+              Sube un archivo <strong>XLSX</strong>, <strong>PDF</strong> o <strong>imagen (PNG/JPG)</strong> de una cotización.
+              El sistema extrae las líneas y las matchea contra el catálogo de productos.
+            </p>
+            <input type="file" accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf"
+              onChange={(e) => setArchivo(e.target.files?.[0] || null)}
+              style={{ marginBottom: 16, fontSize: 14 }} />
+            {archivo && (
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 12 }}>
+                Archivo: <strong>{archivo.name}</strong> ({(archivo.size / 1024).toFixed(1)} KB)
+              </div>
+            )}
+            {error && (
+              <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
+                {error}
+              </div>
+            )}
+            <button onClick={procesar} disabled={!archivo || procesando}
+              style={{
+                background: archivo && !procesando ? "var(--color-primary)" : "#ccc",
+                color: "white", border: 0, padding: "10px 20px",
+                borderRadius: 6, cursor: archivo && !procesando ? "pointer" : "not-allowed",
+                fontSize: 14, fontWeight: 600,
+              }}>
+              {procesando ? "Procesando..." : "Procesar archivo"}
+            </button>
+            <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 12 }}>
+              Tip: XLSX se parsea instantáneo. PDF/imagen usa Claude Vision (~3-8 seg, ~$0.01 USD).
+            </p>
+          </div>
+        ) : (
+          <div>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10,
+              marginBottom: 12, fontSize: 13,
+            }}>
+              <ChipResumen label="Líneas totales" valor={lineas.length} />
+              <ChipResumen label="Matcheadas ✓" valor={matched.length} color="#065f46" />
+              <ChipResumen label="Sin match ⚠" valor={unmatched.length} color="#991b1b" />
+              <ChipResumen label="Total a agregar" valor={fmt(totalMatched)} color="#1e40af" />
+            </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 10, color: "var(--color-text-muted)" }}>
+              <input type="checkbox" checked={usarPrecioCatalogo}
+                onChange={(e) => setUsarPrecioCatalogo(e.target.checked)} />
+              Usar precio del catálogo en lugar del precio de la cotización
+            </label>
+
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f3f4f6" }}>
+                  <th style={{ ...thMini, width: 30 }}></th>
+                  <th style={thMini}>Descripción cotización</th>
+                  <th style={{ ...thMini, textAlign: "right", width: 60 }}>Cant</th>
+                  <th style={{ ...thMini, textAlign: "right", width: 90 }}>Precio cot.</th>
+                  <th style={thMini}>Match catálogo</th>
+                  <th style={{ ...thMini, textAlign: "right", width: 90 }}>Precio cat.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lineas.map((l, i) => {
+                  const omitido = omitidos.has(i);
+                  const sinMatch = !l.match_variante_id;
+                  return (
+                    <tr key={i} style={{
+                      background: omitido ? "#f3f4f6" : sinMatch ? "#fef3c7" : "white",
+                      opacity: omitido ? 0.5 : 1,
+                    }}>
+                      <td style={{ ...tdMini, textAlign: "center" }}>
+                        {sinMatch ? (
+                          <span title="No match en catálogo">⚠</span>
+                        ) : (
+                          <input type="checkbox" checked={!omitido}
+                            onChange={() => toggleOmitir(i)}
+                            style={{ cursor: "pointer" }} />
+                        )}
+                      </td>
+                      <td style={tdMini}>
+                        <div>{l.descripcion}</div>
+                        {l.unidad && <div style={{ fontSize: 10, color: "#6b7280" }}>{l.unidad}</div>}
+                      </td>
+                      <td style={{ ...tdMini, textAlign: "right", fontWeight: 600 }}>{l.cantidad}</td>
+                      <td style={{ ...tdMini, textAlign: "right" }}>{fmt(l.precio)}</td>
+                      <td style={tdMini}>
+                        {l.match_nombre ? (
+                          <>
+                            <div style={{ fontSize: 11 }}>{l.match_nombre}</div>
+                            <div style={{ fontSize: 10, color: "#6b7280" }}>
+                              SKU {l.match_sku} · score {l.match_score} · stock {l.match_stock ?? 0}
+                            </div>
+                          </>
+                        ) : (
+                          <span style={{ color: "#92400e", fontSize: 11 }}>
+                            Crear primero en Productos para incluirlo
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...tdMini, textAlign: "right", color: "#475569" }}>
+                        {l.match_precio_catalogo != null ? fmt(l.match_precio_catalogo) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, gap: 8 }}>
+              <button onClick={() => { setLineas(null); setArchivo(null); setOmitidos(new Set()); }}
+                style={{ background: "transparent", border: "1px solid #ccc", padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
+                ← Subir otro
+              </button>
+              <button onClick={agregarTodos}
+                style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "8px 18px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                Agregar al carrito ({matched.filter((_, i) => !omitidos.has(lineas.indexOf(matched[i]))).length})
+              </button>
+            </div>
+
+            {unmatched.length > 0 && (
+              <div style={{ marginTop: 12, padding: 10, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
+                <strong>⚠ {unmatched.length} línea(s) sin match.</strong> Da de alta esos productos en Productos
+                (con su clave SAT correcta) antes de timbrar. Mientras tanto se quedan fuera del carrito.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function ChipResumen({ label, valor, color }: { label: string; valor: number | string; color?: string }) {
+  return (
+    <div style={{
+      background: color || "#f3f4f6", color: color ? "white" : "#475569",
+      padding: "8px 12px", borderRadius: 6,
+      display: "flex", flexDirection: "column",
+    }}>
+      <span style={{ fontSize: 10, opacity: 0.8, letterSpacing: "0.04em" }}>{label}</span>
+      <strong style={{ fontSize: 16 }}>{valor}</strong>
+    </div>
+  );
+}
+
+
+const thMini: React.CSSProperties = {
+  padding: "5px 8px", textAlign: "left", fontSize: 10,
+  textTransform: "uppercase", color: "#475569",
+  borderBottom: "1px solid #e5e7eb",
+};
+const tdMini: React.CSSProperties = {
+  padding: "6px 8px", borderBottom: "1px solid #f1f5f9", fontSize: 12,
+};
