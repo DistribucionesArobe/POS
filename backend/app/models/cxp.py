@@ -146,6 +146,20 @@ class PanelCxP(Base):
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class OtroPagoPanel(Base):
+    """Otros pagos a considerar en el tablero CxP (ej. renta, sueldos, servicios).
+    Se suman a 'Facturas por pagar' para el calculo de 'A vender por dia'.
+    Tipo Excel: solo concepto + monto, editables."""
+    __tablename__ = "otros_pagos_panel"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), index=True)
+    concepto: Mapped[str] = mapped_column(String(255))
+    monto: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    orden: Mapped[int] = mapped_column(default=0)
+    creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class AbonoCxP(Base):
     __tablename__ = "abonos_cxp"
 

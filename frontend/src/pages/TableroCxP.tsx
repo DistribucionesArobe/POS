@@ -64,6 +64,7 @@ export default function TableroCxP() {
   const [cxps, setCxps] = useState<CxP[]>([]);
   const [deudaProv, setDeudaProv] = useState<DeudaProv | null>(null);
   const [deudasBanc, setDeudasBanc] = useState<DeudaBancaria[]>([]);
+  const [otrosPagos, setOtrosPagos] = useState<{ id: number; concepto: string; monto: number }[]>([]);
   const [showCaptura, setShowCaptura] = useState(false);
   const [editandoPanel, setEditandoPanel] = useState(false);
   const [panelDraft, setPanelDraft] = useState<any>(null);
@@ -153,7 +154,7 @@ export default function TableroCxP() {
   }
 
   async function cargar() {
-    const [t, c, d, db] = await Promise.all([
+    const [t, c, d, db, op] = await Promise.all([
       api.get("/api/cxp/tablero", { params: { anio, mes } }),
       api.get("/api/cxp/cartera", {
         params: {
@@ -165,11 +166,13 @@ export default function TableroCxP() {
       }),
       api.get("/api/cxp/deuda-por-proveedor"),
       api.get("/api/cxp/deuda-bancaria"),
+      api.get("/api/cxp/otros-pagos"),
     ]);
     setTablero(t.data);
     setCxps(c.data);
     setDeudaProv(d.data);
     setDeudasBanc(db.data);
+    setOtrosPagos(op.data || []);
   }
 
   useEffect(() => { cargar(); }, [anio, mes, soloDelMes, incluirPagadas, arrastrarVencidas]);
@@ -243,9 +246,10 @@ export default function TableroCxP() {
   // Restante a venta estimada (lo que falta vender este mes según proyección)
   const restanteVentaEstimada = Math.max(0, ventaMensualEst - ventaActualMes);
 
-  // "Facturas por pagar" = SOLO las CxP marcadas como corto plazo
-  // (las que el usuario decide pagar pronto). Total general queda como referencia.
-  const facturasPorPagar = k?.cxp_corto_plazo || 0;
+  // "Facturas por pagar" = CxP marcadas como corto plazo + Otros pagos del tablero
+  // (renta, sueldos, servicios). Total general queda como referencia.
+  const totalOtrosPagos = otrosPagos.reduce((a, o) => a + (o.monto || 0), 0);
+  const facturasPorPagar = (k?.cxp_corto_plazo || 0) + totalOtrosPagos;
   const totalProveedores = k?.cxp_total || 0; // todas las CxP abiertas
   const saldo = p?.saldo_banco || 0;
   const ingresoEgresoBanco = p?.ingreso_egreso_banco || 0;
@@ -527,8 +531,11 @@ export default function TableroCxP() {
         </table>
       </div>
 
+      {/* SECCIÓN OTROS PAGOS - se suma a Facturas por pagar */}
+      <OtrosPagosPanel otros={otrosPagos} onChange={cargar} />
+
       {/* SECCIÓN DEUDA POR PROVEEDOR + DEUDA BANCARIA - grid 2 columnas */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
         {deudaProv && (
           <div className="card print-area">
             <h3 className="card-header">Deuda por proveedor</h3>
@@ -820,6 +827,159 @@ const modalCard: React.CSSProperties = {
   background: "white", maxWidth: 620, width: "92%",
   padding: 24, borderRadius: 12, maxHeight: "90vh", overflow: "auto",
 };
+
+
+// === Panel Otros Pagos - tipo Excel, se suma a Facturas por pagar ===
+function OtrosPagosPanel({ otros, onChange }: {
+  otros: { id: number; concepto: string; monto: number }[];
+  onChange: () => void;
+}) {
+  const [editing, setEditing] = useState<{ id: number; campo: "concepto" | "monto" } | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [draft, setDraft] = useState({ concepto: "", monto: 0 });
+  const [agregando, setAgregando] = useState(false);
+
+  const total = otros.reduce((a, o) => a + (o.monto || 0), 0);
+
+  async function guardar(o: { id: number; concepto: string; monto: number }) {
+    if (!editing) return;
+    const payload: any = {};
+    if (editing.campo === "monto") {
+      const n = +editValue;
+      if (isNaN(n) || n < 0) return alert("Monto inválido");
+      payload.monto = n;
+    } else {
+      payload.concepto = editValue;
+    }
+    try {
+      await api.patch(`/api/cxp/otros-pagos/${o.id}`, payload);
+      setEditing(null);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function crear() {
+    if (!draft.concepto.trim()) return;
+    try {
+      await api.post("/api/cxp/otros-pagos", draft);
+      setDraft({ concepto: "", monto: 0 });
+      setAgregando(false);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function borrar(id: number) {
+    if (!confirm("Borrar este otro pago?")) return;
+    try {
+      await api.delete(`/api/cxp/otros-pagos/${id}`);
+      onChange();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  return (
+    <div className="card print-area" style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div>
+          <h3 className="card-header" style={{ margin: 0 }}>Otros pagos</h3>
+          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+            Renta, sueldos, servicios, etc. Se suma a "Facturas por pagar"
+          </span>
+        </div>
+        <div style={{
+          background: "#1f2937", color: "white", padding: "6px 14px", borderRadius: 6,
+          fontSize: 14, fontWeight: 700,
+        }}>
+          TOTAL: ${total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+        </div>
+      </div>
+
+      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "#fef9c3" }}>
+            <th style={{ ...thBlack, textAlign: "right", width: "30%" }}>Monto</th>
+            <th style={thBlack}>Concepto</th>
+            <th className="no-print" style={{ ...thBlack, width: 30 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {otros.length === 0 && !agregando && (
+            <tr>
+              <td colSpan={3} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 12 }}>
+                Sin otros pagos. Click "+ Agregar" para registrar (ej. renta, sueldos, servicios).
+              </td>
+            </tr>
+          )}
+          {otros.map((o) => (
+            <tr key={o.id}>
+              <td style={{ ...td, textAlign: "right", fontWeight: 600, cursor: "pointer" }}
+                onDoubleClick={() => { setEditing({ id: o.id, campo: "monto" }); setEditValue(String(o.monto)); }}
+                title="Doble click para editar">
+                {editing?.id === o.id && editing.campo === "monto" ? (
+                  <input autoFocus type="number" step="0.01" value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => guardar(o)}
+                    onKeyDown={(e) => { if (e.key === "Enter") guardar(o); if (e.key === "Escape") setEditing(null); }}
+                    style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+                ) : `$${o.monto.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`}
+              </td>
+              <td style={{ ...td, cursor: "pointer" }}
+                onDoubleClick={() => { setEditing({ id: o.id, campo: "concepto" }); setEditValue(o.concepto); }}
+                title="Doble click para editar">
+                {editing?.id === o.id && editing.campo === "concepto" ? (
+                  <input autoFocus value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => guardar(o)}
+                    onKeyDown={(e) => { if (e.key === "Enter") guardar(o); if (e.key === "Escape") setEditing(null); }}
+                    style={{ width: "100%", padding: 4, fontSize: 12 }} />
+                ) : o.concepto}
+              </td>
+              <td className="no-print" style={td}>
+                <button onClick={() => borrar(o.id)}
+                  style={{ background: "transparent", border: 0, color: "#dc2626", cursor: "pointer" }}>×</button>
+              </td>
+            </tr>
+          ))}
+          {agregando && (
+            <tr style={{ background: "#fef9c3" }}>
+              <td style={td}>
+                <input className="input" type="number" step="0.01" value={draft.monto}
+                  onChange={(e) => setDraft({ ...draft, monto: +e.target.value })}
+                  placeholder="0.00" style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
+              </td>
+              <td style={td}>
+                <input className="input" value={draft.concepto} autoFocus
+                  onChange={(e) => setDraft({ ...draft, concepto: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") crear(); if (e.key === "Escape") { setAgregando(false); setDraft({ concepto: "", monto: 0 }); } }}
+                  placeholder="ej. RENTA LOCAL" style={{ width: "100%", padding: 4, fontSize: 12 }} />
+              </td>
+              <td className="no-print" style={td}>
+                <button onClick={crear}
+                  style={{ background: "var(--color-primary)", color: "white", border: 0, padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓</button>
+              </td>
+            </tr>
+          )}
+          <tr className="no-print">
+            <td colSpan={3} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+              {!agregando && (
+                <button onClick={() => setAgregando(true)}
+                  style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "4px 14px",
+                    borderRadius: 4, cursor: "pointer", fontSize: 12, color: "#6b7280" }}>
+                  + Agregar
+                </button>
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 
 // === Panel Deuda Bancaria - lista plana tipo Excel ===

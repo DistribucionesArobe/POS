@@ -10,7 +10,7 @@ from app.models.pago import Pago  # noqa
 from app.models.cxc import CuentaPorCobrar, AbonoCxC  # noqa
 from app.models.cxp import (  # noqa
     CuentaPorPagar, AbonoCxP, Compra, ConceptoCompra, PanelCxP,
-    DeudaBancaria, ConceptoDeudaBancaria,
+    DeudaBancaria, ConceptoDeudaBancaria, OtroPagoPanel,
 )
 from app.models.cfdi import Cfdi, ComplementoPago  # noqa
 from app.models.cotizacion import Cotizacion  # noqa

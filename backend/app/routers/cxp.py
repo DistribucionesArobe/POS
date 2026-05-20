@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import (
     CuentaPorPagar, Compra, Proveedor, PanelCxP, AbonoCxP,
-    DocumentoVenta, CuentaPorCobrar,
+    DocumentoVenta, CuentaPorCobrar, OtroPagoPanel,
 )
 from app.models.venta import EstatusDocumento, TipoDocumento
 from app.schemas.compra import CompraIn, AbonoCxPIn
@@ -382,6 +382,14 @@ def tablero_cxp(
     )
     cxc_total = float(cxc_total or 0)
 
+    # Otros pagos del tablero (renta, sueldos, servicios, etc.)
+    otros_pagos_total = (
+        db.query(func.coalesce(func.sum(OtroPagoPanel.monto), 0))
+        .filter(OtroPagoPanel.empresa_id == empresa_id)
+        .scalar()
+    )
+    otros_pagos_total = float(otros_pagos_total or 0)
+
     # Cálculos del Excel
     venta_objetivo = panel_dict["venta_objetivo_mes"]
     restante_meta = max(0, venta_objetivo - venta_mes)
@@ -411,8 +419,84 @@ def tablero_cxp(
             "cxp_corto_plazo": round(cxp_corto_plazo, 2),
             "cxc_total": round(cxc_total, 2),
             "diferencia": round(diferencia, 2),
+            "otros_pagos_total": round(otros_pagos_total, 2),
         },
     }
+
+
+# ===== Otros pagos del tablero (renta, sueldos, servicios, etc.) =====
+
+@router.get("/otros-pagos")
+def listar_otros_pagos(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(OtroPagoPanel)
+        .filter(OtroPagoPanel.empresa_id == empresa_id)
+        .order_by(OtroPagoPanel.orden, OtroPagoPanel.id)
+        .all()
+    )
+    return [
+        {"id": r.id, "concepto": r.concepto, "monto": float(r.monto or 0), "orden": r.orden}
+        for r in rows
+    ]
+
+
+@router.post("/otros-pagos")
+def crear_otro_pago(
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    concepto = (payload.get("concepto") or "").strip()
+    if not concepto:
+        raise HTTPException(400, "Concepto requerido")
+    try:
+        monto = float(payload.get("monto") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Monto invalido")
+    siguiente = db.query(OtroPagoPanel).filter(OtroPagoPanel.empresa_id == empresa_id).count() + 1
+    r = OtroPagoPanel(
+        empresa_id=empresa_id, concepto=concepto, monto=monto, orden=siguiente,
+    )
+    db.add(r); db.commit(); db.refresh(r)
+    return {"id": r.id, "concepto": r.concepto, "monto": float(r.monto), "orden": r.orden}
+
+
+@router.patch("/otros-pagos/{pid}")
+def actualizar_otro_pago(
+    pid: int, payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    r = db.get(OtroPagoPanel, pid)
+    if not r or r.empresa_id != empresa_id:
+        raise HTTPException(404, "Otro pago no existe")
+    if "concepto" in payload:
+        c = (payload["concepto"] or "").strip()
+        if c:
+            r.concepto = c
+    if "monto" in payload:
+        try:
+            r.monto = float(payload["monto"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Monto invalido")
+    db.commit()
+    return {"ok": True, "id": r.id}
+
+
+@router.delete("/otros-pagos/{pid}")
+def borrar_otro_pago(
+    pid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    r = db.get(OtroPagoPanel, pid)
+    if not r or r.empresa_id != empresa_id:
+        raise HTTPException(404, "Otro pago no existe")
+    db.delete(r); db.commit()
+    return {"ok": True}
 
 
 @router.get("/deuda-por-proveedor")
