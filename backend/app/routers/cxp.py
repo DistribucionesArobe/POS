@@ -239,6 +239,24 @@ def actualizar_cxp_manual(
             raise HTTPException(400, "Saldado no puede exceder el monto original")
         cxp.saldo = round(float(cxp.monto_original) - saldado, 2)
         cxp.pagado = cxp.saldo <= 0.01
+    if "monto_original" in payload:
+        try:
+            nuevo_monto = float(payload["monto_original"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Monto invalido")
+        if nuevo_monto <= 0:
+            raise HTTPException(400, "Monto debe ser mayor a 0")
+        # Conserva lo ya saldado y recalcula el saldo pendiente
+        saldado_actual = float(cxp.monto_original) - float(cxp.saldo)
+        if saldado_actual > nuevo_monto:
+            raise HTTPException(
+                400,
+                f"No puedes bajar el monto a {nuevo_monto:.2f} porque ya tiene saldado {saldado_actual:.2f}. "
+                "Reversa los abonos primero o usa un monto mayor."
+            )
+        cxp.monto_original = nuevo_monto
+        cxp.saldo = round(nuevo_monto - saldado_actual, 2)
+        cxp.pagado = cxp.saldo <= 0.01
     if "corto_plazo" in payload:
         cxp.corto_plazo = bool(payload["corto_plazo"])
     db.commit()

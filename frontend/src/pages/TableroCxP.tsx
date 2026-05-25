@@ -97,16 +97,8 @@ export default function TableroCxP() {
     } else if (field === "monto") {
       const n = +editValue;
       if (isNaN(n) || n <= 0) return alert("Monto inválido");
-      // Para cambiar monto, recalculamos saldo = monto - saldado actual
-      // Pero el endpoint solo acepta saldado, así que necesitamos otra ruta
-      // Por simplicidad: solo permitir cambiar monto si no hay abonos
-      if (cxp.saldado > 0 && !cxp.manual) {
-        return alert("No se puede cambiar monto si ya tiene abonos");
-      }
-      // Recalcular saldado y enviar
-      payload.saldado = cxp.saldado;
-      payload.monto_original = n; // backend no lo acepta hoy, pero lo agregamos abajo
-      return alert("Para cambiar monto, usa Captura rápida con un nuevo registro");
+      // El backend recalcula saldo = nuevo_monto - saldado_actual y respeta abonos
+      payload.monto_original = n;
     }
     try {
       await api.patch(`/api/cxp/manual/${cxp.cxp_id}`, payload);
@@ -345,7 +337,17 @@ export default function TableroCxP() {
                 <td style={lblBlue}>Venta mensual estimada</td>
                 <td style={valBlack}>{fmt(ventaMensualEst)}</td>
                 <td style={lblYellow}>Facturas por pagar</td>
-                <td style={valBlack}>{fmt(facturasPorPagar)}</td>
+                <td style={valBlack}
+                  title={totalOtrosPagos > 0
+                    ? `Incluye ${fmt(k?.cxp_corto_plazo || 0)} de CxP corto plazo + ${fmt(totalOtrosPagos)} de otros pagos`
+                    : "Suma de CxP marcadas como corto plazo"}>
+                  {fmt(facturasPorPagar)}
+                  {totalOtrosPagos > 0 && (
+                    <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 400, marginTop: 2 }}>
+                      + {fmt(totalOtrosPagos)} otros
+                    </div>
+                  )}
+                </td>
                 <td style={lblYellow}>A vender por día</td>
                 <td style={valRed}>{fmt(aVenderPorDia)}</td>
               </tr>
@@ -477,7 +479,7 @@ export default function TableroCxP() {
                     {celdaEdit(c, "observaciones", c.observaciones || "")}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
-                    {fmt(c.monto_original)}
+                    {celdaEdit(c, "monto", fmt(c.monto_original), String(c.monto_original))}
                     {c.moneda === "USD" && c.monto_moneda_original && (
                       <div style={{ fontSize: 10, color: "#6b7280" }}>
                         ≈ USD ${c.monto_moneda_original.toFixed(2)} @ {c.tipo_cambio}
