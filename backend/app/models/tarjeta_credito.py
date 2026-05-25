@@ -25,6 +25,11 @@ class ConceptoTarjeta(Base):
     monto: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     orden: Mapped[int] = mapped_column(Integer, default=0)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Soft delete: si tiene fecha, no aparece en la lista normal pero se puede restaurar.
+    eliminado_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    # Marcado como "ya lo separe del banco" aunque no hayas pagado la TC.
+    # Se suma aparte en el header como PAGADO.
+    pagado: Mapped[bool] = mapped_column(default=False, index=True)
 
 
 class TarjetaTotal(Base):

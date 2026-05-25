@@ -8,6 +8,7 @@ type Concepto = {
   concepto: string;
   monto: number;
   orden: number;
+  pagado?: boolean;
 };
 
 type Subcuenta = {
@@ -47,6 +48,7 @@ export default function TarjetasCredito() {
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
   // IDs de conceptos seleccionados (estado local en frontend, no se persiste)
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const [showPapelera, setShowPapelera] = useState(false);
 
   function toggleSeleccionado(id: number) {
     setSeleccionados((prev) => {
@@ -109,8 +111,39 @@ export default function TarjetasCredito() {
   const seleccionTotal = seleccionAmex + seleccionBanorte;
   const cantidadSeleccionados = seleccionados.size;
 
+  // Suma de items marcados como pagado (persistido)
+  const sumaPagadoPorTarjeta = (tarjetaPrefix: string) =>
+    datos
+      .filter((d) => d.seccion.startsWith(tarjetaPrefix) && d.pagado)
+      .reduce((a, c) => a + c.monto, 0);
+  const pagadoAmex = sumaPagadoPorTarjeta("amex_");
+  const pagadoBanorte = sumaPagadoPorTarjeta("banorte_");
+
+  async function togglePagado(id: number, pagado: boolean) {
+    try {
+      await api.patch(`/api/tarjetas/${id}`, { pagado });
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   return (
     <Layout title="Tarjetas de crédito · Control de gastos">
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button onClick={() => setShowPapelera(true)}
+          style={{
+            background: "transparent", border: "1px solid #cbd5e1",
+            padding: "6px 14px", borderRadius: 6, fontSize: 12, cursor: "pointer",
+            color: "#475569",
+          }}>
+          🗑 Papelera
+        </button>
+      </div>
+      {showPapelera && (
+        <PapeleraModal onClose={() => { setShowPapelera(false); cargar(); }} />
+      )}
+
       {errorCarga && (
         <div style={{
           background: "#fee2e2", border: "1px solid #fca5a5", color: "#991b1b",
@@ -153,6 +186,7 @@ export default function TarjetasCredito() {
           gastos={gastosAmex}
           saldoPendiente={saldoAmex}
           seleccionado={seleccionAmex}
+          pagado={pagadoAmex}
           subcuentas={subcuentas.filter((s) => s.tarjeta === "amex")}
           subSecciones={[
             { key: "amex_padel",    titulo: "Padel",    color: "#0ea5e9" },
@@ -162,6 +196,7 @@ export default function TarjetasCredito() {
           onChange={cargar}
           seleccionados={seleccionados}
           onToggleSeleccion={toggleSeleccionado}
+          onTogglePagado={togglePagado}
         />
 
         <TarjetaCard
@@ -172,6 +207,7 @@ export default function TarjetasCredito() {
           gastos={gastosBanorte}
           saldoPendiente={saldoBanorte}
           seleccionado={seleccionBanorte}
+          pagado={pagadoBanorte}
           subcuentas={subcuentas.filter((s) => s.tarjeta === "banorte")}
           subSecciones={[
             { key: "banorte_padel",    titulo: "Padel",    color: "#0ea5e9" },
@@ -181,6 +217,7 @@ export default function TarjetasCredito() {
           onChange={cargar}
           seleccionados={seleccionados}
           onToggleSeleccion={toggleSeleccionado}
+          onTogglePagado={togglePagado}
         />
 
         <PanelPersonal gastos={gastosP} ingresos={ingresosP} onChange={cargar} />
@@ -193,8 +230,8 @@ export default function TarjetasCredito() {
 
 
 function TarjetaCard({
-  tarjeta, titulo, colorHeader, total, gastos, saldoPendiente, seleccionado,
-  subcuentas, subSecciones, datos, onChange, seleccionados, onToggleSeleccion,
+  tarjeta, titulo, colorHeader, total, gastos, saldoPendiente, seleccionado, pagado,
+  subcuentas, subSecciones, datos, onChange, seleccionados, onToggleSeleccion, onTogglePagado,
 }: {
   tarjeta: "amex" | "banorte";
   titulo: string;
@@ -203,19 +240,21 @@ function TarjetaCard({
   gastos: number;
   saldoPendiente: number;
   seleccionado: number;
+  pagado: number;
   subcuentas: Subcuenta[];
   subSecciones: SubSeccion[];
   datos: Concepto[];
   onChange: () => void;
   seleccionados: Set<number>;
   onToggleSeleccion: (id: number) => void;
+  onTogglePagado: (id: number, pagado: boolean) => void;
 }) {
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       {/* Header con titulo + subcuentas (Infinite/Platinum) + totales */}
       <div style={{
         background: colorHeader, color: "white", padding: "14px 18px",
-        display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto", gap: 20, alignItems: "center",
+        display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto auto", gap: 20, alignItems: "center",
       }}>
         <strong style={{ fontSize: 18, letterSpacing: "0.04em" }}>{titulo}</strong>
 
@@ -227,6 +266,11 @@ function TarjetaCard({
           label="SALDO PENDIENTE"
           valor={saldoPendiente}
           color={saldoPendiente < 0 ? "#fecaca" : "white"}
+        />
+        <DatoHeader
+          label="PAGADO"
+          valor={pagado}
+          color={pagado > 0 ? "#86efac" : "rgba(255,255,255,0.55)"}
         />
         <DatoHeader
           label="SELECCIONADO"
@@ -245,6 +289,7 @@ function TarjetaCard({
               onChange={onChange}
               seleccionados={seleccionados}
               onToggleSeleccion={onToggleSeleccion}
+              onTogglePagado={onTogglePagado}
             />
           </div>
         ))}
@@ -406,12 +451,13 @@ function DatoHeader({ label, valor, color }: { label: string; valor: number; col
 }
 
 
-function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
+function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion, onTogglePagado }: {
   sub: SubSeccion;
   datos: Concepto[];
   onChange: () => void;
   seleccionados: Set<number>;
   onToggleSeleccion: (id: number) => void;
+  onTogglePagado: (id: number, pagado: boolean) => void;
 }) {
   const [editing, setEditing] = useState<{ id: number; campo: string } | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -487,8 +533,9 @@ function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#fef9c3" }}>
-            <th style={{ ...thBlack, width: 26 }}></th>
-            <th style={{ ...thBlack, textAlign: "right", width: "40%" }}>Monto</th>
+            <th style={{ ...thBlack, width: 26 }} title="Seleccionar (no persistido)">Sel</th>
+            <th style={{ ...thBlack, width: 26 }} title="Pagado: ya lo separaste del banco">Pag</th>
+            <th style={{ ...thBlack, textAlign: "right", width: "35%" }}>Monto</th>
             <th style={thBlack}>Concepto</th>
             <th style={{ ...thBlack, width: 28 }}></th>
           </tr>
@@ -496,21 +543,33 @@ function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
         <tbody>
           {datos.length === 0 && !agregando && (
             <tr>
-              <td colSpan={4} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>
+              <td colSpan={5} style={{ ...td, textAlign: "center", color: "var(--color-text-muted)", padding: 10 }}>
                 Sin movimientos
               </td>
             </tr>
           )}
           {datos.map((c) => {
             const checked = seleccionados.has(c.id);
+            const esPagado = !!c.pagado;
             return (
-              <tr key={c.id} style={checked ? { background: "#fef9c3" } : undefined}>
+              <tr key={c.id} style={{
+                background: esPagado ? "#dcfce7" : checked ? "#fef9c3" : undefined,
+                opacity: esPagado ? 0.7 : 1,
+              }}>
                 <td style={{ ...td, textAlign: "center" }}>
                   <input type="checkbox" checked={checked}
                     onChange={() => onToggleSeleccion(c.id)}
                     style={{ cursor: "pointer", margin: 0 }} />
                 </td>
-                <td style={{ ...td, textAlign: "right", fontWeight: 600, cursor: "pointer" }}
+                <td style={{ ...td, textAlign: "center" }} title="Marcar como Pagado (ya lo separaste del banco)">
+                  <input type="checkbox" checked={esPagado}
+                    onChange={(e) => onTogglePagado(c.id, e.target.checked)}
+                    style={{ cursor: "pointer", margin: 0, accentColor: "#065f46" }} />
+                </td>
+                <td style={{
+                  ...td, textAlign: "right", fontWeight: 600, cursor: "pointer",
+                  textDecoration: esPagado ? "line-through" : "none",
+                }}
                   onDoubleClick={() => { setEditing({ id: c.id, campo: "monto" }); setEditValue(String(c.monto)); }}
                   title="Doble click para editar">
                   {editing?.id === c.id && editing.campo === "monto" ? (
@@ -521,7 +580,10 @@ function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
                       style={{ width: "100%", padding: 4, fontSize: 12, textAlign: "right" }} />
                   ) : fmt(c.monto)}
                 </td>
-                <td style={{ ...td, cursor: "pointer" }}
+                <td style={{
+                  ...td, cursor: "pointer",
+                  textDecoration: esPagado ? "line-through" : "none",
+                }}
                   onDoubleClick={() => { setEditing({ id: c.id, campo: "concepto" }); setEditValue(c.concepto); }}
                   title="Doble click para editar">
                   {editing?.id === c.id && editing.campo === "concepto" ? (
@@ -542,6 +604,7 @@ function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
           {agregando && (
             <tr style={{ background: "#fef9c3" }}>
               <td style={td}></td>
+              <td style={td}></td>
               <td style={td}>
                 <input type="number" step="0.01" value={draft.monto}
                   onChange={(e) => setDraft({ ...draft, monto: +e.target.value })}
@@ -560,7 +623,7 @@ function SubPanel({ sub, datos, onChange, seleccionados, onToggleSeleccion }: {
             </tr>
           )}
           <tr>
-            <td colSpan={4} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
+            <td colSpan={5} style={{ padding: 6, textAlign: "center", borderTop: "1px solid #e5e7eb" }}>
               {!agregando && (
                 <button onClick={() => setAgregando(true)}
                   style={{ background: "transparent", border: "1px dashed #9ca3af", padding: "3px 12px",
@@ -850,6 +913,116 @@ function ResumenFila({ label, valor, color, grande }: { label: string; valor: nu
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
       <span style={{ fontSize: grande ? 14 : 11, color: "#475569", fontWeight: grande ? 700 : 500, letterSpacing: "0.04em" }}>{label}</span>
       <span style={{ fontSize: grande ? 22 : 16, fontWeight: 700, color }}>{fmt(valor)}</span>
+    </div>
+  );
+}
+
+
+function PapeleraModal({ onClose }: { onClose: () => void }) {
+  const [eliminados, setEliminados] = useState<any[]>([]);
+  const [cargando, setCargando] = useState(true);
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const r = await api.get("/api/tarjetas/eliminados");
+      setEliminados(r.data || []);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  async function restaurar(id: number) {
+    try {
+      await api.post(`/api/tarjetas/${id}/restaurar`);
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  async function borrarPermanente(id: number, concepto: string) {
+    if (!confirm(`Borrar PERMANENTEMENTE "${concepto}"? Esta accion no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/api/tarjetas/${id}/permanente`);
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  useEffect(() => { cargar(); }, []);
+
+  const seccionLabel: Record<string, string> = {
+    amex_padel: "AMEX Padel",
+    amex_aceromax: "AMEX Aceromax",
+    banorte_padel: "Banorte Padel",
+    banorte_aceromax: "Banorte Aceromax",
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 20,
+        width: "92%", maxWidth: 800, maxHeight: "85vh", overflow: "auto",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>🗑 Papelera de Tarjetas</h2>
+          <button onClick={onClose} style={{ background: "transparent", border: 0, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+
+        {cargando ? (
+          <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>Cargando...</p>
+        ) : eliminados.length === 0 ? (
+          <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>
+            La papelera está vacía. Lo que borres aquí se podrá recuperar.
+          </p>
+        ) : (
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#f3f4f6" }}>
+                <th style={thBlack}>Eliminado</th>
+                <th style={thBlack}>Sección</th>
+                <th style={thBlack}>Concepto</th>
+                <th style={{ ...thBlack, textAlign: "right" }}>Monto</th>
+                <th style={{ ...thBlack, width: 180 }}>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {eliminados.map((e) => (
+                <tr key={e.id}>
+                  <td style={td}>
+                    {e.eliminado_en ? new Date(e.eliminado_en).toLocaleString("es-MX") : "—"}
+                  </td>
+                  <td style={td}>
+                    <span style={{
+                      fontSize: 10, padding: "2px 6px", borderRadius: 3,
+                      background: "#e5e7eb", color: "#374151",
+                    }}>
+                      {seccionLabel[e.seccion] || e.seccion}
+                    </span>
+                  </td>
+                  <td style={td}>{e.concepto}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmt(e.monto)}</td>
+                  <td style={td}>
+                    <button onClick={() => restaurar(e.id)}
+                      style={{ background: "#10b981", color: "white", border: 0, padding: "3px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>
+                      ↺ Restaurar
+                    </button>
+                    <button onClick={() => borrarPermanente(e.id, e.concepto)}
+                      style={{ background: "transparent", border: "1px solid #fca5a5", color: "#dc2626", padding: "3px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                      Borrar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

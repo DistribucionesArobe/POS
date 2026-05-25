@@ -26,6 +26,7 @@ def listar(
     rows = (
         db.query(ConceptoTarjeta)
         .filter(ConceptoTarjeta.empresa_id == empresa_id)
+        .filter(ConceptoTarjeta.eliminado_en.is_(None))
         .order_by(ConceptoTarjeta.seccion, ConceptoTarjeta.orden, ConceptoTarjeta.id)
         .all()
     )
@@ -34,9 +35,50 @@ def listar(
             "id": c.id, "seccion": c.seccion,
             "concepto": c.concepto, "monto": float(c.monto or 0),
             "orden": c.orden,
+            "pagado": bool(getattr(c, "pagado", False)),
         }
         for c in rows
     ]
+
+
+@router.get("/eliminados")
+def listar_eliminados(
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Lista conceptos eliminados (papelera) para poder restaurar."""
+    rows = (
+        db.query(ConceptoTarjeta)
+        .filter(ConceptoTarjeta.empresa_id == empresa_id)
+        .filter(ConceptoTarjeta.eliminado_en.isnot(None))
+        .order_by(ConceptoTarjeta.eliminado_en.desc())
+        .all()
+    )
+    return [
+        {
+            "id": c.id, "seccion": c.seccion,
+            "concepto": c.concepto, "monto": float(c.monto or 0),
+            "eliminado_en": c.eliminado_en.isoformat() if c.eliminado_en else None,
+        }
+        for c in rows
+    ]
+
+
+@router.post("/{cid}/restaurar")
+def restaurar(
+    cid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Restaura un concepto que estaba en la papelera."""
+    c = db.get(ConceptoTarjeta, cid)
+    if not c or c.empresa_id != empresa_id:
+        raise HTTPException(404, "Concepto no existe")
+    c.eliminado_en = None
+    db.commit()
+    return {"ok": True, "id": c.id}
 
 
 @router.post("")
@@ -91,6 +133,8 @@ def actualizar(
             c.monto = float(payload["monto"])
         except (TypeError, ValueError):
             raise HTTPException(400, "Monto invalido")
+    if "pagado" in payload:
+        c.pagado = bool(payload["pagado"])
     if "seccion" in payload:
         s = (payload["seccion"] or "").strip().lower()
         if s in SECCIONES:
@@ -106,6 +150,24 @@ def borrar(
     _user: Usuario = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    """Soft delete: marca eliminado_en y lo saca de la lista normal.
+    Se puede restaurar desde /eliminados."""
+    c = db.get(ConceptoTarjeta, cid)
+    if not c or c.empresa_id != empresa_id:
+        raise HTTPException(404, "Concepto no existe")
+    c.eliminado_en = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{cid}/permanente")
+def borrar_permanente(
+    cid: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    _user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Borra fisicamente de la DB. Solo desde la papelera."""
     c = db.get(ConceptoTarjeta, cid)
     if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Concepto no existe")
