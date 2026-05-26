@@ -9,7 +9,7 @@ Estilo Excel del usuario:
 Un solo modelo flat con campo seccion para distinguir.
 """
 from datetime import datetime
-from sqlalchemy import String, DateTime, Numeric, ForeignKey, Integer
+from sqlalchemy import String, DateTime, Numeric, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -29,7 +29,7 @@ class ConceptoTarjeta(Base):
     eliminado_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     # Marcado como "ya lo separe del banco" aunque no hayas pagado la TC.
     # Se suma aparte en el header como PAGADO.
-    pagado: Mapped[bool] = mapped_column(default=False, index=True)
+    pagado: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class TarjetaTotal(Base):
