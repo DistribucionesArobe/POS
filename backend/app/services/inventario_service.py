@@ -25,11 +25,9 @@ def aplicar_movimiento(
         raise ValueError(f"Variante {variante.sku} pertenece a otra empresa")
 
     nuevo_stock = float(variante.stock_actual) + cantidad_signed
-    if nuevo_stock < 0:
-        raise ValueError(
-            f"Stock insuficiente para variante {variante.sku}: "
-            f"actual={variante.stock_actual}, requerido={-cantidad_signed}"
-        )
+    # Sin candado de stock - se permite vender en negativo (back-order, pre-venta,
+    # mercancia en transito, productos sin alta de stock inicial, etc.).
+    # El stock queda negativo y se regulariza con una entrada cuando llegue la merca.
 
     mov = MovimientoInventario(
         empresa_id=empresa_id,
