@@ -87,9 +87,10 @@ class FacturamaClient:
                     "Base": importe, "Rate": tasa_isr_ret,
                     "IsRetention": True,
                 })
-            # Total del concepto = Subtotal + IVA trasladado (las retenciones NO se restan
-            # aqui - van como impuestos retenidos a nivel CFDI). Facturama valida que
-            # SUM(Item.Total) coincida con Subtotal + Total IVA trasladado.
+            # Facturama valida: Item.Total = Subtotal + sum(Traslados) - sum(Retenidos)
+            # Sin retenciones: Item.Total = Subtotal + IVA = importe + iva_calc
+            # Con retencion: Item.Total = importe + iva_calc - iva_ret - isr_ret
+            item_total = round(importe + iva_calc - iva_ret_concepto - isr_ret_concepto, 2)
             items.append({
                 "ProductCode": c.clave_prod_serv_sat or "01010101",
                 "IdentificationNumber": str(c.variante_id),
@@ -101,7 +102,7 @@ class FacturamaClient:
                 "Subtotal": importe,
                 "TaxObject": "02",
                 "Taxes": taxes,
-                "Total": round(importe + iva_calc, 2),
+                "Total": item_total,
             })
 
         payload = {
