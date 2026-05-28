@@ -58,11 +58,14 @@ class FacturamaClient:
         # Tasas de retencion (CFE retiene 16% IVA cuando compra a PF 612).
         # Si el documento tiene iva_retenido o isr_retenido > 0, aplicamos
         # la retencion proporcional en cada concepto.
+        # IMPORTANTE: CFDI 4.0 solo acepta TasaOCuota con hasta 6 decimales.
+        # Por eso redondeamos a 6 decimales aqui (la division total/subtotal
+        # daria un float con 15+ decimales que Facturama rechaza).
         subtotal_doc = float(documento.subtotal or 0)
         iva_ret_total = float(getattr(documento, "iva_retenido", 0) or 0)
         isr_ret_total = float(getattr(documento, "isr_retenido", 0) or 0)
-        tasa_iva_ret = (iva_ret_total / subtotal_doc) if subtotal_doc > 0 and iva_ret_total > 0 else 0
-        tasa_isr_ret = (isr_ret_total / subtotal_doc) if subtotal_doc > 0 and isr_ret_total > 0 else 0
+        tasa_iva_ret = round(iva_ret_total / subtotal_doc, 6) if subtotal_doc > 0 and iva_ret_total > 0 else 0
+        tasa_isr_ret = round(isr_ret_total / subtotal_doc, 6) if subtotal_doc > 0 and isr_ret_total > 0 else 0
 
         items = []
         for c in documento.conceptos:
