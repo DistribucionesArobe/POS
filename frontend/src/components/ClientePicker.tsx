@@ -6,6 +6,10 @@ export type ClienteSel = {
   razon_social?: string | null; regimen_fiscal?: string | null;
   codigo_postal?: string | null; correo?: string | null;
   whatsapp?: string | null; telefono?: string | null;
+  uso_cfdi_default?: string | null;
+  forma_pago_default?: string | null;
+  metodo_pago_default?: string | null;
+  condiciones_pago?: string | null;
 };
 
 export default function ClientePicker({ onClose, onSelect, requiereRfc = false }: {
@@ -21,6 +25,8 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
     nombre: "", rfc: "", razon_social: "",
     regimen_fiscal: "612", codigo_postal: "", correo: "",
     whatsapp: "", uso_cfdi_default: "G03",
+    forma_pago_default: "03", metodo_pago_default: "PUE",
+    condiciones_pago: "",
   });
   const [creando, setCreando] = useState(false);
   const [parseandoCsf, setParseandoCsf] = useState(false);
@@ -192,8 +198,8 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
                 <input className="input" type="email" value={nuevo.correo}
                   onChange={(e) => setNuevo({ ...nuevo, correo: e.target.value })} />
               </div>
-              {requiereRfc && (
-                <>
+              {/* Regimen fiscal: SIEMPRE visible (no solo cuando requiere RFC) */}
+              <>
                   <div>
                     <label>Régimen fiscal</label>
                     <select className="input" value={nuevo.regimen_fiscal}
@@ -223,13 +229,48 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
                     <label>Uso CFDI default</label>
                     <select className="input" value={nuevo.uso_cfdi_default}
                       onChange={(e) => setNuevo({ ...nuevo, uso_cfdi_default: e.target.value })}>
-                      <option value="G01">G01 - Adquisición</option>
+                      <option value="G01">G01 - Adquisición de mercancías</option>
+                      <option value="G02">G02 - Devoluciones, descuentos</option>
                       <option value="G03">G03 - Gastos en general</option>
+                      <option value="I01">I01 - Construcciones</option>
+                      <option value="I02">I02 - Mobiliario y equipo</option>
+                      <option value="I03">I03 - Equipo de transporte</option>
+                      <option value="I04">I04 - Equipo cómputo</option>
+                      <option value="I08">I08 - Otra maquinaria</option>
+                      <option value="D01">D01 - Honorarios médicos</option>
+                      <option value="D10">D10 - Pagos por servicios educativos</option>
+                      <option value="S01">S01 - Sin efectos fiscales</option>
+                      <option value="CP01">CP01 - Pagos</option>
                       <option value="P01">P01 - Por definir</option>
                     </select>
                   </div>
+                  <div>
+                    <label>Forma de pago default</label>
+                    <select className="input" value={nuevo.forma_pago_default}
+                      onChange={(e) => setNuevo({ ...nuevo, forma_pago_default: e.target.value })}>
+                      <option value="01">01 - Efectivo</option>
+                      <option value="02">02 - Cheque nominativo</option>
+                      <option value="03">03 - Transferencia</option>
+                      <option value="04">04 - Tarjeta de crédito</option>
+                      <option value="28">28 - Tarjeta de débito</option>
+                      <option value="99">99 - Por definir (PPD)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Método de pago default</label>
+                    <select className="input" value={nuevo.metodo_pago_default}
+                      onChange={(e) => setNuevo({ ...nuevo, metodo_pago_default: e.target.value })}>
+                      <option value="PUE">PUE - Pago en una sola exhibición</option>
+                      <option value="PPD">PPD - Pago en parcialidades</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label>Condiciones de pago (texto libre)</label>
+                    <input className="input" value={nuevo.condiciones_pago}
+                      onChange={(e) => setNuevo({ ...nuevo, condiciones_pago: e.target.value })}
+                      placeholder="ej. 30 días neto, contraentrega, etc." />
+                  </div>
                 </>
-              )}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button className="btn" disabled={creando} onClick={crear}>
