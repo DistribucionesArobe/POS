@@ -209,6 +209,13 @@ export default function Caja() {
     setItems(c);
   }
 
+  function cambiarPrecio(idx: number, nuevo: number) {
+    if (isNaN(nuevo) || nuevo < 0) return;
+    const c = [...items];
+    c[idx].precio = nuevo;
+    setItems(c);
+  }
+
   function abrirCobrar() {
     if (items.length === 0) return;
     setPagos([{ forma_pago_sat: tipoSel === "FACTURA_PUE" ? "03" : "01", monto: total }]);
@@ -634,8 +641,18 @@ export default function Caja() {
                 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{i.nombre}</div>
-                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
-                      {i.sku} · {fmt(i.precio)}
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", display: "flex", gap: 6, alignItems: "center" }}>
+                      <span>{i.sku} ·</span>
+                      <span style={{ color: "#94a3b8" }}>$</span>
+                      <input type="number" min="0" step="0.01" value={i.precio}
+                        onChange={(e) => cambiarPrecio(idx, +e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                        title="Click para modificar el precio"
+                        style={{
+                          width: 88, padding: "2px 4px", fontSize: 11, fontFamily: "monospace",
+                          textAlign: "right", background: "transparent",
+                          border: "1px solid #334155", color: "#e2e8f0", borderRadius: 3,
+                        }} />
                     </div>
                   </div>
                   <input type="number" min="0.01" step="0.01" value={i.cantidad}
