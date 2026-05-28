@@ -51,6 +51,11 @@ export default function Caja() {
   const [puntosACanjear, setPuntosACanjear] = useState<number>(0);
   // Retencion IVA (caso CFE / gobierno comprando a PF)
   const [retenerIva, setRetenerIva] = useState<boolean>(false);
+  // Datos CFDI seleccionados al cobrar (pre-llenados desde defaults del cliente)
+  const [usoCfdiSel, setUsoCfdiSel] = useState<string>("G03");
+  const [condicionesPagoSel, setCondicionesPagoSel] = useState<string>("");
+  // Vista previa de la factura antes de timbrar
+  const [mostrarPrevia, setMostrarPrevia] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -93,6 +98,15 @@ export default function Caja() {
   // Refresca saldo cada vez que cambia el cliente
   useEffect(() => {
     cargarSaldoMonedero(cliente.id);
+    // Pre-cargar defaults CFDI del cliente
+    setUsoCfdiSel(cliente.uso_cfdi_default || "G03");
+    setCondicionesPagoSel(cliente.condiciones_pago || "");
+    // Pre-cargar forma de pago default si el primer pago aún está en 0
+    if (cliente.forma_pago_default) {
+      setPagos((prev) => prev.map((p, i) => i === 0 && (!p.monto || p.monto === 0)
+        ? { ...p, forma_pago_sat: cliente.forma_pago_default! }
+        : p));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente.id]);
 
@@ -225,8 +239,22 @@ export default function Caja() {
     setPagos(nuevos.length ? nuevos : [{ forma_pago_sat: "01", monto: total }]);
   }
 
-  async function cobrar() {
+  async function cobrar(confirmadoDesdePrevia: boolean = false) {
     if (procesando) return;
+    // Si es FACTURA y no se ha confirmado la vista previa, mostrarla en vez de timbrar
+    if (tipo === "FACTURA" && !confirmadoDesdePrevia) {
+      // Pre-validaciones rápidas antes de mostrar la previa
+      if (!cliente.rfc) {
+        alert("Para facturar el cliente necesita RFC. Click 'cambiar' en el campo Cliente.");
+        return;
+      }
+      if (!esCredito && sumaPagos < totalAPagar - 0.01) {
+        alert(`Faltan ${fmt(totalAPagar - sumaPagos)} por cubrir`);
+        return;
+      }
+      setMostrarPrevia(true);
+      return;
+    }
     // Validar pagos solo si se cobra al contado (PUE).
     // REMISION y FACTURA PPD son a credito, se cobraran despues desde Cartera.
     if (!esCredito) {
@@ -264,6 +292,8 @@ export default function Caja() {
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
       iva_retenido_pct: retencionAplica ? 0.16 : 0,
+      uso_cfdi: tipo === "FACTURA" ? usoCfdiSel : undefined,
+      notas: condicionesPagoSel ? `Condiciones de pago: ${condicionesPagoSel}` : undefined,
     };
     if (!esCredito) {
       const pagosFinales = pagos
@@ -341,6 +371,7 @@ export default function Caja() {
       setTipoSel("TICKET");
       setPuntosACanjear(0);
       setRetenerIva(false);
+      setMostrarPrevia(false);
       // Refresca saldo del cliente (despues del canje y de la ganancia automatica)
       if (cliente.id !== 1) {
         setTimeout(() => cargarSaldoMonedero(cliente.id), 300);
@@ -694,6 +725,55 @@ export default function Caja() {
               </div>
             )}
 
+            {/* Selectores CFDI - solo factura */}
+            {tipo === "FACTURA" && cliente.rfc && (
+              <div style={{
+                marginTop: 12, padding: 12, background: "#f8fafc",
+                border: "1px solid #cbd5e1", borderRadius: 6,
+              }}>
+                <div style={{ fontSize: 11, color: "#475569", marginBottom: 8, fontWeight: 700, letterSpacing: "0.04em" }}>
+                  DATOS CFDI · PRE-LLENADOS DEL CLIENTE · EDITABLES
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#475569" }}>Uso CFDI</label>
+                    <select className="input" value={usoCfdiSel}
+                      onChange={(e) => setUsoCfdiSel(e.target.value)} style={{ fontSize: 13 }}>
+                      <option value="G01">G01 - Adquisición de mercancías</option>
+                      <option value="G02">G02 - Devoluciones, descuentos</option>
+                      <option value="G03">G03 - Gastos en general</option>
+                      <option value="I01">I01 - Construcciones</option>
+                      <option value="I02">I02 - Mobiliario y equipo</option>
+                      <option value="I03">I03 - Equipo de transporte</option>
+                      <option value="I04">I04 - Equipo cómputo</option>
+                      <option value="I08">I08 - Otra maquinaria</option>
+                      <option value="D01">D01 - Honorarios médicos</option>
+                      <option value="D10">D10 - Servicios educativos</option>
+                      <option value="S01">S01 - Sin efectos fiscales</option>
+                      <option value="CP01">CP01 - Pagos</option>
+                      <option value="P01">P01 - Por definir</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: "#475569" }}>Método de pago (CFDI)</label>
+                    <select className="input" value={tipoSel === "FACTURA_PUE" ? "PUE" : "PPD"}
+                      onChange={(e) => setTipoSel(e.target.value === "PUE" ? "FACTURA_PUE" : "FACTURA_PPD")}
+                      style={{ fontSize: 13 }}>
+                      <option value="PUE">PUE - Pago en una sola exhibición</option>
+                      <option value="PPD">PPD - Pago en parcialidades / diferido</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label style={{ fontSize: 12, color: "#475569" }}>Condiciones de pago (texto libre, va en CFDI)</label>
+                    <input className="input" value={condicionesPagoSel}
+                      onChange={(e) => setCondicionesPagoSel(e.target.value)}
+                      placeholder="ej. 30 días neto, contraentrega, etc."
+                      style={{ fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Retencion IVA - solo factura con cliente RFC (caso CFE / gobierno) */}
             {tipo === "FACTURA" && cliente.rfc && (
               <div style={{
@@ -841,7 +921,7 @@ export default function Caja() {
               </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-              <button onClick={cobrar}
+              <button onClick={() => cobrar()}
                 disabled={procesando || (!esCredito && sumaPagos < totalAPagar - 0.01)}
                 style={{
                   flex: 1, padding: 18, fontSize: 18, fontWeight: 700, color: "white",
@@ -868,6 +948,26 @@ export default function Caja() {
           requiereRfc={tipo === "FACTURA"}
           onClose={() => { setShowClientePicker(false); focus(); }}
           onSelect={(c) => { setCliente(c); setShowClientePicker(false); focus(); }}
+        />
+      )}
+
+      {/* Modal vista previa de factura antes de timbrar */}
+      {mostrarPrevia && (
+        <PreviaFacturaModal
+          empresa={empresaActiva}
+          cliente={cliente}
+          items={items}
+          subtotal={subtotal}
+          iva={iva}
+          ivaRetenido={ivaRetenido}
+          total={total}
+          usoCfdi={usoCfdiSel}
+          tipoSel={tipoSel}
+          condicionesPago={condicionesPagoSel}
+          retencionAplica={retencionAplica}
+          procesando={procesando}
+          onCancelar={() => setMostrarPrevia(false)}
+          onConfirmar={() => cobrar(true)}
         />
       )}
 
@@ -927,6 +1027,213 @@ function QuickBtn({ k, label, color, onClick }: {
     </button>
   );
 }
+
+
+// ===== Modal: vista previa de factura antes de timbrar =====
+
+function PreviaFacturaModal({
+  empresa, cliente, items, subtotal, iva, ivaRetenido, total,
+  usoCfdi, tipoSel, condicionesPago, retencionAplica,
+  procesando, onCancelar, onConfirmar,
+}: {
+  empresa: { id: number; nombre: string } | null;
+  cliente: ClienteSel;
+  items: Item[];
+  subtotal: number;
+  iva: number;
+  ivaRetenido: number;
+  total: number;
+  usoCfdi: string;
+  tipoSel: string;
+  condicionesPago: string;
+  retencionAplica: boolean;
+  procesando: boolean;
+  onCancelar: () => void;
+  onConfirmar: () => void;
+}) {
+  const metodoPago = tipoSel === "FACTURA_PUE" ? "PUE" : "PPD";
+  const usoCfdiNombre: Record<string, string> = {
+    G01: "Adquisición de mercancías",
+    G02: "Devoluciones, descuentos",
+    G03: "Gastos en general",
+    I01: "Construcciones",
+    I02: "Mobiliario y equipo",
+    I03: "Equipo de transporte",
+    I04: "Equipo cómputo",
+    I08: "Otra maquinaria",
+    D01: "Honorarios médicos",
+    D10: "Servicios educativos",
+    S01: "Sin efectos fiscales",
+    CP01: "Pagos",
+    P01: "Por definir",
+  };
+
+  return (
+    <div onClick={onCancelar} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 0,
+        width: "95%", maxWidth: 920, maxHeight: "95vh", overflow: "auto",
+      }}>
+        {/* Header */}
+        <div style={{
+          background: "#0f172a", color: "white", padding: "14px 20px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          borderRadius: "10px 10px 0 0",
+        }}>
+          <div>
+            <strong style={{ fontSize: 16 }}>👁 Vista previa de factura</strong>
+            <div style={{ fontSize: 11, opacity: 0.8 }}>
+              Revisa los datos antes de timbrar. Una vez timbrado el CFDI no se puede modificar.
+            </div>
+          </div>
+          <button onClick={onCancelar} style={{ background: "transparent", border: 0, color: "white", fontSize: 22, cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          {/* Emisor + Receptor */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <div style={{ padding: 12, background: "#f1f5f9", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: "#64748b", letterSpacing: "0.05em" }}>EMISOR</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2 }}>{empresa?.nombre || "—"}</div>
+            </div>
+            <div style={{ padding: 12, background: "#dbeafe", borderRadius: 6, border: "1px solid #93c5fd" }}>
+              <div style={{ fontSize: 10, color: "#1e40af", letterSpacing: "0.05em" }}>RECEPTOR (cliente)</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2 }}>{cliente.razon_social || cliente.nombre}</div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
+                <strong>RFC:</strong> {cliente.rfc || "—"} · <strong>CP:</strong> {cliente.codigo_postal || "—"}
+              </div>
+              <div style={{ fontSize: 11, color: "#475569" }}>
+                <strong>Régimen:</strong> {cliente.regimen_fiscal || "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Conceptos */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 700, letterSpacing: "0.05em" }}>
+              CONCEPTOS ({items.length})
+            </div>
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f3f4f6" }}>
+                  <th style={{ ...thP, textAlign: "left" }}>Descripción</th>
+                  <th style={{ ...thP, textAlign: "right", width: 70 }}>Cant</th>
+                  <th style={{ ...thP, textAlign: "right", width: 110 }}>Precio</th>
+                  <th style={{ ...thP, textAlign: "right", width: 110 }}>Importe</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i}>
+                    <td style={tdP}>
+                      <div>{it.nombre}</div>
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU {it.sku}</div>
+                    </td>
+                    <td style={{ ...tdP, textAlign: "right", fontWeight: 600 }}>{it.cantidad}</td>
+                    <td style={{ ...tdP, textAlign: "right" }}>{fmt(it.precio)}</td>
+                    <td style={{ ...tdP, textAlign: "right", fontWeight: 700 }}>{fmt(it.cantidad * it.precio)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Totales + datos CFDI */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>
+            <div style={{ padding: 12, background: "#f8fafc", borderRadius: 6, border: "1px solid #cbd5e1" }}>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8, fontWeight: 700, letterSpacing: "0.05em" }}>
+                DATOS CFDI
+              </div>
+              <DatoCFDI label="Uso CFDI" valor={`${usoCfdi} — ${usoCfdiNombre[usoCfdi] || ""}`} />
+              <DatoCFDI label="Método de pago" valor={`${metodoPago} — ${metodoPago === "PUE" ? "Una sola exhibición" : "Parcialidades / diferido"}`} />
+              {condicionesPago && (
+                <DatoCFDI label="Condiciones de pago" valor={condicionesPago} />
+              )}
+              {retencionAplica && (
+                <div style={{
+                  marginTop: 8, padding: 8, background: "#fee2e2",
+                  border: "1px solid #fca5a5", borderRadius: 4, fontSize: 11,
+                }}>
+                  <strong style={{ color: "#991b1b" }}>⚠ Retención IVA 16% aplicada</strong>
+                  <div style={{ color: "#7f1d1d" }}>
+                    CFE retiene el IVA y lo entera al SAT por ti.
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{ padding: 12, background: "#0f172a", color: "white", borderRadius: 6 }}>
+              <FilaTotal label="Subtotal" valor={subtotal} />
+              <FilaTotal label="IVA trasladado (16%)" valor={iva} />
+              {ivaRetenido > 0 && (
+                <FilaTotal label="IVA retenido (-16%)" valor={-ivaRetenido} color="#fca5a5" />
+              )}
+              <div style={{ borderTop: "1px dashed rgba(255,255,255,0.3)", marginTop: 6, paddingTop: 6 }}>
+                <FilaTotal label="TOTAL CFDI" valor={total} grande />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer con botones */}
+        <div style={{
+          padding: "14px 20px", borderTop: "1px solid #e5e7eb",
+          display: "flex", justifyContent: "space-between", gap: 10,
+        }}>
+          <button onClick={onCancelar} disabled={procesando}
+            style={{
+              background: "transparent", border: "1px solid #cbd5e1",
+              padding: "10px 18px", borderRadius: 6, fontSize: 14, cursor: "pointer",
+              color: "#475569",
+            }}>
+            ← Editar / Cancelar
+          </button>
+          <button onClick={onConfirmar} disabled={procesando}
+            style={{
+              background: procesando ? "#94a3b8" : "#10b981", color: "white",
+              border: 0, padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 700,
+              cursor: procesando ? "wait" : "pointer",
+            }}>
+            {procesando ? "Timbrando..." : "✓ Confirmar y timbrar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function DatoCFDI({ label, valor }: { label: string; valor: string }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <span style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase" }}>{label}: </span>
+      <strong style={{ fontSize: 12 }}>{valor}</strong>
+    </div>
+  );
+}
+
+
+function FilaTotal({ label, valor, color, grande }: { label: string; valor: number; color?: string; grande?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+      <span style={{ fontSize: grande ? 13 : 11, opacity: 0.85 }}>{label}</span>
+      <strong style={{ fontSize: grande ? 22 : 14, color: color || "white" }}>{fmt(valor)}</strong>
+    </div>
+  );
+}
+
+
+const thP: React.CSSProperties = {
+  padding: "6px 8px", fontSize: 10, color: "#475569",
+  textTransform: "uppercase", letterSpacing: "0.04em",
+  borderBottom: "1px solid #e5e7eb",
+};
+const tdP: React.CSSProperties = {
+  padding: "6px 8px", fontSize: 12,
+  borderBottom: "1px solid #f1f5f9",
+};
 
 
 // ===== Modal: importar cotizacion desde XLSX o imagen/PDF =====
