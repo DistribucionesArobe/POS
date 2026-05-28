@@ -53,6 +53,8 @@ class FacturamaClient:
             return r.json() if r.text else {}
 
     def emitir_ingreso(self, documento, cliente) -> dict:
+        import logging
+        logger = logging.getLogger(__name__)
         # Tasas de retencion (CFE retiene 16% IVA cuando compra a PF 612).
         # Si el documento tiene iva_retenido o isr_retenido > 0, aplicamos
         # la retencion proporcional en cada concepto.
@@ -85,6 +87,9 @@ class FacturamaClient:
                     "Base": importe, "Rate": tasa_isr_ret,
                     "IsRetention": True,
                 })
+            # Total del concepto = Subtotal + IVA trasladado (las retenciones NO se restan
+            # aqui - van como impuestos retenidos a nivel CFDI). Facturama valida que
+            # SUM(Item.Total) coincida con Subtotal + Total IVA trasladado.
             items.append({
                 "ProductCode": c.clave_prod_serv_sat or "01010101",
                 "IdentificationNumber": str(c.variante_id),
@@ -96,7 +101,7 @@ class FacturamaClient:
                 "Subtotal": importe,
                 "TaxObject": "02",
                 "Taxes": taxes,
-                "Total": round(importe + iva_calc - iva_ret_concepto - isr_ret_concepto, 2),
+                "Total": round(importe + iva_calc, 2),
             })
 
         payload = {
@@ -120,7 +125,14 @@ class FacturamaClient:
             },
             "Items": items,
         }
-        return self._post("/3/cfdis", payload)
+        try:
+            return self._post("/3/cfdis", payload)
+        except FacturamaError as e:
+            # Log el payload completo para debug en Render Logs
+            import json as _json
+            logger.error("FACTURAMA RECHAZO. Payload: %s", _json.dumps(payload, default=str))
+            logger.error("FACTURAMA ERROR: %s", str(e))
+            raise
 
     def emitir_pago(self, payload: dict) -> dict:
         """Emite un CFDI tipo P (Pago) a Facturama."""
