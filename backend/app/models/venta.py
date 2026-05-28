@@ -68,6 +68,10 @@ class DocumentoVenta(Base):
     descuento: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     iva: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    # Retenciones (caso CFE / gobierno comprando a PF). Si > 0, se incluyen en CFDI
+    # como retenciones por concepto y el total final se reduce por esta cantidad.
+    iva_retenido: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    isr_retenido: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 
     forma_pago_sat: Mapped[str] = mapped_column(String(2), default=FormaPagoSAT.EFECTIVO.value)
     metodo_pago_sat: Mapped[str] = mapped_column(String(3), default=MetodoPagoSAT.PUE.value)

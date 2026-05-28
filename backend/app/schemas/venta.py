@@ -30,6 +30,10 @@ class DocumentoVentaIn(BaseModel):
     # - 2+ pagos: forma_pago_sat = "99" en CFDI (Por definir)
     pagos: list[PagoIn] | None = None
     timbrar_inmediatamente: bool = False  # solo aplica si tipo == FACTURA
+    # Retenciones como porcentaje sobre subtotal (ej. 0.16 = 16%).
+    # Caso CFE: iva_retenido_pct=0.16 (gobierno retiene IVA completo a PF).
+    iva_retenido_pct: float = 0
+    isr_retenido_pct: float = 0
 
 
 class ConceptoVentaOut(BaseModel):

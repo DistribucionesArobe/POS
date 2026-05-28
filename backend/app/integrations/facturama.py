@@ -53,11 +53,38 @@ class FacturamaClient:
             return r.json() if r.text else {}
 
     def emitir_ingreso(self, documento, cliente) -> dict:
+        # Tasas de retencion (CFE retiene 16% IVA cuando compra a PF 612).
+        # Si el documento tiene iva_retenido o isr_retenido > 0, aplicamos
+        # la retencion proporcional en cada concepto.
+        subtotal_doc = float(documento.subtotal or 0)
+        iva_ret_total = float(getattr(documento, "iva_retenido", 0) or 0)
+        isr_ret_total = float(getattr(documento, "isr_retenido", 0) or 0)
+        tasa_iva_ret = (iva_ret_total / subtotal_doc) if subtotal_doc > 0 and iva_ret_total > 0 else 0
+        tasa_isr_ret = (isr_ret_total / subtotal_doc) if subtotal_doc > 0 and isr_ret_total > 0 else 0
+
         items = []
         for c in documento.conceptos:
             importe = float(c.importe)
             tasa = float(c.tasa_iva)
             iva_calc = round(importe * tasa, 2)
+            taxes = [{
+                "Total": iva_calc, "Name": "IVA", "Base": importe,
+                "Rate": tasa, "IsRetention": False,
+            }]
+            iva_ret_concepto = round(importe * tasa_iva_ret, 2)
+            isr_ret_concepto = round(importe * tasa_isr_ret, 2)
+            if tasa_iva_ret > 0:
+                taxes.append({
+                    "Total": iva_ret_concepto, "Name": "IVA",
+                    "Base": importe, "Rate": tasa_iva_ret,
+                    "IsRetention": True,
+                })
+            if tasa_isr_ret > 0:
+                taxes.append({
+                    "Total": isr_ret_concepto, "Name": "ISR",
+                    "Base": importe, "Rate": tasa_isr_ret,
+                    "IsRetention": True,
+                })
             items.append({
                 "ProductCode": c.clave_prod_serv_sat or "01010101",
                 "IdentificationNumber": str(c.variante_id),
@@ -68,11 +95,8 @@ class FacturamaClient:
                 "Quantity": float(c.cantidad),
                 "Subtotal": importe,
                 "TaxObject": "02",
-                "Taxes": [{
-                    "Total": iva_calc, "Name": "IVA", "Base": importe,
-                    "Rate": tasa, "IsRetention": False,
-                }],
-                "Total": importe + iva_calc,
+                "Taxes": taxes,
+                "Total": round(importe + iva_calc - iva_ret_concepto - isr_ret_concepto, 2),
             })
 
         payload = {

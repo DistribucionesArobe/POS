@@ -45,7 +45,13 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         ))
 
     iva = round(subtotal * IVA_TASA, 2)
-    total = round(subtotal + iva, 2)
+    # Retenciones (caso CFE / gobierno comprando a PF). Vienen del payload
+    # opcionalmente como porcentaje sobre subtotal.
+    iva_retenido_pct = float(getattr(payload, "iva_retenido_pct", 0) or 0)
+    isr_retenido_pct = float(getattr(payload, "isr_retenido_pct", 0) or 0)
+    iva_retenido = round(subtotal * iva_retenido_pct, 2)
+    isr_retenido = round(subtotal * isr_retenido_pct, 2)
+    total = round(subtotal + iva - iva_retenido - isr_retenido, 2)
 
     # Resolver forma_pago_sat a partir de pagos[] si se mandaron
     forma_pago_resuelta = payload.forma_pago_sat
@@ -76,6 +82,8 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         subtotal=subtotal,
         iva=iva,
         total=total,
+        iva_retenido=iva_retenido,
+        isr_retenido=isr_retenido,
         forma_pago_sat=forma_pago_resuelta,
         metodo_pago_sat=payload.metodo_pago_sat,
         uso_cfdi=payload.uso_cfdi,

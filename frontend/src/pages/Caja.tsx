@@ -49,6 +49,8 @@ export default function Caja() {
   const [puntosCliente, setPuntosCliente] = useState<number>(0);
   const [minCanje, setMinCanje] = useState<number>(200);
   const [puntosACanjear, setPuntosACanjear] = useState<number>(0);
+  // Retencion IVA (caso CFE / gobierno comprando a PF)
+  const [retenerIva, setRetenerIva] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -100,7 +102,10 @@ export default function Caja() {
 
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
   const iva = subtotal * 0.16;
-  const total = +(subtotal + iva).toFixed(2);
+  // Retencion solo aplica a FACTURA con cliente con RFC y cuando el toggle esta activo
+  const retencionAplica = retenerIva && tipo === "FACTURA" && !!cliente.rfc;
+  const ivaRetenido = retencionAplica ? +(subtotal * 0.16).toFixed(2) : 0;
+  const total = +(subtotal + iva - ivaRetenido).toFixed(2);
 
   async function buscarOAgregar() {
     const q = busqueda.trim();
@@ -258,6 +263,7 @@ export default function Caja() {
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
+      iva_retenido_pct: retencionAplica ? 0.16 : 0,
     };
     if (!esCredito) {
       const pagosFinales = pagos
@@ -334,6 +340,7 @@ export default function Caja() {
       setPagos([{ forma_pago_sat: "01", monto: 0 }]);
       setTipoSel("TICKET");
       setPuntosACanjear(0);
+      setRetenerIva(false);
       // Refresca saldo del cliente (despues del canje y de la ganancia automatica)
       if (cliente.id !== 1) {
         setTimeout(() => cargarSaldoMonedero(cliente.id), 300);
@@ -684,6 +691,40 @@ export default function Caja() {
                 <strong>{tipoSel === "REMISION" ? "Remisión a crédito" : "Factura PPD a crédito"}:</strong>{" "}
                 no se cobra al momento. Se generará una cuenta por cobrar y la cobrarás desde
                 <strong> Cartera → Abonar</strong>{tipoSel === "FACTURA_PPD" ? ", donde podrás emitir el complemento de pago." : "."}
+              </div>
+            )}
+
+            {/* Retencion IVA - solo factura con cliente RFC (caso CFE / gobierno) */}
+            {tipo === "FACTURA" && cliente.rfc && (
+              <div style={{
+                marginTop: 12, padding: 12, background: "#eff6ff",
+                border: "1px solid #93c5fd", borderRadius: 6,
+              }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}>
+                  <input type="checkbox" checked={retenerIva}
+                    onChange={(e) => setRetenerIva(e.target.checked)} />
+                  <strong>Retener IVA 16%</strong>
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>
+                    (caso CFE / gobierno que retiene el IVA a PF)
+                  </span>
+                </label>
+                {retencionAplica && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#1e40af" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>Subtotal:</span> <strong>{fmt(subtotal)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>IVA trasladado (16%):</span> <strong>{fmt(iva)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
+                      <span>IVA retenido (-16%):</span> <strong>-{fmt(ivaRetenido)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                      borderTop: "1px dashed #93c5fd", paddingTop: 4, marginTop: 4 }}>
+                      <strong>Total CFE deposita:</strong> <strong>{fmt(total)}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
