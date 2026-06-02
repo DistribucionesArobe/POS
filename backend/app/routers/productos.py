@@ -129,6 +129,56 @@ async def importar_excel(
         raise HTTPException(400, str(e))
 
 
+@router.post("/matchear-lineas-cotizacion")
+def matchear_lineas_cotizacion(
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Recibe lista de lineas ya parseadas {descripcion, cantidad, precio, monto}
+    y las matchea contra el catalogo. Sin parser de archivo - usado por copy/paste."""
+    lineas_in = payload.get("lineas") or []
+    if not isinstance(lineas_in, list) or not lineas_in:
+        raise HTTPException(400, "Falta lista 'lineas'")
+    lineas = []
+    for raw in lineas_in:
+        desc = (raw.get("descripcion") or "").strip()
+        if not desc:
+            continue
+        try:
+            cantidad = float(raw.get("cantidad") or 0)
+        except (TypeError, ValueError):
+            cantidad = 0
+        if cantidad <= 0:
+            continue
+        try:
+            precio = float(raw.get("precio") or 0)
+        except (TypeError, ValueError):
+            precio = 0
+        try:
+            monto = float(raw.get("monto") or 0)
+        except (TypeError, ValueError):
+            monto = 0
+        lineas.append({
+            "descripcion": desc,
+            "unidad": (raw.get("unidad") or "").strip(),
+            "cantidad": cantidad,
+            "precio": precio,
+            "monto": monto or cantidad * precio,
+        })
+    if not lineas:
+        return {"lineas": [], "total_lineas": 0, "total_monto": 0.0}
+    enriquecidas = cotizacion_parser.matchear_lineas(db, empresa_id, lineas)
+    total_monto = sum((l.get("monto") or 0) for l in enriquecidas)
+    return {
+        "lineas": enriquecidas,
+        "total_lineas": len(enriquecidas),
+        "matched": sum(1 for l in enriquecidas if l.get("match_variante_id")),
+        "no_matched": sum(1 for l in enriquecidas if not l.get("match_variante_id")),
+        "total_monto": round(total_monto, 2),
+    }
+
+
 @router.post("/parsear-cotizacion")
 async def parsear_cotizacion(
     file: UploadFile = File(...),
@@ -219,16 +269,43 @@ def buscar_variante(
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    like = f"%{q}%"
+    """Busqueda con ranking por prefijo.
+
+    Prioridad:
+      0. SKU empieza con q
+      1. Nombre del producto empieza con q (caso 'tab' -> 'Tablaroca')
+      2. Una palabra del nombre empieza con q (caso 'tab' -> 'Lamina Tablaroca')
+      3. Match en cualquier parte (caso 'tab' -> 'Pija para tablaroca')
+    """
+    like_any = f"%{q}%"
+    like_prefix = f"{q}%"
+    like_word_prefix = f"% {q}%"
+
     rows = (
         db.query(VarianteProducto)
         .join(Producto)
         .filter(Producto.empresa_id == empresa_id)
         .filter(VarianteProducto.activo == True)
-        .filter(or_(VarianteProducto.sku.ilike(like), Producto.nombre.ilike(like)))
-        .limit(20)
+        .filter(or_(VarianteProducto.sku.ilike(like_any), Producto.nombre.ilike(like_any)))
+        .limit(80)
         .all()
     )
+
+    def rank(v) -> int:
+        nombre = (v.producto.nombre or "").lower()
+        sku = (v.sku or "").lower()
+        ql = q.lower()
+        if sku.startswith(ql):
+            return 0
+        if nombre.startswith(ql):
+            return 1
+        if any(w.startswith(ql) for w in nombre.split()):
+            return 2
+        return 3
+
+    rows.sort(key=lambda v: (rank(v), v.producto.nombre.lower(), v.presentacion.lower()))
+    rows = rows[:20]
+
     return [
         {
             "id": v.id, "sku": v.sku,

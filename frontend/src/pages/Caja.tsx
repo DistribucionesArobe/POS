@@ -1273,7 +1273,9 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
   onClose: () => void;
   onAgregar: (items: Item[]) => void;
 }) {
+  const [modo, setModo] = useState<"archivo" | "pegar">("archivo");
   const [archivo, setArchivo] = useState<File | null>(null);
+  const [textoPegado, setTextoPegado] = useState<string>("");
   const [procesando, setProcesando] = useState(false);
   const [lineas, setLineas] = useState<LineaCot[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1296,6 +1298,72 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 60000,
       });
+      setLineas(r.data.lineas || []);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  function parsearTextoPegado(texto: string): Array<{descripcion: string; cantidad: number; precio: number; monto: number}> {
+    const limpiarNum = (s: string): number => {
+      if (!s) return 0;
+      // Quita $, comas, espacios, NBSP
+      const limpio = s.replace(/[\$,\s ]/g, "").trim();
+      const n = parseFloat(limpio);
+      return isNaN(n) ? 0 : n;
+    };
+    const filas: Array<{descripcion: string; cantidad: number; precio: number; monto: number}> = [];
+    for (const linea of texto.split(/\r?\n/)) {
+      if (!linea.trim()) continue;
+      // Excel pega con tab \t entre columnas
+      const cols = linea.split("\t");
+      if (cols.length < 2) continue;
+      // Esquemas soportados:
+      // [desc, cantidad, precio, monto] (4 cols)
+      // [desc, cantidad, precio]        (3 cols)
+      // [desc, cantidad, monto]         (3 cols - calcula precio = monto/cantidad)
+      const desc = (cols[0] || "").trim();
+      if (!desc) continue;
+      const cantidad = limpiarNum(cols[1] || "");
+      if (cantidad <= 0) continue;
+      let precio = 0;
+      let monto = 0;
+      if (cols.length >= 4) {
+        precio = limpiarNum(cols[2]);
+        monto = limpiarNum(cols[3]);
+      } else if (cols.length === 3) {
+        const c2 = limpiarNum(cols[2]);
+        // Heuristica: si col 2 ≈ col 1 * algun precio bajo, asumimos que es precio
+        // Si c2 es mucho mas grande que cantidad, probablemente es monto
+        if (c2 > cantidad * 100) {
+          monto = c2;
+          precio = monto / cantidad;
+        } else {
+          precio = c2;
+          monto = cantidad * precio;
+        }
+      }
+      if (!monto) monto = cantidad * precio;
+      if (!precio && monto) precio = monto / cantidad;
+      filas.push({ descripcion: desc, cantidad, precio: +precio.toFixed(4), monto: +monto.toFixed(2) });
+    }
+    return filas;
+  }
+
+  async function procesarTextoPegado() {
+    if (!textoPegado.trim()) return;
+    setProcesando(true);
+    setError(null);
+    try {
+      const filas = parsearTextoPegado(textoPegado);
+      if (filas.length === 0) {
+        setError("No se pudieron extraer líneas del texto pegado. Asegúrate de pegar desde Excel con columnas separadas por tab.");
+        setProcesando(false);
+        return;
+      }
+      const r = await api.post("/api/productos/matchear-lineas-cotizacion", { lineas: filas });
       setLineas(r.data.lineas || []);
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message);
@@ -1386,36 +1454,106 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
         </div>
 
         {!lineas ? (
-          <div style={{ padding: 30 }}>
-            <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16 }}>
-              Sube un archivo <strong>XLSX</strong>, <strong>PDF</strong> o <strong>imagen (PNG/JPG)</strong> de una cotización.
-              El sistema extrae las líneas y las matchea contra el catálogo de productos.
-            </p>
-            <input type="file" accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf"
-              onChange={(e) => setArchivo(e.target.files?.[0] || null)}
-              style={{ marginBottom: 16, fontSize: 14 }} />
-            {archivo && (
-              <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 12 }}>
-                Archivo: <strong>{archivo.name}</strong> ({(archivo.size / 1024).toFixed(1)} KB)
+          <div style={{ padding: 0 }}>
+            {/* Tabs */}
+            <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
+              <button onClick={() => setModo("archivo")}
+                style={{
+                  flex: 1, padding: "12px 16px", fontSize: 13, fontWeight: 600,
+                  background: modo === "archivo" ? "white" : "#f8fafc",
+                  border: 0, borderBottom: modo === "archivo" ? "3px solid var(--color-primary)" : "3px solid transparent",
+                  cursor: "pointer", color: modo === "archivo" ? "var(--color-primary)" : "#64748b",
+                }}>
+                📁 Subir archivo (XLSX / PDF / imagen)
+              </button>
+              <button onClick={() => setModo("pegar")}
+                style={{
+                  flex: 1, padding: "12px 16px", fontSize: 13, fontWeight: 600,
+                  background: modo === "pegar" ? "white" : "#f8fafc",
+                  border: 0, borderBottom: modo === "pegar" ? "3px solid var(--color-primary)" : "3px solid transparent",
+                  cursor: "pointer", color: modo === "pegar" ? "var(--color-primary)" : "#64748b",
+                }}>
+                📋 Pegar desde Excel
+              </button>
+            </div>
+
+            {modo === "archivo" ? (
+              <div style={{ padding: 24 }}>
+                <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16 }}>
+                  Sube un archivo <strong>XLSX</strong>, <strong>PDF</strong> o <strong>imagen (PNG/JPG)</strong> de una cotización.
+                  El sistema extrae las líneas y las matchea contra el catálogo de productos.
+                </p>
+                <input type="file" accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf"
+                  onChange={(e) => setArchivo(e.target.files?.[0] || null)}
+                  style={{ marginBottom: 16, fontSize: 14 }} />
+                {archivo && (
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 12 }}>
+                    Archivo: <strong>{archivo.name}</strong> ({(archivo.size / 1024).toFixed(1)} KB)
+                  </div>
+                )}
+                {error && (
+                  <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
+                    {error}
+                  </div>
+                )}
+                <button onClick={procesar} disabled={!archivo || procesando}
+                  style={{
+                    background: archivo && !procesando ? "var(--color-primary)" : "#ccc",
+                    color: "white", border: 0, padding: "10px 20px",
+                    borderRadius: 6, cursor: archivo && !procesando ? "pointer" : "not-allowed",
+                    fontSize: 14, fontWeight: 600,
+                  }}>
+                  {procesando ? "Procesando..." : "Procesar archivo"}
+                </button>
+                <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 12 }}>
+                  Tip: XLSX se parsea instantáneo. PDF/imagen usa Claude Vision (~3-8 seg, ~$0.01 USD).
+                </p>
+              </div>
+            ) : (
+              <div style={{ padding: 24 }}>
+                <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 12 }}>
+                  Selecciona y copia (Ctrl+C / Cmd+C) las celdas desde Excel y pégalas (Ctrl+V / Cmd+V) abajo.
+                  Formato esperado: <strong>Descripción · Cantidad · Precio · Monto</strong> separados por tab.
+                </p>
+                <textarea value={textoPegado}
+                  onChange={(e) => setTextoPegado(e.target.value)}
+                  placeholder={`TUBO CONDUIT FIERRO GALV 21 MM	216.35	$265.01	$57,334.91
+CABLE DE COBRE #10 600V	649.05	$50.55	$32,809.48
+...`}
+                  style={{
+                    width: "100%", minHeight: 220, fontSize: 12, padding: 10,
+                    fontFamily: "monospace", border: "1px solid var(--color-border)",
+                    borderRadius: 6, resize: "vertical",
+                  }} />
+                {error && (
+                  <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 6, fontSize: 13, marginTop: 12 }}>
+                    {error}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+                  <button onClick={procesarTextoPegado} disabled={!textoPegado.trim() || procesando}
+                    style={{
+                      background: textoPegado.trim() && !procesando ? "var(--color-primary)" : "#ccc",
+                      color: "white", border: 0, padding: "10px 20px",
+                      borderRadius: 6, cursor: textoPegado.trim() && !procesando ? "pointer" : "not-allowed",
+                      fontSize: 14, fontWeight: 600,
+                    }}>
+                    {procesando ? "Procesando..." : "Procesar texto pegado"}
+                  </button>
+                  <button onClick={() => setTextoPegado("")} type="button"
+                    style={{ background: "transparent", border: "1px solid #cbd5e1", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                    Limpiar
+                  </button>
+                  <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                    {textoPegado.split(/\r?\n/).filter((l) => l.trim()).length} líneas detectadas
+                  </span>
+                </div>
+                <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 12 }}>
+                  Tip: si tu Excel tiene la descripción con saltos de línea, copia solo las celdas (no la fila completa).
+                  Funciona con 3 o 4 columnas. Los símbolos $, comas y espacios se limpian automáticamente.
+                </p>
               </div>
             )}
-            {error && (
-              <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
-                {error}
-              </div>
-            )}
-            <button onClick={procesar} disabled={!archivo || procesando}
-              style={{
-                background: archivo && !procesando ? "var(--color-primary)" : "#ccc",
-                color: "white", border: 0, padding: "10px 20px",
-                borderRadius: 6, cursor: archivo && !procesando ? "pointer" : "not-allowed",
-                fontSize: 14, fontWeight: 600,
-              }}>
-              {procesando ? "Procesando..." : "Procesar archivo"}
-            </button>
-            <p style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 12 }}>
-              Tip: XLSX se parsea instantáneo. PDF/imagen usa Claude Vision (~3-8 seg, ~$0.01 USD).
-            </p>
           </div>
         ) : (
           <div>
@@ -1519,7 +1657,7 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
             </table>
 
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, gap: 8 }}>
-              <button onClick={() => { setLineas(null); setArchivo(null); setOmitidos(new Set()); }}
+              <button onClick={() => { setLineas(null); setArchivo(null); setTextoPegado(""); setOmitidos(new Set()); }}
                 style={{ background: "transparent", border: "1px solid #ccc", padding: "8px 14px", borderRadius: 6, cursor: "pointer" }}>
                 ← Subir otro
               </button>
