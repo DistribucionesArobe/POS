@@ -350,24 +350,47 @@ def crear_producto_simple(
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    if db.query(VarianteProducto).filter(VarianteProducto.sku == payload.sku).first():
-        raise HTTPException(400, f"SKU '{payload.sku}' ya existe")
-    p = Producto(
-        empresa_id=empresa_id,
-        nombre=payload.nombre, categoria=payload.categoria, marca=payload.marca,
-        clave_prod_serv_sat=payload.clave_prod_serv_sat,
-    )
-    db.add(p)
-    db.flush()
-    v = VarianteProducto(
-        producto_id=p.id, sku=payload.sku, presentacion=payload.presentacion,
-        unidad=payload.unidad, clave_unidad_sat=payload.clave_unidad_sat,
-        precio_publico=payload.precio_publico, costo_promedio=payload.costo_promedio,
-        stock_minimo=payload.stock_minimo,
-    )
-    db.add(v)
-    db.commit()
-    return {"producto_id": p.id, "variante_id": v.id, "sku": v.sku}
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        sku_limpio = (payload.sku or "").strip()
+        if not sku_limpio:
+            raise HTTPException(400, "SKU vacio")
+        # Trunca a 64 chars que es lo que aguanta la columna
+        sku_limpio = sku_limpio[:64]
+        if db.query(VarianteProducto).filter(VarianteProducto.sku == sku_limpio).first():
+            raise HTTPException(400, f"SKU '{sku_limpio}' ya existe")
+        # Limpia y trunca clave SAT a 8 chars
+        clave_sat = (payload.clave_prod_serv_sat or "").strip()[:8] or None
+        clave_unidad = (payload.clave_unidad_sat or "H87").strip()[:3]
+        p = Producto(
+            empresa_id=empresa_id,
+            nombre=(payload.nombre or "").strip()[:255],
+            categoria=(payload.categoria or None),
+            marca=(payload.marca or None),
+            clave_prod_serv_sat=clave_sat,
+        )
+        db.add(p)
+        db.flush()
+        v = VarianteProducto(
+            producto_id=p.id, sku=sku_limpio,
+            presentacion=(payload.presentacion or "Default")[:64],
+            unidad=(payload.unidad or "PZA")[:32],
+            clave_unidad_sat=clave_unidad,
+            precio_publico=float(payload.precio_publico or 0),
+            costo_promedio=float(payload.costo_promedio or 0),
+            stock_minimo=float(payload.stock_minimo or 0),
+        )
+        db.add(v)
+        db.commit()
+        return {"producto_id": p.id, "variante_id": v.id, "sku": v.sku}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("ERROR CREAR PRODUCTO SIMPLE. Payload: %s | Error: %s",
+                     payload.model_dump() if hasattr(payload, "model_dump") else str(payload), e)
+        raise HTTPException(500, f"No se pudo crear producto: {type(e).__name__}: {e}")
 
 
 @router.post("")
