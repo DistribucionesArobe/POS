@@ -838,6 +838,201 @@ def export_cartera_proveedores_xlsx(
     )
 
 
+@router.get("/movimientos-xlsx")
+def export_movimientos_periodo_xlsx(
+    desde: str = Query(..., description="Fecha inicio YYYY-MM-DD"),
+    hasta: str = Query(..., description="Fecha fin YYYY-MM-DD (inclusiva)"),
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Export XLSX con todos los movimientos CxP en un rango de fechas.
+    3 hojas: CxP creadas, Abonos pagados, Resumen por proveedor."""
+    from io import BytesIO
+    from datetime import datetime as _dt
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from fastapi.responses import Response
+
+    try:
+        ini = _dt.fromisoformat(desde)
+        fin = _dt.fromisoformat(hasta).replace(hour=23, minute=59, second=59)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Formato de fechas debe ser YYYY-MM-DD")
+
+    # Hoja 1: CxP creadas en el periodo (fecha_recepcion en rango)
+    cxps_creadas = (
+        db.query(CuentaPorPagar, Proveedor)
+        .join(Proveedor, Proveedor.id == CuentaPorPagar.proveedor_id)
+        .outerjoin(Compra, Compra.id == CuentaPorPagar.compra_id)
+        .filter(or_(
+            CuentaPorPagar.empresa_id == empresa_id,
+            Compra.empresa_id == empresa_id,
+        ))
+        .filter(CuentaPorPagar.fecha_recepcion.between(ini, fin))
+        .order_by(CuentaPorPagar.fecha_recepcion)
+        .all()
+    )
+
+    # Hoja 2: Abonos hechos en el periodo
+    abonos = (
+        db.query(AbonoCxP, CuentaPorPagar, Proveedor)
+        .join(CuentaPorPagar, CuentaPorPagar.id == AbonoCxP.cxp_id)
+        .join(Proveedor, Proveedor.id == CuentaPorPagar.proveedor_id)
+        .outerjoin(Compra, Compra.id == CuentaPorPagar.compra_id)
+        .filter(or_(
+            CuentaPorPagar.empresa_id == empresa_id,
+            Compra.empresa_id == empresa_id,
+        ))
+        .filter(AbonoCxP.fecha.between(ini, fin))
+        .order_by(AbonoCxP.fecha)
+        .all()
+    )
+
+    wb = Workbook()
+
+    # === HOJA 1: CxP creadas ===
+    ws1 = wb.active
+    ws1.title = "CxP del periodo"
+    titulo = f"CxP recibidas — {ini.date()} a {fin.date()}"
+    ws1["A1"] = titulo
+    ws1["A1"].font = Font(bold=True, size=14)
+    ws1.merge_cells("A1:H1")
+    ws1["A2"] = f"Generado: {_dt.utcnow().strftime('%d/%m/%Y %H:%M')}"
+    ws1["A2"].font = Font(italic=True, size=10, color="6B7280")
+    ws1.merge_cells("A2:H2")
+
+    headers1 = ["Fecha recepción", "Fecha vence", "Proveedor", "Folio",
+                "Obs", "Monto original", "Saldado", "Saldo actual"]
+    for col, h in enumerate(headers1, start=1):
+        c = ws1.cell(row=4, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1F2937")
+        c.alignment = Alignment(horizontal="center")
+
+    row = 5
+    total_monto = total_saldado = total_saldo = 0.0
+    for cxp, prov in cxps_creadas:
+        compra = db.get(Compra, cxp.compra_id) if cxp.compra_id else None
+        folio = cxp.folio_factura or (compra.folio_interno if compra else "")
+        m = float(cxp.monto_original or 0)
+        s = float(cxp.saldo or 0)
+        ws1.cell(row=row, column=1, value=cxp.fecha_recepcion.strftime("%d/%m/%Y") if cxp.fecha_recepcion else "")
+        ws1.cell(row=row, column=2, value=cxp.fecha_vencimiento.strftime("%d/%m/%Y") if cxp.fecha_vencimiento else "")
+        ws1.cell(row=row, column=3, value=prov.nombre)
+        ws1.cell(row=row, column=4, value=folio)
+        ws1.cell(row=row, column=5, value=cxp.observaciones or "")
+        ws1.cell(row=row, column=6, value=m).number_format = '"$"#,##0.00'
+        ws1.cell(row=row, column=7, value=m - s).number_format = '"$"#,##0.00'
+        ws1.cell(row=row, column=8, value=s).number_format = '"$"#,##0.00'
+        total_monto += m
+        total_saldado += (m - s)
+        total_saldo += s
+        row += 1
+    row += 1
+    ws1.cell(row=row, column=5, value="TOTAL").font = Font(bold=True)
+    ws1.cell(row=row, column=6, value=total_monto).number_format = '"$"#,##0.00'
+    ws1.cell(row=row, column=6).font = Font(bold=True)
+    ws1.cell(row=row, column=7, value=total_saldado).number_format = '"$"#,##0.00'
+    ws1.cell(row=row, column=7).font = Font(bold=True)
+    ws1.cell(row=row, column=8, value=total_saldo).number_format = '"$"#,##0.00'
+    ws1.cell(row=row, column=8).font = Font(bold=True)
+    for col, w in zip("ABCDEFGH", [14, 12, 28, 16, 30, 14, 14, 14]):
+        ws1.column_dimensions[col].width = w
+
+    # === HOJA 2: Abonos del periodo ===
+    ws2 = wb.create_sheet("Abonos del periodo")
+    ws2["A1"] = f"Abonos pagados — {ini.date()} a {fin.date()}"
+    ws2["A1"].font = Font(bold=True, size=14)
+    ws2.merge_cells("A1:G1")
+
+    headers2 = ["Fecha pago", "Proveedor", "Folio CxP", "Forma pago",
+                "Referencia", "Monto pagado", "Notas"]
+    for col, h in enumerate(headers2, start=1):
+        c = ws2.cell(row=3, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="065F46")
+        c.alignment = Alignment(horizontal="center")
+
+    row = 4
+    total_abonos = 0.0
+    for ab, cxp, prov in abonos:
+        compra = db.get(Compra, cxp.compra_id) if cxp.compra_id else None
+        folio = cxp.folio_factura or (compra.folio_interno if compra else "")
+        monto_ab = float(ab.monto or 0)
+        ws2.cell(row=row, column=1, value=ab.fecha.strftime("%d/%m/%Y") if ab.fecha else "")
+        ws2.cell(row=row, column=2, value=prov.nombre)
+        ws2.cell(row=row, column=3, value=folio)
+        ws2.cell(row=row, column=4, value=ab.forma_pago or "")
+        ws2.cell(row=row, column=5, value=ab.referencia or "")
+        ws2.cell(row=row, column=6, value=monto_ab).number_format = '"$"#,##0.00'
+        ws2.cell(row=row, column=7, value=ab.notas or "")
+        total_abonos += monto_ab
+        row += 1
+    row += 1
+    ws2.cell(row=row, column=5, value="TOTAL ABONOS").font = Font(bold=True)
+    ws2.cell(row=row, column=6, value=total_abonos).number_format = '"$"#,##0.00'
+    ws2.cell(row=row, column=6).font = Font(bold=True)
+    ws2.cell(row=row, column=6).fill = PatternFill("solid", fgColor="DCFCE7")
+    for col, w in zip("ABCDEFG", [14, 28, 16, 14, 18, 14, 30]):
+        ws2.column_dimensions[col].width = w
+
+    # === HOJA 3: Resumen por proveedor ===
+    ws3 = wb.create_sheet("Resumen proveedor")
+    ws3["A1"] = f"Resumen por proveedor — {ini.date()} a {fin.date()}"
+    ws3["A1"].font = Font(bold=True, size=14)
+    ws3.merge_cells("A1:E1")
+
+    # Agregar: por proveedor, total CxP recibido en periodo + total abonado en periodo
+    resumen: dict[int, dict] = {}
+    for cxp, prov in cxps_creadas:
+        r = resumen.setdefault(prov.id, {"nombre": prov.nombre, "recibido": 0.0, "pagado": 0.0, "facturas": 0, "abonos": 0})
+        r["recibido"] += float(cxp.monto_original or 0)
+        r["facturas"] += 1
+    for ab, _cxp, prov in abonos:
+        r = resumen.setdefault(prov.id, {"nombre": prov.nombre, "recibido": 0.0, "pagado": 0.0, "facturas": 0, "abonos": 0})
+        r["pagado"] += float(ab.monto or 0)
+        r["abonos"] += 1
+
+    headers3 = ["Proveedor", "Facturas recibidas", "Monto recibido",
+                "Abonos hechos", "Monto pagado"]
+    for col, h in enumerate(headers3, start=1):
+        c = ws3.cell(row=3, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1E40AF")
+        c.alignment = Alignment(horizontal="center")
+
+    row = 4
+    tot_rec = tot_pag = 0.0
+    for _pid, r in sorted(resumen.items(), key=lambda x: x[1]["recibido"], reverse=True):
+        ws3.cell(row=row, column=1, value=r["nombre"])
+        ws3.cell(row=row, column=2, value=r["facturas"])
+        ws3.cell(row=row, column=3, value=r["recibido"]).number_format = '"$"#,##0.00'
+        ws3.cell(row=row, column=4, value=r["abonos"])
+        ws3.cell(row=row, column=5, value=r["pagado"]).number_format = '"$"#,##0.00'
+        tot_rec += r["recibido"]
+        tot_pag += r["pagado"]
+        row += 1
+    row += 1
+    ws3.cell(row=row, column=1, value="TOTAL").font = Font(bold=True)
+    ws3.cell(row=row, column=3, value=tot_rec).number_format = '"$"#,##0.00'
+    ws3.cell(row=row, column=3).font = Font(bold=True)
+    ws3.cell(row=row, column=5, value=tot_pag).number_format = '"$"#,##0.00'
+    ws3.cell(row=row, column=5).font = Font(bold=True)
+    for col, w in zip("ABCDE", [32, 16, 16, 16, 16]):
+        ws3.column_dimensions[col].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    nombre = f"cxp_movimientos_{ini.date()}_a_{fin.date()}.xlsx"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
 # ===== Deuda bancaria con conceptos editables =====
 
 @router.get("/deuda-bancaria")

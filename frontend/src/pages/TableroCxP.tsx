@@ -208,6 +208,29 @@ export default function TableroCxP() {
 
   function imprimir() { window.print(); }
 
+  async function exportarMovimientos() {
+    // Default: mes seleccionado actual
+    const primerDia = `${anio}-${String(mes).padStart(2, "0")}-01`;
+    const ultimoDia = new Date(anio, mes, 0).toISOString().slice(0, 10);
+    const desde = window.prompt(`Fecha inicio (YYYY-MM-DD):`, primerDia);
+    if (!desde) return;
+    const hasta = window.prompt(`Fecha fin (YYYY-MM-DD):`, ultimoDia);
+    if (!hasta) return;
+    try {
+      const r = await api.get("/api/cxp/movimientos-xlsx", {
+        params: { desde, hasta },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `cxp_movimientos_${desde}_a_${hasta}.xlsx`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      alert("Error al exportar: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   const totalSaldo = useMemo(() => cxps.reduce((a, c) => a + c.saldo, 0), [cxps]);
   const totalMonto = useMemo(() => cxps.reduce((a, c) => a + c.monto_original, 0), [cxps]);
   const totalSaldado = useMemo(() => cxps.reduce((a, c) => a + c.saldado, 0), [cxps]);
@@ -264,7 +287,11 @@ export default function TableroCxP() {
       actions={
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn-icon no-print" onClick={imprimir}>🖨 Imprimir</button>
-          <button className="btn-icon no-print" onClick={exportar}>⬇ XLSX</button>
+          <button className="btn-icon no-print" onClick={exportar}>⬇ XLSX cartera</button>
+          <button className="btn-icon no-print" onClick={exportarMovimientos}
+            title="Descarga movimientos de CxP (creadas, abonadas, resumen) por rango de fechas">
+            📊 Movimientos por periodo
+          </button>
           <button className="btn no-print" onClick={() => setShowCaptura(true)}>+ Captura rápida</button>
         </div>
       }>
