@@ -1069,6 +1069,21 @@ function PreviaFacturaModal({
   onConfirmar: () => void;
 }) {
   const metodoPago = tipoSel === "FACTURA_PUE" ? "PUE" : "PPD";
+
+  function imprimirPrevia() {
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    const html = construirHtmlPrevia({
+      empresa: empresa?.nombre || "—",
+      cliente, items, subtotal, iva, ivaRetenido, total,
+      usoCfdi, metodoPago, condicionesPago, retencionAplica,
+    });
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch {} }, 250);
+  }
+
   const usoCfdiNombre: Record<string, string> = {
     G01: "Adquisición de mercancías",
     G02: "Devoluciones, descuentos",
@@ -1197,7 +1212,7 @@ function PreviaFacturaModal({
         {/* Footer con botones */}
         <div style={{
           padding: "14px 20px", borderTop: "1px solid #e5e7eb",
-          display: "flex", justifyContent: "space-between", gap: 10,
+          display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center",
         }}>
           <button onClick={onCancelar} disabled={procesando}
             style={{
@@ -1207,18 +1222,138 @@ function PreviaFacturaModal({
             }}>
             ← Editar / Cancelar
           </button>
-          <button onClick={onConfirmar} disabled={procesando}
-            style={{
-              background: procesando ? "#94a3b8" : "#10b981", color: "white",
-              border: 0, padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 700,
-              cursor: procesando ? "wait" : "pointer",
-            }}>
-            {procesando ? "Timbrando..." : "✓ Confirmar y timbrar"}
-          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={imprimirPrevia} disabled={procesando} type="button"
+              style={{
+                background: "white", border: "1px solid #0ea5e9", color: "#0ea5e9",
+                padding: "10px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer",
+              }}
+              title="Imprime o guarda como PDF antes de timbrar">
+              🖨 Imprimir previa
+            </button>
+            <button onClick={onConfirmar} disabled={procesando}
+              style={{
+                background: procesando ? "#94a3b8" : "#10b981", color: "white",
+                border: 0, padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 700,
+                cursor: procesando ? "wait" : "pointer",
+              }}>
+              {procesando ? "Timbrando..." : "✓ Confirmar y timbrar"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+
+// Construye un HTML imprimible self-contained de la previa de factura
+function construirHtmlPrevia(d: {
+  empresa: string;
+  cliente: ClienteSel;
+  items: Item[];
+  subtotal: number;
+  iva: number;
+  ivaRetenido: number;
+  total: number;
+  usoCfdi: string;
+  metodoPago: string;
+  condicionesPago: string;
+  retencionAplica: boolean;
+}): string {
+  const fmtN = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const escapar = (s: string) => String(s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
+  const itemsRows = d.items.map((it) => `
+    <tr>
+      <td>${escapar(it.nombre)}<br/><span class="muted">SKU ${escapar(it.sku)}</span></td>
+      <td class="r">${it.cantidad}</td>
+      <td class="r">${fmtN(it.precio)}</td>
+      <td class="r b">${fmtN(it.cantidad * it.precio)}</td>
+    </tr>`).join("");
+  const filaRet = d.retencionAplica ? `
+    <tr><td>IVA retenido (-16%)</td><td class="r" style="color:#991b1b">-${fmtN(d.ivaRetenido)}</td></tr>` : "";
+  const fechaImpresion = new Date().toLocaleString("es-MX", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<title>Previa de factura — ${escapar(d.cliente.razon_social || d.cliente.nombre)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; font-size: 12px; padding: 30px; color: #0f172a; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .muted { color: #94a3b8; font-size: 10px; }
+  .aviso { background: #fef3c7; border: 1px solid #f59e0b; padding: 8px 12px; border-radius: 4px;
+           margin-bottom: 16px; font-size: 11px; color: #92400e; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .box { padding: 10px; border: 1px solid #e5e7eb; border-radius: 4px; }
+  .label { font-size: 9px; color: #64748b; letter-spacing: 0.04em; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px;
+       text-transform: uppercase; color: #475569; border-bottom: 1px solid #cbd5e1; }
+  td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .r { text-align: right; }
+  .b { font-weight: 700; }
+  .totales { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .totales table { width: 100%; }
+  .totales td { padding: 4px 0; border: 0; }
+  .total-final { background: #0f172a; color: white; padding: 10px 14px; border-radius: 4px;
+                 display: flex; justify-content: space-between; font-size: 18px; margin-top: 6px; }
+  .retencion { background: #fee2e2; border: 1px solid #fca5a5; padding: 8px;
+               border-radius: 4px; font-size: 10px; color: #991b1b; margin-top: 8px; }
+  @media print { body { padding: 14px; } .no-print { display: none; } }
+</style></head><body>
+<div class="aviso"><strong>📄 VISTA PREVIA — NO ES UNA FACTURA TIMBRADA.</strong>
+ Generado: ${escapar(fechaImpresion)}. Una vez confirmes en el sistema, se genera el CFDI real con UUID del SAT.</div>
+<h1>${escapar(d.empresa)}</h1>
+<div class="muted">Emisor</div>
+<div class="grid2">
+  <div class="box">
+    <div class="label">RECEPTOR</div>
+    <div class="b" style="font-size:13px">${escapar(d.cliente.razon_social || d.cliente.nombre)}</div>
+    <div class="muted" style="margin-top:4px">
+      <strong>RFC:</strong> ${escapar(d.cliente.rfc || "—")} ·
+      <strong>CP:</strong> ${escapar(d.cliente.codigo_postal || "—")}<br/>
+      <strong>Régimen:</strong> ${escapar(d.cliente.regimen_fiscal || "—")}
+    </div>
+  </div>
+  <div class="box">
+    <div class="label">DATOS CFDI</div>
+    <div><strong>Uso CFDI:</strong> ${escapar(d.usoCfdi)}</div>
+    <div><strong>Método pago:</strong> ${escapar(d.metodoPago)}${d.metodoPago === "PUE" ? " — Una sola exhibición" : " — Parcialidades"}</div>
+    ${d.condicionesPago ? `<div><strong>Condiciones:</strong> ${escapar(d.condicionesPago)}</div>` : ""}
+  </div>
+</div>
+<div class="label" style="margin-bottom:4px">CONCEPTOS (${d.items.length})</div>
+<table>
+  <thead><tr>
+    <th>Descripción</th><th class="r" style="width:60px">Cant</th>
+    <th class="r" style="width:90px">Precio</th><th class="r" style="width:100px">Importe</th>
+  </tr></thead>
+  <tbody>${itemsRows}</tbody>
+</table>
+<div class="totales">
+  <div>${d.retencionAplica ? `<div class="retencion"><strong>⚠ RETENCIÓN IVA 16%</strong><br/>
+       El cliente retiene el IVA y lo entera al SAT por ti. Cobrarías solo el subtotal.</div>` : ""}</div>
+  <div>
+    <table>
+      <tr><td>Subtotal</td><td class="r b">${fmtN(d.subtotal)}</td></tr>
+      <tr><td>IVA trasladado (16%)</td><td class="r">${fmtN(d.iva)}</td></tr>
+      ${filaRet}
+    </table>
+    <div class="total-final">
+      <span>TOTAL CFDI</span><span>${fmtN(d.total)}</span>
+    </div>
+  </div>
+</div>
+<div class="no-print" style="text-align:center; margin-top:20px">
+  <button onclick="window.print()" style="padding:10px 20px;font-size:14px;background:#0ea5e9;color:white;border:0;border-radius:4px;cursor:pointer">
+    Imprimir / Guardar como PDF
+  </button>
+  <button onclick="window.close()" style="padding:10px 20px;font-size:14px;background:transparent;border:1px solid #ccc;border-radius:4px;cursor:pointer;margin-left:8px">
+    Cerrar
+  </button>
+</div>
+</body></html>`;
 }
 
 
