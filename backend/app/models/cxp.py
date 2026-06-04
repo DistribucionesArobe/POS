@@ -141,6 +141,9 @@ class PanelCxP(Base):
     ingreso_egreso_banco: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     usd_mxn: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Capturados a mano para calcular Venta del mes = Ingreso - Errores
+    ingreso_mensual: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    errores_mensual: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     actualizado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

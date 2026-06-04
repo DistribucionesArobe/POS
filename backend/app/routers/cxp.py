@@ -292,6 +292,8 @@ class PanelIn(BaseModel):
     ingreso_egreso_banco: float = 0
     usd_mxn: float = 0
     notas: str | None = None
+    ingreso_mensual: float = 0
+    errores_mensual: float = 0
 
 
 @router.get("/tablero")
@@ -314,6 +316,7 @@ def tablero_cxp(
             "anio": anio, "mes": mes,
             "venta_objetivo_mes": 0, "saldo_banco": 0,
             "ingreso_egreso_banco": 0, "usd_mxn": 0, "notas": None,
+            "ingreso_mensual": 0, "errores_mensual": 0,
         }
     else:
         panel_dict = {
@@ -323,6 +326,8 @@ def tablero_cxp(
             "ingreso_egreso_banco": float(getattr(panel, "ingreso_egreso_banco", 0) or 0),
             "usd_mxn": float(panel.usd_mxn),
             "notas": panel.notas,
+            "ingreso_mensual": float(getattr(panel, "ingreso_mensual", 0) or 0),
+            "errores_mensual": float(getattr(panel, "errores_mensual", 0) or 0),
             "actualizado_en": panel.actualizado_en.isoformat(),
         }
 
@@ -336,8 +341,8 @@ def tablero_cxp(
     else:
         dia_actual = dias_mes
 
-    # Ventas del mes
-    venta_mes = (
+    # Ventas del mes - INGRESO bruto (ticket/factura/remision)
+    venta_ingreso = (
         db.query(func.coalesce(func.sum(DocumentoVenta.total), 0))
         .filter(DocumentoVenta.empresa_id == empresa_id)
         .filter(DocumentoVenta.fecha >= ini_mes, DocumentoVenta.fecha < fin_mes)
@@ -347,7 +352,21 @@ def tablero_cxp(
         .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
         .scalar()
     )
-    venta_mes = float(venta_mes or 0)
+    venta_ingreso = float(venta_ingreso or 0)
+
+    # DEVOLUCIONES del mes (notas de credito) - se restan del ingreso
+    venta_devoluciones = (
+        db.query(func.coalesce(func.sum(DocumentoVenta.total), 0))
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(DocumentoVenta.fecha >= ini_mes, DocumentoVenta.fecha < fin_mes)
+        .filter(DocumentoVenta.tipo == "NOTA_CREDITO")
+        .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
+        .scalar()
+    )
+    venta_devoluciones = float(venta_devoluciones or 0)
+
+    # Venta NETA del mes = Ingreso - Devoluciones
+    venta_mes = venta_ingreso - venta_devoluciones
 
     # Total CxP abiertas (todas, no solo del mes)
     cxp_total = (
@@ -427,7 +446,9 @@ def tablero_cxp(
             "dias_mes": dias_mes,
             "dias_restantes": dias_restantes,
             "dias_habiles_semana": dias_habiles_semana,
-            "venta_mes": round(venta_mes, 2),
+            "venta_mes": round(venta_mes, 2),  # NETA (ingreso - devoluciones)
+            "venta_ingreso": round(venta_ingreso, 2),
+            "venta_devoluciones": round(venta_devoluciones, 2),
             "venta_promedio_dia": round(venta_promedio_dia, 2),
             "venta_estimada_mes": round(venta_estimada_mes, 2),
             "restante_meta": round(restante_meta, 2),
@@ -587,6 +608,8 @@ def upsert_panel(
     panel.ingreso_egreso_banco = payload.ingreso_egreso_banco
     panel.usd_mxn = payload.usd_mxn
     panel.notas = payload.notas
+    panel.ingreso_mensual = payload.ingreso_mensual
+    panel.errores_mensual = payload.errores_mensual
     panel.actualizado_en = datetime.utcnow()
     db.commit()
     return {"ok": True}

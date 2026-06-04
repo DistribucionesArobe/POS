@@ -30,11 +30,13 @@ type Tablero = {
     venta_objetivo_mes: number; saldo_banco: number;
     ingreso_egreso_banco: number;
     usd_mxn: number; notas: string | null;
+    ingreso_mensual?: number; errores_mensual?: number;
   };
   kpis: {
     dia_actual: number; dias_mes: number; dias_restantes: number;
     dias_habiles_semana: number;
-    venta_mes: number; venta_promedio_dia: number; venta_estimada_mes: number;
+    venta_mes: number; venta_ingreso?: number; venta_devoluciones?: number;
+    venta_promedio_dia: number; venta_estimada_mes: number;
     restante_meta: number; a_vender_por_dia: number;
     cxp_total: number; cxp_del_mes: number; cxp_corto_plazo: number; cxc_total: number;
     diferencia: number;
@@ -246,9 +248,17 @@ export default function TableroCxP() {
 
   // "Venta del mes" = lo vendido hasta hoy. Auto del POS, pero si el usuario
   // capturó un valor manual en el panel, ese gana (override).
-  const ventaActualMes = (p?.venta_objetivo_mes && p.venta_objetivo_mes > 0)
-    ? p.venta_objetivo_mes
-    : (k?.venta_mes || 0);
+  // Venta del mes:
+  // 1. Si el usuario captura Ingreso + Errores en el panel -> usa Ingreso - Errores
+  // 2. Si captura venta_objetivo_mes -> usa ese
+  // 3. Si no, usa lo auto-calculado por el POS
+  const ingresoManual = p?.ingreso_mensual || 0;
+  const erroresManual = p?.errores_mensual || 0;
+  const ventaActualMes = ingresoManual > 0
+    ? Math.max(0, ingresoManual - erroresManual)
+    : (p?.venta_objetivo_mes && p.venta_objetivo_mes > 0)
+      ? p.venta_objetivo_mes
+      : (k?.venta_mes || 0);
 
   const diaActual = k?.dia_actual || 1;
   const diasMes = k?.dias_mes || 30;
@@ -336,15 +346,33 @@ export default function TableroCxP() {
         <div className="card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
           <table style={panelTableStyle}>
             <tbody>
+              {/* NUEVA FILA: Ingreso - Errores -> Venta del mes */}
+              <tr>
+                <td style={lblBlue}>Ingreso</td>
+                <td style={valBlack}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.01"
+                      value={panelDraft.ingreso_mensual || 0}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, ingreso_mensual: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmt(ingresoManual)}
+                </td>
+                <td style={lblYellow}>Errores</td>
+                <td style={valBlack}>
+                  {editandoPanel ? (
+                    <input className="input" type="number" step="0.01"
+                      value={panelDraft.errores_mensual || 0}
+                      onChange={(e) => setPanelDraft({ ...panelDraft, errores_mensual: +e.target.value })}
+                      style={inpStyle} />
+                  ) : fmt(erroresManual)}
+                </td>
+                <td colSpan={4} style={{ ...lblGreen, fontSize: 11, textAlign: "center", color: "#475569", fontStyle: "italic" }}>
+                  Ingreso − Errores = Venta del mes
+                </td>
+              </tr>
               <tr>
                 <td style={lblGreen}>Venta del mes</td>
-                <td style={valRed}>
-                  {editandoPanel ? (
-                    <input className="input" type="number" step="0.01" value={panelDraft.venta_objetivo_mes}
-                      onChange={(e) => setPanelDraft({ ...panelDraft, venta_objetivo_mes: +e.target.value })}
-                      style={inpStyle} />
-                  ) : fmt(ventaActualMes)}
-                </td>
+                <td style={valRed}>{fmt(ventaActualMes)}</td>
                 <td style={lblYellow}>Saldo</td>
                 <td style={valBlack}>
                   {editandoPanel ? (
