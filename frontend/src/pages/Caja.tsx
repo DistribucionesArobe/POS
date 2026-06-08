@@ -11,6 +11,7 @@ type Item = {
   precio: number;
   cantidad: number;
   stock: number;
+  unidad?: string;
 };
 
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -156,6 +157,7 @@ export default function Caja() {
       setItems([...items, {
         variante_id: s.id, sku: s.sku, nombre: s.nombre,
         precio: s.precio, cantidad: 1, stock: s.stock,
+        unidad: s.unidad,
       }]);
     }
     setBusqueda("");
@@ -1152,7 +1154,8 @@ function PreviaFacturaModal({
               <thead>
                 <tr style={{ background: "#f3f4f6" }}>
                   <th style={{ ...thP, textAlign: "left" }}>Descripción</th>
-                  <th style={{ ...thP, textAlign: "right", width: 70 }}>Cant</th>
+                  <th style={{ ...thP, textAlign: "right", width: 60 }}>Cant</th>
+                  <th style={{ ...thP, textAlign: "left", width: 70 }}>Unidad</th>
                   <th style={{ ...thP, textAlign: "right", width: 110 }}>Precio</th>
                   <th style={{ ...thP, textAlign: "right", width: 110 }}>Importe</th>
                 </tr>
@@ -1165,6 +1168,7 @@ function PreviaFacturaModal({
                       <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU {it.sku}</div>
                     </td>
                     <td style={{ ...tdP, textAlign: "right", fontWeight: 600 }}>{it.cantidad}</td>
+                    <td style={tdP}>{it.unidad || "—"}</td>
                     <td style={{ ...tdP, textAlign: "right" }}>{fmt(it.precio)}</td>
                     <td style={{ ...tdP, textAlign: "right", fontWeight: 700 }}>{fmt(it.cantidad * it.precio)}</td>
                   </tr>
@@ -1267,6 +1271,7 @@ function construirHtmlPrevia(d: {
     <tr>
       <td>${escapar(it.nombre)}<br/><span class="muted">SKU ${escapar(it.sku)}</span></td>
       <td class="r">${it.cantidad}</td>
+      <td>${escapar(it.unidad || "—")}</td>
       <td class="r">${fmtN(it.precio)}</td>
       <td class="r b">${fmtN(it.cantidad * it.precio)}</td>
     </tr>`).join("");
@@ -1326,7 +1331,8 @@ function construirHtmlPrevia(d: {
 <div class="label" style="margin-bottom:4px">CONCEPTOS (${d.items.length})</div>
 <table>
   <thead><tr>
-    <th>Descripción</th><th class="r" style="width:60px">Cant</th>
+    <th>Descripción</th><th class="r" style="width:50px">Cant</th>
+    <th style="width:60px">Unidad</th>
     <th class="r" style="width:90px">Precio</th><th class="r" style="width:100px">Importe</th>
   </tr></thead>
   <tbody>${itemsRows}</tbody>
@@ -1557,6 +1563,7 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
         precio: precioBase,
         cantidad: l.cantidad,
         stock: l.match_stock || 0,
+        unidad: l.unidad,
       });
     }
     if (items.length === 0) {
