@@ -42,6 +42,43 @@ export default function Cotizaciones() {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
+  async function imprimirBonita(c: Cot) {
+    try {
+      const r = await api.get(`/api/cotizaciones/${c.id}`);
+      const d = r.data;
+      const ventana = window.open("", "_blank");
+      if (!ventana) return;
+      const html = construirHtmlCotizacion({
+        empresa: d.empresa_nombre || "Mi empresa",
+        folio: d.folio,
+        fechaEmision: d.fecha,
+        vigenciaHasta: d.vigencia_hasta,
+        cliente: {
+          nombre: d.cliente_razon_social || d.cliente_nombre,
+          rfc: d.cliente_rfc,
+          cp: d.cliente_cp,
+          regimen: d.cliente_regimen,
+        },
+        conceptos: (d.conceptos || []).map((it: any) => ({
+          descripcion: it.descripcion || it.nombre || "",
+          sku: it.sku || "",
+          unidad: it.unidad || "",
+          cantidad: it.cantidad,
+          precio: it.precio_unitario,
+          importe: it.importe,
+        })),
+        subtotal: d.subtotal,
+        iva: d.iva,
+        total: d.total,
+        notas: d.notas,
+      });
+      ventana.document.write(html);
+      ventana.document.close();
+    } catch (err: any) {
+      alert("Error al cargar cotización: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   function mandarWhatsApp(c: Cot) {
     const tel = prompt("Número de WhatsApp del cliente (10 dígitos, sin lada):", c.whatsapp_origen || "");
     if (!tel) return;
@@ -115,7 +152,10 @@ export default function Cotizaciones() {
                 <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(c.total)}</td>
                 <td><span className={`badge ${BADGE[c.estatus] || ""}`}>{c.estatus}</span></td>
                 <td style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  <button className="btn-icon" onClick={() => descargarPdf(c)}>PDF</button>
+                  <button className="btn-icon" onClick={() => imprimirBonita(c)}
+                    title="Imprimir/guardar PDF con formato">🖨 Imprimir</button>
+                  <button className="btn-icon" onClick={() => descargarPdf(c)}
+                    title="PDF backend (versión vieja)">PDF</button>
                   <button className="btn-icon" title="Enviar por WhatsApp"
                     onClick={() => mandarWhatsApp(c)}>📱 WhatsApp</button>
                   {c.estatus === "ENVIADA" && (
@@ -321,4 +361,161 @@ function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
       </div>
     </div>
   );
+}
+
+
+// ===== HTML imprimible de cotización =====
+
+function construirHtmlCotizacion(d: {
+  empresa: string;
+  folio: string;
+  fechaEmision: string;
+  vigenciaHasta: string | null;
+  cliente: {
+    nombre: string;
+    rfc: string | null;
+    cp: string | null;
+    regimen: string | null;
+  };
+  conceptos: Array<{
+    descripcion: string;
+    sku: string;
+    unidad: string;
+    cantidad: number;
+    precio: number;
+    importe: number;
+  }>;
+  subtotal: number;
+  iva: number;
+  total: number;
+  notas: string | null;
+}): string {
+  const fmtN = (n: number) => "$" + (n || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const escapar = (s: string) => String(s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
+  const itemsRows = d.conceptos.map((it, i) => `
+    <tr>
+      <td style="text-align:center;color:#94a3b8">${i + 1}</td>
+      <td>${escapar(it.descripcion)}${it.sku ? `<br/><span class="muted">SKU ${escapar(it.sku)}</span>` : ""}</td>
+      <td class="r">${it.cantidad}</td>
+      <td>${escapar(it.unidad || "—")}</td>
+      <td class="r">${fmtN(it.precio)}</td>
+      <td class="r b">${fmtN(it.importe)}</td>
+    </tr>`).join("");
+  const fEmis = new Date(d.fechaEmision);
+  const fVig = d.vigenciaHasta ? new Date(d.vigenciaHasta) : null;
+  const fmtFecha = (f: Date) => f.toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<title>Cotización ${escapar(d.folio)} — ${escapar(d.cliente.nombre)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; font-size: 12px; padding: 30px; color: #0f172a; }
+  h1 { font-size: 22px; margin: 0 0 4px; color: #0f172a; }
+  h2 { font-size: 14px; margin: 0; color: #475569; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+  .muted { color: #94a3b8; font-size: 10px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px;
+            padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
+  .header .right { text-align: right; }
+  .folio { font-size: 20px; font-weight: 800; color: #0ea5e9; letter-spacing: 0.04em; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .box { padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fafafa; }
+  .label { font-size: 9px; color: #64748b; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 3px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th { background: #0f172a; padding: 8px 8px; text-align: left; font-size: 10px;
+       text-transform: uppercase; color: white; letter-spacing: 0.04em; }
+  td { padding: 7px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .r { text-align: right; }
+  .b { font-weight: 700; }
+  .totales { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .totales table { width: 100%; }
+  .totales td { padding: 5px 8px; border: 0; }
+  .total-final { background: #0f172a; color: white; padding: 12px 16px; border-radius: 4px;
+                 display: flex; justify-content: space-between; font-size: 20px; margin-top: 8px; font-weight: 800; }
+  .vigencia { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px 12px; border-radius: 4px;
+              margin-top: 16px; font-size: 11px; color: #92400e; }
+  .notas { margin-top: 16px; padding: 10px; background: #f8fafc; border-left: 3px solid #cbd5e1;
+           font-size: 11px; color: #475569; }
+  .firma { margin-top: 40px; padding-top: 8px; border-top: 1px solid #cbd5e1;
+           width: 60%; text-align: center; font-size: 10px; color: #64748b; }
+  @media print { body { padding: 14px; } .no-print { display: none; } }
+</style></head><body>
+<div class="header">
+  <div>
+    <h1>${escapar(d.empresa)}</h1>
+    <div class="muted">Emisor de la cotización</div>
+  </div>
+  <div class="right">
+    <h2>Cotización</h2>
+    <div class="folio">${escapar(d.folio)}</div>
+    <div class="muted">Emitida: ${escapar(fmtFecha(fEmis))}</div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <div class="label">CLIENTE</div>
+    <div class="b" style="font-size:13px">${escapar(d.cliente.nombre)}</div>
+    ${d.cliente.rfc ? `<div class="muted" style="margin-top:4px"><strong>RFC:</strong> ${escapar(d.cliente.rfc)}</div>` : ""}
+    ${d.cliente.cp ? `<div class="muted"><strong>CP:</strong> ${escapar(d.cliente.cp)}</div>` : ""}
+    ${d.cliente.regimen ? `<div class="muted"><strong>Régimen:</strong> ${escapar(d.cliente.regimen)}</div>` : ""}
+  </div>
+  <div class="box">
+    <div class="label">VIGENCIA</div>
+    ${fVig ? `<div><strong>Válida hasta:</strong> ${escapar(fmtFecha(fVig))}</div>` : `<div class="muted">Sin vigencia definida</div>`}
+    <div class="muted" style="margin-top:4px">Precios sujetos a cambio sin previo aviso</div>
+  </div>
+</div>
+
+<div class="label" style="margin-bottom:4px">CONCEPTOS (${d.conceptos.length})</div>
+<table>
+  <thead><tr>
+    <th style="width:30px;text-align:center">#</th>
+    <th>Descripción</th>
+    <th class="r" style="width:50px;color:white">Cant</th>
+    <th style="width:60px;color:white">Unidad</th>
+    <th class="r" style="width:90px;color:white">P. Unit.</th>
+    <th class="r" style="width:100px;color:white">Importe</th>
+  </tr></thead>
+  <tbody>${itemsRows}</tbody>
+</table>
+
+<div class="totales">
+  <div>
+    <div class="notas">
+      <strong>NOTAS:</strong><br/>
+      ${d.notas ? `${escapar(d.notas)}<br/><br/>` : ""}
+      • Esta cotización NO es un comprobante fiscal.<br/>
+      • Para formalizar el pedido confirme antes de la vigencia.<br/>
+      • Disponibilidad sujeta a existencias al momento de la confirmación.
+    </div>
+  </div>
+  <div>
+    <table>
+      <tr><td>Subtotal</td><td class="r b">${fmtN(d.subtotal)}</td></tr>
+      <tr><td>IVA 16%</td><td class="r">${fmtN(d.iva)}</td></tr>
+    </table>
+    <div class="total-final">
+      <span>TOTAL</span><span>${fmtN(d.total)}</span>
+    </div>
+  </div>
+</div>
+
+${fVig ? `<div class="vigencia">
+  <strong>⏱ ESTA COTIZACIÓN ES VÁLIDA HASTA EL ${escapar(fmtFecha(fVig).toUpperCase())}.</strong>
+  Después de esta fecha los precios pueden variar.
+</div>` : ""}
+
+<div class="firma">
+  Atención y servicio<br/>
+  ${escapar(d.empresa)}
+</div>
+
+<div class="no-print" style="text-align:center; margin-top:20px">
+  <button onclick="window.print()" style="padding:10px 20px;font-size:14px;background:#0ea5e9;color:white;border:0;border-radius:4px;cursor:pointer">
+    Imprimir / Guardar como PDF
+  </button>
+  <button onclick="window.close()" style="padding:10px 20px;font-size:14px;background:transparent;border:1px solid #ccc;border-radius:4px;cursor:pointer;margin-left:8px">
+    Cerrar
+  </button>
+</div>
+</body></html>`;
 }

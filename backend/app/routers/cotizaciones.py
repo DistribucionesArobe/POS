@@ -142,14 +142,20 @@ def obtener_cotizacion(
     if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Cotizacion no existe")
     cli = db.get(Cliente, c.cliente_id) if c.cliente_id else None
+    emp = db.get(Empresa, c.empresa_id)
     return {
         "id": c.id, "folio": c.folio,
         "fecha": c.fecha.isoformat(),
         "vigencia_hasta": c.vigencia_hasta.isoformat() if c.vigencia_hasta else None,
         "cliente_id": c.cliente_id,
         "cliente_nombre": cli.nombre if cli else (c.nombre_libre or "Cliente libre"),
+        "cliente_razon_social": cli.razon_social if cli else None,
+        "cliente_rfc": cli.rfc if cli else None,
+        "cliente_cp": cli.codigo_postal if cli else None,
+        "cliente_regimen": cli.regimen_fiscal if cli else None,
         "cliente_telefono": cli.telefono if cli else None,
         "cliente_whatsapp": (cli.whatsapp if cli else c.whatsapp_origen),
+        "empresa_nombre": emp.nombre if emp else "",
         "subtotal": float(c.subtotal),
         "iva": float(c.iva),
         "total": float(c.total),
