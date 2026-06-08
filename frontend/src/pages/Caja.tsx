@@ -43,7 +43,11 @@ export default function Caja() {
   const [showClientePicker, setShowClientePicker] = useState(false);
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [procesando, setProcesando] = useState(false);
-  const [empresaActiva, setEmpresaActiva] = useState<{ id: number; nombre: string } | null>(null);
+  const [empresaActiva, setEmpresaActiva] = useState<{
+    id: number; nombre: string;
+    razon_social?: string; rfc?: string;
+    regimen_fiscal?: string; codigo_postal?: string;
+  } | null>(null);
   const [favoritos, setFavoritos] = useState<any[]>([]);
   const [showImportar, setShowImportar] = useState(false);
   // Monedero del cliente activo
@@ -66,8 +70,18 @@ export default function Caja() {
       if (ea) setEmpresaActiva(JSON.parse(ea));
     } catch {}
     cargarFavoritos();
+    cargarEmpresaActiva();
     focus();
   }, []);
+
+  async function cargarEmpresaActiva() {
+    try {
+      const r = await api.get("/api/empresas/activa");
+      setEmpresaActiva(r.data);
+    } catch {
+      // si falla queda con lo del localStorage
+    }
+  }
 
   async function cargarFavoritos() {
     try {
@@ -226,13 +240,18 @@ export default function Caja() {
     const ventana = window.open("", "_blank");
     if (!ventana) return;
     const html = construirHtmlCotizacion({
-      empresa: empresaActiva?.nombre || "Mi empresa",
+      emisor: {
+        nombre: empresaActiva?.nombre || "Mi empresa",
+        razon_social: empresaActiva?.razon_social || "",
+        rfc: empresaActiva?.rfc || "",
+        regimen: empresaActiva?.regimen_fiscal || "",
+        cp: empresaActiva?.codigo_postal || "",
+      },
       cliente,
       items,
       subtotal,
       iva,
       total,
-      vigenciaDias: 15,
     });
     ventana.document.write(html);
     ventana.document.close();
@@ -1396,13 +1415,18 @@ function construirHtmlPrevia(d: {
 
 
 function construirHtmlCotizacion(d: {
-  empresa: string;
+  emisor: {
+    nombre: string;
+    razon_social: string;
+    rfc: string;
+    regimen: string;
+    cp: string;
+  };
   cliente: ClienteSel;
   items: Item[];
   subtotal: number;
   iva: number;
   total: number;
-  vigenciaDias: number;
 }): string {
   const fmtN = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const escapar = (s: string) => String(s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
@@ -1416,23 +1440,24 @@ function construirHtmlCotizacion(d: {
       <td class="r b">${fmtN(it.cantidad * it.precio)}</td>
     </tr>`).join("");
   const fechaEmision = new Date();
-  const fechaVigencia = new Date(fechaEmision.getTime() + d.vigenciaDias * 24 * 60 * 60 * 1000);
   const fmtFecha = (f: Date) => f.toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
   const folioPreview = "COT-" + fechaEmision.getFullYear() + String(fechaEmision.getMonth() + 1).padStart(2, "0") +
                        String(fechaEmision.getDate()).padStart(2, "0") + "-" +
                        String(fechaEmision.getHours()).padStart(2, "0") + String(fechaEmision.getMinutes()).padStart(2, "0");
+  const emisorTitulo = d.emisor.razon_social || d.emisor.nombre;
   return `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"/>
 <title>Cotización ${folioPreview} — ${escapar(d.cliente.razon_social || d.cliente.nombre)}</title>
 <style>
   body { font-family: -apple-system, Arial, sans-serif; font-size: 12px; padding: 30px; color: #0f172a; }
-  h1 { font-size: 22px; margin: 0 0 4px; color: #0f172a; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #0f172a; }
   h2 { font-size: 14px; margin: 0; color: #475569; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
   .muted { color: #94a3b8; font-size: 10px; }
   .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px;
             padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
   .header .right { text-align: right; }
   .folio { font-size: 20px; font-weight: 800; color: #0ea5e9; letter-spacing: 0.04em; }
+  .emisor-datos { font-size: 11px; color: #475569; margin-top: 6px; line-height: 1.5; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
   .box { padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fafafa; }
   .label { font-size: 9px; color: #64748b; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 3px; }
@@ -1447,8 +1472,6 @@ function construirHtmlCotizacion(d: {
   .totales td { padding: 5px 8px; border: 0; }
   .total-final { background: #0f172a; color: white; padding: 12px 16px; border-radius: 4px;
                  display: flex; justify-content: space-between; font-size: 20px; margin-top: 8px; font-weight: 800; }
-  .vigencia { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px 12px; border-radius: 4px;
-              margin-top: 16px; font-size: 11px; color: #92400e; }
   .notas { margin-top: 16px; padding: 10px; background: #f8fafc; border-left: 3px solid #cbd5e1;
            font-size: 11px; color: #475569; }
   .firma { margin-top: 40px; padding-top: 8px; border-top: 1px solid #cbd5e1;
@@ -1456,9 +1479,14 @@ function construirHtmlCotizacion(d: {
   @media print { body { padding: 14px; } .no-print { display: none; } }
 </style></head><body>
 <div class="header">
-  <div>
-    <h1>${escapar(d.empresa)}</h1>
+  <div style="flex:1">
+    <h1>${escapar(emisorTitulo)}</h1>
     <div class="muted">Emisor de la cotización</div>
+    <div class="emisor-datos">
+      ${d.emisor.rfc ? `<strong>RFC:</strong> ${escapar(d.emisor.rfc)}` : ""}
+      ${d.emisor.regimen ? ` &nbsp;·&nbsp; <strong>Régimen:</strong> ${escapar(d.emisor.regimen)}` : ""}
+      ${d.emisor.cp ? ` &nbsp;·&nbsp; <strong>CP:</strong> ${escapar(d.emisor.cp)}` : ""}
+    </div>
   </div>
   <div class="right">
     <h2>Cotización</h2>
@@ -1469,17 +1497,18 @@ function construirHtmlCotizacion(d: {
 
 <div class="grid2">
   <div class="box">
-    <div class="label">CLIENTE</div>
+    <div class="label">EMISOR (DATOS FISCALES)</div>
+    <div class="b" style="font-size:13px">${escapar(d.emisor.razon_social || d.emisor.nombre)}</div>
+    ${d.emisor.rfc ? `<div class="muted" style="margin-top:4px"><strong>RFC:</strong> ${escapar(d.emisor.rfc)}</div>` : ""}
+    ${d.emisor.cp ? `<div class="muted"><strong>CP:</strong> ${escapar(d.emisor.cp)}</div>` : ""}
+    ${d.emisor.regimen ? `<div class="muted"><strong>Régimen fiscal:</strong> ${escapar(d.emisor.regimen)}</div>` : ""}
+  </div>
+  <div class="box">
+    <div class="label">CLIENTE (DATOS FISCALES)</div>
     <div class="b" style="font-size:13px">${escapar(d.cliente.razon_social || d.cliente.nombre)}</div>
     ${d.cliente.rfc ? `<div class="muted" style="margin-top:4px"><strong>RFC:</strong> ${escapar(d.cliente.rfc)}</div>` : ""}
     ${d.cliente.codigo_postal ? `<div class="muted"><strong>CP:</strong> ${escapar(d.cliente.codigo_postal)}</div>` : ""}
-    ${d.cliente.regimen_fiscal ? `<div class="muted"><strong>Régimen:</strong> ${escapar(d.cliente.regimen_fiscal)}</div>` : ""}
-  </div>
-  <div class="box">
-    <div class="label">VIGENCIA</div>
-    <div><strong>Válida hasta:</strong> ${escapar(fmtFecha(fechaVigencia))}</div>
-    <div><strong>Vigencia:</strong> ${d.vigenciaDias} días naturales</div>
-    <div class="muted" style="margin-top:4px">Precios sujetos a cambio sin previo aviso</div>
+    ${d.cliente.regimen_fiscal ? `<div class="muted"><strong>Régimen fiscal:</strong> ${escapar(d.cliente.regimen_fiscal)}</div>` : ""}
   </div>
 </div>
 
@@ -1501,7 +1530,7 @@ function construirHtmlCotizacion(d: {
     <div class="notas">
       <strong>NOTAS:</strong><br/>
       • Esta cotización NO es un comprobante fiscal.<br/>
-      • Para formalizar el pedido confirme antes de la vigencia.<br/>
+      • Precios sujetos a cambio sin previo aviso.<br/>
       • Disponibilidad sujeta a existencias al momento de la confirmación.
     </div>
   </div>
@@ -1516,14 +1545,9 @@ function construirHtmlCotizacion(d: {
   </div>
 </div>
 
-<div class="vigencia">
-  <strong>⏱ ESTA COTIZACIÓN ES VÁLIDA HASTA EL ${escapar(fmtFecha(fechaVigencia).toUpperCase())}.</strong>
-  Después de esta fecha los precios pueden variar.
-</div>
-
 <div class="firma">
   Atención y servicio<br/>
-  ${escapar(d.empresa)}
+  ${escapar(emisorTitulo)}
 </div>
 
 <div class="no-print" style="text-align:center; margin-top:20px">

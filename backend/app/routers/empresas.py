@@ -15,6 +15,27 @@ def _require_super(user: Usuario):
         raise HTTPException(403, "Solo super admin")
 
 
+@router.get("/activa")
+def empresa_activa(
+    user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Datos fiscales completos de la empresa actualmente activa para el usuario."""
+    if not user.empresa_id:
+        raise HTTPException(400, "Usuario sin empresa activa")
+    e = db.get(Empresa, user.empresa_id)
+    if not e:
+        raise HTTPException(404, "Empresa no existe")
+    return {
+        "id": e.id,
+        "nombre": e.nombre,
+        "razon_social": e.razon_social,
+        "rfc": e.rfc,
+        "regimen_fiscal": e.regimen_fiscal,
+        "codigo_postal": e.codigo_postal,
+    }
+
+
 @router.get("")
 def listar_empresas(
     user: Usuario = Depends(get_current_user),
