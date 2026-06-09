@@ -14,6 +14,48 @@ from app.utils.folios import siguiente_folio
 IVA_TASA = 0.16
 
 
+def _unidad_a_clave_sat(unidad: str) -> str | None:
+    """Mapea unidad descriptiva (Pieza, Kg, etc.) -> clave SAT c_ClaveUnidad.
+
+    Si no encuentra match devuelve None para que el caller mantenga
+    la clave SAT que ya tenia la variante.
+    """
+    u = (unidad or "").strip().lower()
+    if not u:
+        return None
+    if u.startswith("pieza") or u == "pza" or u == "pz":
+        return "H87"
+    if u.startswith("kit"):
+        return "XKI"
+    if u.startswith("paq"):
+        return "XPK"
+    if u.startswith("caja"):
+        return "XBX"
+    if u.startswith("bult"):
+        return "XBG"
+    if u.startswith("kg") or "kilo" in u:
+        return "KGM"
+    if u in {"g", "gr"} or u.startswith("gramo"):
+        return "GRM"
+    if u == "m" or "metro" in u:
+        return "MTR"
+    if u in {"m2", "m²"} or "metro2" in u or "metro cuadrado" in u:
+        return "MTK"
+    if u in {"m3", "m³"} or "metro3" in u or "metro cubico" in u:
+        return "MTQ"
+    if u.startswith("lt") or "litro" in u or u == "l":
+        return "LTR"
+    if u.startswith("gal"):
+        return "GLL"
+    if u.startswith("ton"):
+        return "TNE"
+    if u.startswith("hora") or u == "h" or u == "hr":
+        return "HUR"
+    if u.startswith("servicio") or u.startswith("serv"):
+        return "E48"
+    return None
+
+
 def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> DocumentoVenta:
     cliente = db.get(Cliente, payload.cliente_id)
     if not cliente:
@@ -32,6 +74,12 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
             raise ValueError(f"Variante {v.sku} pertenece a otra empresa")
         importe = c.cantidad * c.precio_unitario - c.descuento
         subtotal += importe
+        # Resolver clave SAT de unidad: si el concepto manda override de "unidad",
+        # tratamos de mapearla; si no hay match usamos la de la variante.
+        clave_unidad = v.clave_unidad_sat
+        unidad_override = getattr(c, "unidad", None)
+        if unidad_override:
+            clave_unidad = _unidad_a_clave_sat(unidad_override) or v.clave_unidad_sat
         conceptos_creados.append(ConceptoVenta(
             variante_id=v.id,
             descripcion=f"{producto.nombre} - {v.presentacion}",
@@ -40,7 +88,7 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
             descuento=c.descuento,
             importe=importe,
             clave_prod_serv_sat=producto.clave_prod_serv_sat,
-            clave_unidad_sat=v.clave_unidad_sat,
+            clave_unidad_sat=clave_unidad,
             tasa_iva=IVA_TASA,
         ))
 

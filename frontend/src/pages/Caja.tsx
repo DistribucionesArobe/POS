@@ -338,6 +338,7 @@ export default function Caja() {
       metodo_pago_sat: metodoPagoSat,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
+        unidad: i.unidad || undefined,
       })),
       iva_retenido_pct: retencionAplica ? 0.16 : 0,
       uso_cfdi: tipo === "FACTURA" ? usoCfdiSel : undefined,
@@ -1036,6 +1037,23 @@ export default function Caja() {
           condicionesPago={condicionesPagoSel}
           retencionAplica={retencionAplica}
           procesando={procesando}
+          onCambiarUnidad={(idx, unidad) => {
+            const c = [...items];
+            c[idx].unidad = unidad;
+            setItems(c);
+          }}
+          onCambiarCantidad={(idx, cantidad) => {
+            if (cantidad <= 0) return;
+            const c = [...items];
+            c[idx].cantidad = cantidad;
+            setItems(c);
+          }}
+          onCambiarPrecio={(idx, precio) => {
+            if (isNaN(precio) || precio < 0) return;
+            const c = [...items];
+            c[idx].precio = precio;
+            setItems(c);
+          }}
           onCancelar={() => setMostrarPrevia(false)}
           onConfirmar={() => cobrar(true)}
         />
@@ -1104,7 +1122,8 @@ function QuickBtn({ k, label, color, onClick }: {
 function PreviaFacturaModal({
   empresa, cliente, items, subtotal, iva, ivaRetenido, total,
   usoCfdi, tipoSel, condicionesPago, retencionAplica,
-  procesando, onCancelar, onConfirmar,
+  procesando, onCambiarUnidad, onCambiarCantidad, onCambiarPrecio,
+  onCancelar, onConfirmar,
 }: {
   empresa: { id: number; nombre: string } | null;
   cliente: ClienteSel;
@@ -1118,6 +1137,9 @@ function PreviaFacturaModal({
   condicionesPago: string;
   retencionAplica: boolean;
   procesando: boolean;
+  onCambiarUnidad: (idx: number, unidad: string) => void;
+  onCambiarCantidad: (idx: number, cantidad: number) => void;
+  onCambiarPrecio: (idx: number, precio: number) => void;
   onCancelar: () => void;
   onConfirmar: () => void;
 }) {
@@ -1218,9 +1240,46 @@ function PreviaFacturaModal({
                       <div>{it.nombre}</div>
                       <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU {it.sku}</div>
                     </td>
-                    <td style={{ ...tdP, textAlign: "right", fontWeight: 600 }}>{it.cantidad}</td>
-                    <td style={tdP}>{it.unidad || "—"}</td>
-                    <td style={{ ...tdP, textAlign: "right" }}>{fmt(it.precio)}</td>
+                    <td style={{ ...tdP, textAlign: "right" }}>
+                      <input type="number" min="0.01" step="0.01" value={it.cantidad}
+                        onChange={(e) => onCambiarCantidad(i, +e.target.value)}
+                        style={{
+                          width: 60, padding: "3px 6px", fontSize: 12, fontWeight: 600,
+                          textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 4,
+                        }} />
+                    </td>
+                    <td style={tdP}>
+                      <input type="text" value={it.unidad || ""} list={`unid-${i}`}
+                        placeholder="Pieza"
+                        onChange={(e) => onCambiarUnidad(i, e.target.value)}
+                        style={{
+                          width: 80, padding: "3px 6px", fontSize: 12,
+                          border: "1px solid #cbd5e1", borderRadius: 4,
+                        }} />
+                      <datalist id={`unid-${i}`}>
+                        <option value="Pieza" />
+                        <option value="Kg" />
+                        <option value="Kit" />
+                        <option value="Paquete" />
+                        <option value="Caja" />
+                        <option value="Litro" />
+                        <option value="Metro" />
+                        <option value="m2" />
+                        <option value="m3" />
+                        <option value="Servicio" />
+                        <option value="Hora" />
+                        <option value="Galón" />
+                        <option value="Tonelada" />
+                      </datalist>
+                    </td>
+                    <td style={{ ...tdP, textAlign: "right" }}>
+                      <input type="number" min="0" step="0.01" value={it.precio}
+                        onChange={(e) => onCambiarPrecio(i, +e.target.value)}
+                        style={{
+                          width: 90, padding: "3px 6px", fontSize: 12,
+                          textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 4,
+                        }} />
+                    </td>
                     <td style={{ ...tdP, textAlign: "right", fontWeight: 700 }}>{fmt(it.cantidad * it.precio)}</td>
                   </tr>
                 ))}

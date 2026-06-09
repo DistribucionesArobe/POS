@@ -8,6 +8,9 @@ class ConceptoVentaIn(BaseModel):
     cantidad: float = Field(gt=0)
     precio_unitario: float = Field(ge=0)
     descuento: float = 0
+    # Override opcional de la unidad para este concepto. Si viene, sobreescribe
+    # la unidad guardada en la variante (solo para este documento).
+    unidad: str | None = None
 
 
 class PagoIn(BaseModel):
