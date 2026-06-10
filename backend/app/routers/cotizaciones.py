@@ -42,6 +42,25 @@ class ConvertirIn(BaseModel):
     cliente_id: int | None = None  # si la cotizacion no tenia cliente
 
 
+class ConceptoEditIn(BaseModel):
+    """Concepto editable en una cotizacion ya guardada. Cantidad, precio, unidad
+    o descripcion pueden cambiar; variante_id es el match al catalogo."""
+    variante_id: int
+    cantidad: float = Field(gt=0)
+    precio_unitario: float = Field(ge=0)
+    descripcion: str | None = None
+    unidad: str | None = None
+    sku: str | None = None
+
+
+class CotizacionEditIn(BaseModel):
+    conceptos: list[ConceptoEditIn] | None = None
+    notas: str | None = None
+    vigencia_dias: int | None = None
+    cliente_id: int | None = None
+    nombre_libre: str | None = None
+
+
 def _folio_cot(db: Session, empresa_id: int) -> str:
     n = db.query(func.count(Cotizacion.id)).filter(Cotizacion.empresa_id == empresa_id).scalar() or 0
     return f"E{empresa_id}-COT-{n + 1:06d}"
@@ -167,6 +186,75 @@ def obtener_cotizacion(
         "estatus": c.estatus,
         "documento_venta_id": c.documento_venta_id,
         "notas": c.notas,
+    }
+
+
+@router.patch("/{cot_id}")
+def editar_cotizacion(
+    cot_id: int,
+    payload: CotizacionEditIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Edita una cotizacion ENVIADA: conceptos, notas, vigencia, cliente.
+    Recalcula totales. No se puede editar si ya fue convertida o cancelada."""
+    c = db.get(Cotizacion, cot_id)
+    if not c or c.empresa_id != empresa_id:
+        raise HTTPException(404, "Cotizacion no existe")
+    if c.estatus != "ENVIADA":
+        raise HTTPException(400, f"No se puede editar (estatus: {c.estatus})")
+
+    if payload.conceptos is not None:
+        # Recalcula totales y enriquece con datos del catalogo (sku, unidad si no vino)
+        subtotal = 0.0
+        items_nuevos = []
+        for ce in payload.conceptos:
+            v = db.get(VarianteProducto, ce.variante_id)
+            if not v:
+                raise HTTPException(400, f"Variante {ce.variante_id} no existe")
+            prod = db.get(Producto, v.producto_id)
+            if prod.empresa_id != empresa_id:
+                raise HTTPException(403, "Variante de otra empresa")
+            importe = round(ce.cantidad * ce.precio_unitario, 2)
+            subtotal += importe
+            items_nuevos.append({
+                "variante_id": v.id,
+                "sku": ce.sku or v.sku,
+                "descripcion": ce.descripcion or f"{prod.nombre} - {v.presentacion}",
+                "unidad": ce.unidad or v.unidad,
+                "cantidad": ce.cantidad,
+                "precio_unitario": ce.precio_unitario,
+                "importe": importe,
+            })
+        c.conceptos = items_nuevos
+        c.subtotal = round(subtotal, 2)
+        c.iva = round(subtotal * IVA_TASA, 2)
+        c.total = round(subtotal + c.iva, 2)
+
+    if payload.notas is not None:
+        c.notas = payload.notas
+    if payload.vigencia_dias is not None:
+        c.vigencia_hasta = c.fecha + timedelta(days=payload.vigencia_dias)
+    if payload.cliente_id is not None:
+        if payload.cliente_id == 0:
+            c.cliente_id = None
+        else:
+            cli = db.get(Cliente, payload.cliente_id)
+            if not cli or cli.empresa_id != empresa_id:
+                raise HTTPException(400, "Cliente invalido")
+            c.cliente_id = payload.cliente_id
+    if payload.nombre_libre is not None:
+        c.nombre_libre = payload.nombre_libre or None
+
+    db.commit()
+    db.refresh(c)
+    return {
+        "ok": True,
+        "id": c.id,
+        "folio": c.folio,
+        "subtotal": float(c.subtotal),
+        "iva": float(c.iva),
+        "total": float(c.total),
     }
 
 

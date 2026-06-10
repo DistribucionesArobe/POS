@@ -28,6 +28,7 @@ const BADGE: Record<string, string> = {
 export default function Cotizaciones() {
   const [cots, setCots] = useState<Cot[]>([]);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [editando, setEditando] = useState<number | null>(null);
 
   async function cargar() {
     const r = await api.get("/api/cotizaciones");
@@ -166,6 +167,8 @@ export default function Cotizaciones() {
                     onClick={() => mandarWhatsApp(c)}>📱 WhatsApp</button>
                   {c.estatus === "ENVIADA" && (
                     <>
+                      <button className="btn-icon" onClick={() => setEditando(c.id)}
+                        title="Editar conceptos">✎ Editar</button>
                       <button className="btn btn-sm" onClick={() => convertir(c, "TICKET")}>→ Ticket</button>
                       <button className="btn btn-sm" onClick={() => convertir(c, "FACTURA")}>→ Factura</button>
                       <button className="btn-icon" style={{ color: "var(--color-danger)" }}
@@ -188,6 +191,14 @@ export default function Cotizaciones() {
           </tbody>
         </table>
       </div>
+
+      {editando !== null && (
+        <EditarCotizacionModal
+          cotId={editando}
+          onClose={() => setEditando(null)}
+          onSaved={() => { setEditando(null); cargar(); }}
+        />
+      )}
     </Layout>
   );
 }
@@ -364,6 +375,245 @@ function CotizacionForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
         <button className="btn" disabled={busy} onClick={guardar}>{busy ? "Guardando..." : "Guardar cotización"}</button>
         <button className="btn-icon" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Modal de edición de cotización ya guardada =====
+
+type ConceptoEdit = {
+  variante_id: number;
+  sku: string;
+  descripcion: string;
+  unidad: string;
+  cantidad: number;
+  precio_unitario: number;
+};
+
+function EditarCotizacionModal({ cotId, onClose, onSaved }: {
+  cotId: number; onClose: () => void; onSaved: () => void;
+}) {
+  const [items, setItems] = useState<ConceptoEdit[]>([]);
+  const [notas, setNotas] = useState<string>("");
+  const [folio, setFolio] = useState<string>("");
+  const [cargando, setCargando] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get(`/api/cotizaciones/${cotId}`);
+        setItems((r.data.conceptos || []).map((c: any) => ({
+          variante_id: c.variante_id,
+          sku: c.sku || "",
+          descripcion: c.descripcion || "",
+          unidad: c.unidad || "",
+          cantidad: c.cantidad,
+          precio_unitario: c.precio_unitario,
+        })));
+        setNotas(r.data.notas || "");
+        setFolio(r.data.folio || "");
+      } catch (err: any) {
+        alert("Error al cargar: " + (err.response?.data?.detail || err.message));
+        onClose();
+      } finally {
+        setCargando(false);
+      }
+    })();
+  }, [cotId]);
+
+  function cambiarItem(idx: number, patch: Partial<ConceptoEdit>) {
+    const copy = [...items];
+    copy[idx] = { ...copy[idx], ...patch };
+    setItems(copy);
+  }
+
+  function eliminarItem(idx: number) {
+    if (!confirm("¿Quitar este concepto de la cotización?")) return;
+    setItems(items.filter((_, i) => i !== idx));
+  }
+
+  const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio_unitario, 0);
+  const iva = subtotal * 0.16;
+  const total = subtotal + iva;
+
+  async function guardar() {
+    if (items.length === 0) return alert("La cotización necesita al menos un concepto");
+    setBusy(true);
+    try {
+      await api.patch(`/api/cotizaciones/${cotId}`, {
+        conceptos: items.map((i) => ({
+          variante_id: i.variante_id,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio_unitario,
+          unidad: i.unidad || undefined,
+          descripcion: i.descripcion || undefined,
+          sku: i.sku || undefined,
+        })),
+        notas: notas || null,
+      });
+      onSaved();
+    } catch (err: any) {
+      alert("Error al guardar: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, width: "95%", maxWidth: 1000,
+        maxHeight: "95vh", overflow: "auto",
+      }}>
+        <div style={{
+          background: "#0f172a", color: "white", padding: "14px 20px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div>
+            <strong style={{ fontSize: 16 }}>✎ Editar cotización</strong>
+            <div style={{ fontSize: 11, opacity: 0.8 }}>{folio}</div>
+          </div>
+          <button onClick={onClose} style={{
+            background: "transparent", border: 0, color: "white", fontSize: 22, cursor: "pointer",
+          }}>×</button>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          {cargando ? (
+            <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>Cargando...</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 700, letterSpacing: "0.05em" }}>
+                CONCEPTOS ({items.length})
+              </div>
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "#f3f4f6" }}>
+                    <th style={{ padding: "6px 8px", textAlign: "left" }}>Descripción</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right", width: 70 }}>Cant</th>
+                    <th style={{ padding: "6px 8px", textAlign: "left", width: 100 }}>Unidad</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right", width: 110 }}>Precio</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right", width: 110 }}>Importe</th>
+                    <th style={{ width: 30 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "6px 8px" }}>
+                        <input type="text" value={it.descripcion}
+                          onChange={(e) => cambiarItem(i, { descripcion: e.target.value })}
+                          style={{
+                            width: "100%", padding: "4px 6px", fontSize: 12,
+                            border: "1px solid #cbd5e1", borderRadius: 4,
+                          }} />
+                        <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU {it.sku}</div>
+                      </td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                        <input type="number" min="0.01" step="0.01" value={it.cantidad}
+                          onChange={(e) => cambiarItem(i, { cantidad: +e.target.value })}
+                          style={{
+                            width: 60, padding: "4px 6px", fontSize: 12, fontWeight: 600,
+                            textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 4,
+                          }} />
+                      </td>
+                      <td style={{ padding: "6px 8px" }}>
+                        <input type="text" value={it.unidad} list={`unid-edit-${i}`}
+                          placeholder="Pieza"
+                          onChange={(e) => cambiarItem(i, { unidad: e.target.value })}
+                          style={{
+                            width: 85, padding: "4px 6px", fontSize: 12,
+                            border: "1px solid #cbd5e1", borderRadius: 4,
+                          }} />
+                        <datalist id={`unid-edit-${i}`}>
+                          <option value="Pieza" />
+                          <option value="Kg" />
+                          <option value="Kit" />
+                          <option value="Paquete" />
+                          <option value="Caja" />
+                          <option value="Litro" />
+                          <option value="Metro" />
+                          <option value="m2" />
+                          <option value="m3" />
+                          <option value="Servicio" />
+                          <option value="Hora" />
+                          <option value="Galón" />
+                          <option value="Tonelada" />
+                        </datalist>
+                      </td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                        <input type="number" min="0" step="0.01" value={it.precio_unitario}
+                          onChange={(e) => cambiarItem(i, { precio_unitario: +e.target.value })}
+                          style={{
+                            width: 90, padding: "4px 6px", fontSize: 12,
+                            textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 4,
+                          }} />
+                      </td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700 }}>
+                        {fmt(it.cantidad * it.precio_unitario)}
+                      </td>
+                      <td style={{ padding: "6px 8px" }}>
+                        <button className="btn-icon" onClick={() => eliminarItem(i)}
+                          title="Quitar este renglón"
+                          style={{ color: "var(--color-danger)" }}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div style={{ marginTop: 16 }}>
+                <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Notas</label>
+                <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)}
+                  placeholder="Notas internas de la cotización" />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                <div style={{ minWidth: 280, padding: 12, background: "#0f172a", color: "white", borderRadius: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                    <span style={{ opacity: 0.8 }}>Subtotal</span><span>{fmt(subtotal)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                    <span style={{ opacity: 0.8 }}>IVA 16%</span><span>{fmt(iva)}</span>
+                  </div>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", fontSize: 22, fontWeight: 800,
+                    marginTop: 6, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.3)",
+                  }}>
+                    <span>TOTAL</span><span>{fmt(total)}</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{
+          padding: "14px 20px", borderTop: "1px solid #e5e7eb",
+          display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center",
+        }}>
+          <button onClick={onClose} disabled={busy}
+            style={{
+              background: "transparent", border: "1px solid #cbd5e1",
+              padding: "10px 18px", borderRadius: 6, fontSize: 14, cursor: "pointer", color: "#475569",
+            }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={busy || cargando}
+            style={{
+              background: busy ? "#94a3b8" : "#10b981", color: "white",
+              border: 0, padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 700,
+              cursor: busy ? "wait" : "pointer",
+            }}>
+            {busy ? "Guardando..." : "✓ Guardar cambios"}
+          </button>
+        </div>
       </div>
     </div>
   );
