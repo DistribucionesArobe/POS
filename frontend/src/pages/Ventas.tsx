@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
+import ClientePicker from "../components/ClientePicker";
 
 type CfdiInfo = {
   cfdi_id: number; uuid: string; serie: string; folio: string;
@@ -40,6 +41,9 @@ export default function Ventas() {
   const [cancelandoCfdi, setCancelandoCfdi] = useState<CfdiInfo | null>(null);
   const [motivoCancel, setMotivoCancel] = useState("02");
   const [uuidSustituto, setUuidSustituto] = useState("");
+
+  // Modal de cambiar cliente de una venta
+  const [cambiandoClienteVenta, setCambiandoClienteVenta] = useState<VentaT | null>(null);
 
   // Modal de devolucion
   const [devolviendoFactura, setDevolviendoFactura] = useState<VentaT | null>(null);
@@ -123,6 +127,19 @@ export default function Ventas() {
   }
   function convertirUna(v: VentaT) {
     nav(`/convertir-remisiones?ids=${v.id}`);
+  }
+
+  async function cambiarClienteVenta(documento_id: number, nuevo_cliente_id: number) {
+    try {
+      const r = await api.patch(`/api/ventas/${documento_id}/cliente`, {
+        cliente_id: nuevo_cliente_id,
+      });
+      alert(`Cliente actualizado a ${r.data.cliente_nombre} (RFC ${r.data.cliente_rfc}).\nAhora puedes timbrar la factura.`);
+      setCambiandoClienteVenta(null);
+      cargar();
+    } catch (err: any) {
+      alert("Error al cambiar cliente: " + (err.response?.data?.detail || err.message));
+    }
   }
 
   async function timbrar(documento_id: number) {
@@ -450,10 +467,17 @@ export default function Ventas() {
                       </button>
                     )}
                     {isFactura && !timbrada && !v.cfdi?.cancelado && (
-                      <button className="btn btn-sm" disabled={busy === v.id}
-                        onClick={() => timbrar(v.id)}>
-                        {busy === v.id ? "..." : "Timbrar"}
-                      </button>
+                      <>
+                        <button className="btn btn-sm" disabled={busy === v.id}
+                          onClick={() => timbrar(v.id)}>
+                          {busy === v.id ? "..." : "Timbrar"}
+                        </button>
+                        <button className="btn-icon"
+                          title="Cambiar cliente receptor antes de timbrar"
+                          onClick={() => setCambiandoClienteVenta(v)}>
+                          ✎ Cliente
+                        </button>
+                      </>
                     )}
                     {timbrada && v.cfdi && (
                       <>
@@ -518,6 +542,14 @@ export default function Ventas() {
           factura={devolviendoFactura}
           onClose={() => setDevolviendoFactura(null)}
           onSuccess={() => { setDevolviendoFactura(null); cargar(); }}
+        />
+      )}
+
+      {cambiandoClienteVenta && (
+        <ClientePicker
+          requiereRfc={true}
+          onClose={() => setCambiandoClienteVenta(null)}
+          onSelect={(c) => cambiarClienteVenta(cambiandoClienteVenta.id, c.id)}
         />
       )}
     </Layout>

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import (
     DocumentoVenta, ConceptoVenta, Cliente, Empresa, Pago,
-    CuentaPorCobrar, VarianteProducto, Producto,
+    CuentaPorCobrar, VarianteProducto, Producto, Cfdi,
 )
 from app.models.venta import TipoDocumento, EstatusDocumento, MetodoPagoSAT, FormaPagoSAT
 from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut, DevolucionIn
@@ -20,6 +20,59 @@ from app.utils.folios import siguiente_folio
 router = APIRouter()
 
 IVA_TASA = 0.16
+
+
+class CambiarClienteIn(BaseModel):
+    cliente_id: int
+
+
+@router.patch("/{documento_id}/cliente")
+def cambiar_cliente_venta(
+    documento_id: int,
+    payload: CambiarClienteIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Cambia el cliente (receptor) de una FACTURA que aun NO se ha timbrado.
+    Util cuando el cobro se hizo al cliente equivocado y Facturama rechazo el timbre.
+    Bloqueado si ya hay CFDI vigente (no cancelado)."""
+    doc = db.get(DocumentoVenta, documento_id)
+    if not doc:
+        raise HTTPException(404, "Venta no existe")
+    if doc.empresa_id != empresa_id:
+        raise HTTPException(403, "Venta de otra empresa")
+    if doc.tipo != "FACTURA":
+        raise HTTPException(400, "Solo se puede cambiar cliente en FACTURAS")
+
+    # Verifica que no haya CFDI vigente
+    cfdi = db.query(Cfdi).filter(Cfdi.documento_venta_id == doc.id).first()
+    if cfdi and not cfdi.cancelado:
+        raise HTTPException(400, "No se puede cambiar cliente: la factura ya tiene CFDI timbrado")
+
+    # Verifica que el cliente nuevo exista y sea de la misma empresa
+    nuevo = db.get(Cliente, payload.cliente_id)
+    if not nuevo:
+        raise HTTPException(400, "Cliente no existe")
+    if nuevo.empresa_id != empresa_id:
+        raise HTTPException(403, "Cliente pertenece a otra empresa")
+    if not nuevo.rfc:
+        raise HTTPException(400, "El cliente nuevo debe tener RFC para poder facturar")
+
+    doc.cliente_id = payload.cliente_id
+
+    # Si tenia CxC asociada (PPD), tambien hay que moverla al nuevo cliente
+    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.documento_id == doc.id).first()
+    if cxc:
+        cxc.cliente_id = payload.cliente_id
+
+    db.commit()
+    return {
+        "ok": True,
+        "documento_id": doc.id,
+        "cliente_id": nuevo.id,
+        "cliente_nombre": nuevo.razon_social or nuevo.nombre,
+        "cliente_rfc": nuevo.rfc,
+    }
 
 
 @router.post("", response_model=DocumentoVentaOut)
