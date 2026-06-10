@@ -1,4 +1,6 @@
 """Endpoints CFDI 4.0 - operados con la empresa activa."""
+import logging
+import traceback
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -7,6 +9,8 @@ from app.db import get_db
 from app.services import cfdi_service
 from app.models import Cfdi, DocumentoVenta
 from app.services.security import get_active_empresa_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -21,6 +25,13 @@ def timbrar_documento(
         return cfdi_service.timbrar(db, documento_id, empresa_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        # Captura cualquier otra excepcion para que NO se vea como CORS error
+        # en el navegador. Logea el traceback completo para diagnostico.
+        logger.exception("Error inesperado al timbrar documento %s", documento_id)
+        tb = traceback.format_exc().splitlines()[-3:]
+        detalle = f"{type(e).__name__}: {e}"
+        raise HTTPException(500, f"Error interno al timbrar: {detalle} | {' | '.join(tb)}")
 
 
 @router.post("/cancelar/{cfdi_id}")
