@@ -67,11 +67,17 @@ def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
     db.commit()
     db.refresh(cfdi)
 
-    # Envio automatico via SMTP propio (descarga XML+PDF de Facturama y los adjunta)
+    # Envio automatico via SMTP propio (descarga XML, genera PDF propio y los adjunta)
     if facturama_id and cliente.correo and email_service.smtp_configurado():
         try:
             xml_bytes = client.descargar_xml(facturama_id)
-            pdf_bytes = client.descargar_pdf(facturama_id)
+            # PDF propio con el formato del sistema (footer correcto, etc.)
+            try:
+                from app.services import cfdi_pdf_service
+                pdf_bytes = cfdi_pdf_service.generar_pdf_cfdi(db, cfdi.id, empresa_id, xml_bytes)
+            except Exception:
+                # Fallback al PDF de Facturama si nuestro motor falla
+                pdf_bytes = client.descargar_pdf(facturama_id)
             ok, err = email_service.enviar_cfdi(
                 destinatario=cliente.correo,
                 nombre_destinatario=cliente.razon_social or cliente.nombre,
@@ -307,6 +313,8 @@ def reenviar_correo(db: Session, cfdi_id: int, email: str | None, empresa_id: in
 
 
 def descargar_pdf_cfdi(db: Session, cfdi_id: int, empresa_id: int) -> bytes:
+    """Genera PDF de CFDI usando nuestro motor propio.
+    Si algo falla cae al PDF de Facturama como fallback."""
     cfdi = db.get(Cfdi, cfdi_id)
     if not cfdi:
         raise ValueError("CFDI no existe")
@@ -315,7 +323,16 @@ def descargar_pdf_cfdi(db: Session, cfdi_id: int, empresa_id: int) -> bytes:
         raise ValueError("CFDI de otra empresa")
     empresa = db.get(Empresa, empresa_id)
     facturama_id = (cfdi.xml_url or "").replace("facturama://", "").split("/")[0]
-    return FacturamaClient(empresa).descargar_pdf(facturama_id)
+    client = FacturamaClient(empresa)
+    try:
+        xml_bytes = client.descargar_xml(facturama_id)
+        from app.services import cfdi_pdf_service
+        return cfdi_pdf_service.generar_pdf_cfdi(db, cfdi_id, empresa_id, xml_bytes)
+    except Exception as e:
+        # Fallback al PDF de Facturama si nuestro motor falla
+        import logging
+        logging.getLogger(__name__).exception("PDF propio fallo, cayendo a Facturama: %s", e)
+        return client.descargar_pdf(facturama_id)
 
 
 def emitir_complemento_pago(db: Session, abono_id: int, empresa_id: int) -> dict:
