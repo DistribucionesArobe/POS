@@ -678,8 +678,20 @@ function CapturaCxPModal({ onClose, onSaved, tipoCambioDefault }: {
 }) {
   const [proveedorNombre, setProveedorNombre] = useState("");
   const [folio, setFolio] = useState("");
-  const [fechaRecep, setFechaRecep] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [fechaVence, setFechaVence] = useState<string>("");
+  // Helper: agrega N dias a una fecha ISO yyyy-mm-dd y devuelve la nueva ISO
+  function sumarDiasIso(iso: string, dias: number): string {
+    if (!iso) return "";
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + dias);
+    return d.toISOString().slice(0, 10);
+  }
+  const _hoy = new Date().toISOString().slice(0, 10);
+  const [fechaRecep, setFechaRecep] = useState<string>(_hoy);
+  // Default: 30 dias despues de la recepcion (editable)
+  const [fechaVence, setFechaVence] = useState<string>(sumarDiasIso(_hoy, 30));
+  // Flag para saber si el user toco el vencimiento a mano. Si no lo toco, se
+  // auto-actualiza cuando cambia la recepcion.
+  const [vencEditadoManual, setVencEditadoManual] = useState(false);
   const [monto, setMonto] = useState(0);
   const [saldado, setSaldado] = useState(0);
   const [obs, setObs] = useState("");
@@ -736,12 +748,26 @@ function CapturaCxPModal({ onClose, onSaved, tipoCambioDefault }: {
           <div>
             <label>Fecha llegada</label>
             <input className="input" type="date" value={fechaRecep}
-              onChange={(e) => setFechaRecep(e.target.value)} />
+              onChange={(e) => {
+                const nueva = e.target.value;
+                setFechaRecep(nueva);
+                // Si el usuario NO ha tocado el vencimiento a mano,
+                // auto-recalcula a +30 dias cuando mueve la recepcion
+                if (!vencEditadoManual && nueva) {
+                  setFechaVence(sumarDiasIso(nueva, 30));
+                }
+              }} />
           </div>
           <div>
             <label>Fecha vence</label>
             <input className="input" type="date" value={fechaVence}
-              onChange={(e) => setFechaVence(e.target.value)} />
+              onChange={(e) => {
+                setFechaVence(e.target.value);
+                setVencEditadoManual(true);
+              }} />
+            <small style={{ color: "#94a3b8", fontSize: 10 }}>
+              Default +30 dias de la recepcion. Editable manualmente.
+            </small>
           </div>
           <div>
             <label>Empresa (proveedor) *</label>

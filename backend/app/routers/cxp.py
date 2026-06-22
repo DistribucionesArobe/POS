@@ -185,13 +185,23 @@ def crear_cxp_manual(
         raise HTTPException(400, "Saldado no puede exceder el monto original")
 
     saldo = round(monto_mxn - saldado_mxn, 2)
+    # Fecha de recepcion: la del payload o hoy
+    fecha_recep = (
+        datetime.combine(payload.fecha_recepcion, datetime.min.time())
+        if payload.fecha_recepcion else datetime.utcnow()
+    )
+    # Vencimiento: si no se mando, default a +30 dias de la recepcion (editable)
+    if payload.fecha_vencimiento:
+        fecha_venc = datetime.combine(payload.fecha_vencimiento, datetime.min.time())
+    else:
+        fecha_venc = fecha_recep + timedelta(days=30)
     cxp = CuentaPorPagar(
         empresa_id=empresa_id,
         proveedor_id=prov.id,
         compra_id=None,
         folio_factura=payload.folio_factura,
-        fecha_recepcion=datetime.combine(payload.fecha_recepcion, datetime.min.time()) if payload.fecha_recepcion else datetime.utcnow(),
-        fecha_vencimiento=datetime.combine(payload.fecha_vencimiento, datetime.min.time()) if payload.fecha_vencimiento else None,
+        fecha_recepcion=fecha_recep,
+        fecha_vencimiento=fecha_venc,
         observaciones=payload.observaciones,
         moneda=moneda,
         tipo_cambio=payload.tipo_cambio if moneda == "USD" else None,
@@ -229,10 +239,19 @@ def actualizar_cxp_manual(
         cxp.folio_factura = payload["folio_factura"] or None
     if "observaciones" in payload:
         cxp.observaciones = payload["observaciones"] or None
-    if "fecha_vencimiento" in payload and payload["fecha_vencimiento"]:
+    # Detectar si vencimiento explicitamente viene en el payload (aunque sea null)
+    venc_in_payload = "fecha_vencimiento" in payload
+    recep_in_payload = "fecha_recepcion" in payload
+
+    if venc_in_payload and payload["fecha_vencimiento"]:
         cxp.fecha_vencimiento = datetime.fromisoformat(payload["fecha_vencimiento"])
-    if "fecha_recepcion" in payload and payload["fecha_recepcion"]:
-        cxp.fecha_recepcion = datetime.fromisoformat(payload["fecha_recepcion"])
+    if recep_in_payload and payload["fecha_recepcion"]:
+        nueva_recep = datetime.fromisoformat(payload["fecha_recepcion"])
+        cxp.fecha_recepcion = nueva_recep
+        # Si el usuario cambio la recepcion pero NO mando vencimiento en este PATCH,
+        # auto-mover vencimiento a recepcion + 30 dias (puede ser nuevo o reajuste).
+        if not venc_in_payload:
+            cxp.fecha_vencimiento = nueva_recep + timedelta(days=30)
     if "saldado" in payload:
         saldado = float(payload["saldado"])
         if saldado > float(cxp.monto_original):
