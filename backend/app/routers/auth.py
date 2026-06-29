@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -95,3 +96,50 @@ def me(user: Usuario = Depends(get_current_user), db: Session = Depends(get_db))
         "empresa_id": user.empresa_id,
         "empresas": [{"id": e.id, "nombre": e.nombre, "rfc": e.rfc} for e in empresas],
     }
+
+
+class CambiarPasswordIn(BaseModel):
+    password_actual: str
+    password_nuevo: str
+
+
+@router.post("/cambiar-password")
+def cambiar_password(
+    payload: CambiarPasswordIn,
+    user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permite al usuario logueado cambiar su propia contrasena."""
+    # Validar password actual
+    if not verify_password(payload.password_actual, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La contrasena actual es incorrecta")
+    # Validar minimo de longitud del nuevo password
+    nuevo = (payload.password_nuevo or "").strip()
+    if len(nuevo) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La nueva contrasena debe tener al menos 6 caracteres")
+    if nuevo == payload.password_actual:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La nueva contrasena debe ser distinta a la actual")
+    user.password_hash = hash_password(nuevo)
+    db.commit()
+    return {"ok": True, "mensaje": "Contrasena actualizada"}
+
+
+@router.post("/admin/resetear-password/{usuario_id}")
+def admin_resetear_password(
+    usuario_id: int,
+    payload: dict,
+    user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Solo super_admin: resetea la contrasena de cualquier usuario."""
+    if not user.super_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo super admin")
+    nuevo = (payload.get("password_nuevo") or "").strip()
+    if len(nuevo) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Minimo 6 caracteres")
+    target = db.get(Usuario, usuario_id)
+    if not target:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuario no existe")
+    target.password_hash = hash_password(nuevo)
+    db.commit()
+    return {"ok": True, "email": target.email}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 
@@ -12,6 +12,7 @@ const Icon = {
   building: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 21h18"/><path d="M5 21V5l7-2 7 2v16"/><path d="M9 9h.01M9 12h.01M9 15h.01M9 18h.01M13 9h.01M13 12h.01M13 15h.01M13 18h.01"/></svg>,
   logout: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   chevron: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
+  key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
 };
 
 const items = [
@@ -50,6 +51,7 @@ export default function Sidebar() {
   } catch {}
 
   const [showEmpresaMenu, setShowEmpresaMenu] = useState(false);
+  const [mostrarCambioPwd, setMostrarCambioPwd] = useState(false);
   const puedeCambiar = empresas.length > 1;
 
   async function cambiarEmpresa(id: number) {
@@ -168,11 +170,117 @@ export default function Sidebar() {
           <div className="sidebar-user-name">{nombre}</div>
           <div className="sidebar-user-rol">{superAdmin ? "SUPER ADMIN" : rol.toUpperCase()}</div>
         </div>
+        <button className="sidebar-link" onClick={() => setMostrarCambioPwd(true)}>
+          {Icon.key}
+          <span>Cambiar contrasena</span>
+        </button>
         <button className="sidebar-link" onClick={logout}>
           {Icon.logout}
           <span>Cerrar sesion</span>
         </button>
       </div>
+      {mostrarCambioPwd && (
+        <CambiarPasswordModal onClose={() => setMostrarCambioPwd(false)} />
+      )}
     </aside>
   );
 }
+
+
+function CambiarPasswordModal({ onClose }: { onClose: () => void }) {
+  const [actual, setActual] = useState("");
+  const [nueva, setNueva] = useState("");
+  const [confirmar, setConfirmar] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  async function guardar() {
+    setError(null);
+    if (!actual) return setError("Captura tu contrasena actual");
+    if (nueva.length < 6) return setError("La nueva contrasena debe tener al menos 6 caracteres");
+    if (nueva !== confirmar) return setError("Las contrasenas nuevas no coinciden");
+    if (nueva === actual) return setError("La nueva contrasena debe ser distinta a la actual");
+    setBusy(true);
+    try {
+      await api.post("/api/auth/cambiar-password", {
+        password_actual: actual,
+        password_nuevo: nueva,
+      });
+      setOk(true);
+      setTimeout(onClose, 1500);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1500,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 24,
+        width: "90%", maxWidth: 420, color: "#0f172a",
+      }}>
+        <h3 style={{ margin: "0 0 4px" }}>Cambiar contrasena</h3>
+        <p style={{ fontSize: 12, color: "#64748b", marginTop: 0 }}>
+          Minimo 6 caracteres. Te recomendamos mezclar letras, numeros y un simbolo.
+        </p>
+        {ok ? (
+          <div style={{ padding: 16, background: "#d1fae5", color: "#065f46", borderRadius: 6, textAlign: "center", fontWeight: 600 }}>
+            Contrasena actualizada
+          </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Contrasena actual</label>
+              <input type="password" autoFocus value={actual} onChange={(e) => setActual(e.target.value)}
+                style={inputStyle} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Nueva contrasena</label>
+              <input type="password" value={nueva} onChange={(e) => setNueva(e.target.value)}
+                style={inputStyle} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Confirma la nueva contrasena</label>
+              <input type="password" value={confirmar} onChange={(e) => setConfirmar(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && guardar()}
+                style={inputStyle} />
+            </div>
+            {error && (
+              <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 4, fontSize: 13, marginBottom: 10 }}>
+                {error}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={guardar} disabled={busy}
+                style={{
+                  flex: 1, padding: "10px 16px", background: busy ? "#94a3b8" : "#10b981",
+                  color: "white", border: 0, borderRadius: 6, fontSize: 14, fontWeight: 600,
+                  cursor: busy ? "wait" : "pointer",
+                }}>
+                {busy ? "Guardando..." : "Cambiar contrasena"}
+              </button>
+              <button onClick={onClose} disabled={busy}
+                style={{
+                  padding: "10px 16px", background: "transparent",
+                  color: "#475569", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 14, cursor: "pointer",
+                }}>
+                Cancelar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "8px 10px", fontSize: 14,
+  border: "1px solid #cbd5e1", borderRadius: 4, marginTop: 4,
+};
