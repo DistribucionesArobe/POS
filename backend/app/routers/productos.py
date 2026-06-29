@@ -1,6 +1,7 @@
 """Productos y variantes - filtrado por empresa."""
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -501,6 +502,29 @@ def actualizar_precio(
     v.precio_mayoreo = payload.precio_mayoreo
     db.commit()
     return {"ok": True, "precio_publico": float(v.precio_publico)}
+
+
+class CostoUpdate(BaseModel):
+    costo_promedio: float = Field(ge=0)
+
+
+@router.patch("/variantes/{variante_id}/costo")
+def actualizar_costo(
+    variante_id: int, payload: CostoUpdate,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Permite editar manualmente el costo promedio de una variante.
+    El costo se sobreescribe (no se promedia con compras anteriores)."""
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+    v.costo_promedio = payload.costo_promedio
+    db.commit()
+    return {"ok": True, "costo_promedio": float(v.costo_promedio)}
 
 
 @router.patch("/{producto_id}")

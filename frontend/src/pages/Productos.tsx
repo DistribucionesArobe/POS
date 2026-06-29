@@ -48,6 +48,8 @@ export default function Productos() {
 
   // Modal de edicion full
   const [editandoVar, setEditandoVar] = useState<{ producto: ProductoT; variante: Variante } | null>(null);
+  // Edicion inline de precio/costo por doble click
+  const [editCelda, setEditCelda] = useState<{ id: number; campo: "precio" | "costo"; valor: string } | null>(null);
 
   async function cargar() {
     const r = await api.get("/api/productos", { params: { q: busqueda || undefined } });
@@ -122,6 +124,45 @@ export default function Productos() {
       precio_publico: parseFloat(nuevo),
     });
     cargar();
+  }
+
+  async function guardarCeldaPrecioCosto() {
+    if (!editCelda) return;
+    const val = parseFloat(editCelda.valor);
+    if (isNaN(val) || val < 0) {
+      setEditCelda(null);
+      return;
+    }
+    const { id, campo } = editCelda;
+    // Optimistic update local
+    setProductos((prev) =>
+      prev.map((p) => ({
+        ...p,
+        variantes: p.variantes.map((vv) =>
+          vv.id === id
+            ? (campo === "precio"
+                ? { ...vv, precio_publico: val }
+                : { ...vv, costo_promedio: val })
+            : vv
+        ),
+      }))
+    );
+    setEditCelda(null);
+    try {
+      if (campo === "precio") {
+        await api.patch(`/api/productos/variantes/${id}/precio`, {
+          precio_publico: val,
+          precio_mayoreo: null,
+        });
+      } else {
+        await api.patch(`/api/productos/variantes/${id}/costo`, {
+          costo_promedio: val,
+        });
+      }
+    } catch (err: any) {
+      alert("No se pudo guardar: " + (err.response?.data?.detail || err.message));
+      cargar();
+    }
   }
 
   async function toggleFavorito(v: Variante) {
@@ -503,8 +544,42 @@ export default function Productos() {
                               <td><code>{v.sku}</code></td>
                               <td>{v.presentacion}</td>
                               <td>{v.unidad}</td>
-                              <td style={{ textAlign: "right" }}>{fmt(v.precio_publico)}</td>
-                              <td style={{ textAlign: "right", color: "var(--color-text-muted)" }}>{fmt(v.costo_promedio)}</td>
+                              <td style={{ textAlign: "right" }}
+                                onDoubleClick={() => setEditCelda({ id: v.id, campo: "precio", valor: String(v.precio_publico) })}>
+                                {editCelda?.id === v.id && editCelda.campo === "precio" ? (
+                                  <input
+                                    type="number" step="0.01" autoFocus
+                                    value={editCelda.valor}
+                                    onChange={(e) => setEditCelda({ ...editCelda, valor: e.target.value })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") guardarCeldaPrecioCosto();
+                                      if (e.key === "Escape") setEditCelda(null);
+                                    }}
+                                    onBlur={() => guardarCeldaPrecioCosto()}
+                                    style={{ width: 90, padding: "3px 6px", fontSize: 13, textAlign: "right", border: "1px solid #0ea5e9", borderRadius: 3 }}
+                                  />
+                                ) : (
+                                  <span style={{ cursor: "pointer" }} title="Doble click para editar">{fmt(v.precio_publico)}</span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "right", color: "var(--color-text-muted)" }}
+                                onDoubleClick={() => setEditCelda({ id: v.id, campo: "costo", valor: String(v.costo_promedio) })}>
+                                {editCelda?.id === v.id && editCelda.campo === "costo" ? (
+                                  <input
+                                    type="number" step="0.01" autoFocus
+                                    value={editCelda.valor}
+                                    onChange={(e) => setEditCelda({ ...editCelda, valor: e.target.value })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") guardarCeldaPrecioCosto();
+                                      if (e.key === "Escape") setEditCelda(null);
+                                    }}
+                                    onBlur={() => guardarCeldaPrecioCosto()}
+                                    style={{ width: 90, padding: "3px 6px", fontSize: 13, textAlign: "right", border: "1px solid #0ea5e9", borderRadius: 3 }}
+                                  />
+                                ) : (
+                                  <span style={{ cursor: "pointer" }} title="Doble click para editar">{fmt(v.costo_promedio)}</span>
+                                )}
+                              </td>
                               <td style={{ textAlign: "right" }}>
                                 <span className={`badge ${v.stock_actual <= v.stock_minimo ? "badge-warning" : "badge-success"}`}>
                                   {v.stock_actual}
