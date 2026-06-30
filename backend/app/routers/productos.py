@@ -682,6 +682,94 @@ def desactivar_variante(
     return {"ok": True}
 
 
+class EliminarMasivoIn(BaseModel):
+    variante_ids: list[int]
+    # Si True: solo borra las que NO tienen historial. Las que tengan historial
+    # se quedan intactas y se reportan en la respuesta.
+    # Si False (default): borra las que pueda y desactiva el resto.
+    solo_si_sin_historial: bool = False
+
+
+@router.post("/variantes/eliminar-masivo")
+def eliminar_masivo_variantes(
+    payload: EliminarMasivoIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Elimina varias variantes a la vez. Estrategia:
+    1. Si la variante NO tiene historial (ventas/compras/movs) -> borrar permanente
+    2. Si tiene historial -> desactivar (soft delete)
+    3. Si todas las variantes de un producto se borran -> borrar producto padre
+
+    Devuelve un resumen con cuantas se borraron, desactivaron e ignoraron.
+    """
+    from app.models import ConceptoVenta, ConceptoCompra, MovimientoInventario
+
+    if not payload.variante_ids:
+        raise HTTPException(400, "Selecciona al menos una variante")
+
+    borradas = 0
+    desactivadas = 0
+    ignoradas = 0
+    productos_afectados: set[int] = set()
+    detalles: list[str] = []
+
+    for vid in payload.variante_ids:
+        v = db.get(VarianteProducto, vid)
+        if not v:
+            ignoradas += 1
+            continue
+        producto = db.get(Producto, v.producto_id)
+        if not producto or producto.empresa_id != empresa_id:
+            ignoradas += 1
+            continue
+
+        ventas = db.query(ConceptoVenta).filter(ConceptoVenta.variante_id == vid).count()
+        compras = db.query(ConceptoCompra).filter(ConceptoCompra.variante_id == vid).count()
+        movs = db.query(MovimientoInventario).filter(MovimientoInventario.variante_id == vid).count()
+        tiene_historial = (ventas + compras + movs) > 0
+
+        if not tiene_historial:
+            # Romper referencias derivada_id
+            derivadas = db.query(VarianteProducto).filter(VarianteProducto.derivada_id == vid).all()
+            for d in derivadas:
+                d.derivada_id = None
+            productos_afectados.add(v.producto_id)
+            db.delete(v)
+            borradas += 1
+        else:
+            if payload.solo_si_sin_historial:
+                ignoradas += 1
+                detalles.append(f"{v.sku}: tiene historial, no se borro")
+            else:
+                if v.activo:
+                    v.activo = False
+                    desactivadas += 1
+                else:
+                    ignoradas += 1
+
+    db.flush()
+    # Borrar productos huerfanos (sin variantes restantes)
+    productos_borrados = 0
+    for pid in productos_afectados:
+        remaining = db.query(VarianteProducto).filter(VarianteProducto.producto_id == pid).count()
+        if remaining == 0:
+            prod = db.get(Producto, pid)
+            if prod:
+                db.delete(prod)
+                productos_borrados += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "borradas_permanente": borradas,
+        "desactivadas": desactivadas,
+        "ignoradas": ignoradas,
+        "productos_borrados": productos_borrados,
+        "detalles": detalles[:20],
+    }
+
+
 @router.delete("/variantes/{variante_id}/permanente")
 def borrar_variante_permanente(
     variante_id: int,

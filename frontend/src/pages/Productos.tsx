@@ -73,6 +73,38 @@ export default function Productos() {
     setSeleccionadasMasivo(new Set());
   }
 
+  async function eliminarMasivo() {
+    const ids = Array.from(seleccionadasMasivo);
+    if (ids.length === 0) return;
+    if (!confirm(
+      `Vas a ELIMINAR ${ids.length} variante(s).\n\n` +
+      "Las que NO tengan historial se borraran permanente.\n" +
+      "Las que SI tengan historial (ventas, compras, movimientos) " +
+      "solo se desactivaran para mantener la trazabilidad fiscal.\n\n" +
+      "Si todas las variantes de un producto se borran, el producto padre tambien se elimina.\n\n" +
+      "Continuar?"
+    )) return;
+    try {
+      const r = await api.post("/api/productos/variantes/eliminar-masivo", {
+        variante_ids: ids,
+        solo_si_sin_historial: false,
+      });
+      const d = r.data;
+      let msg = `Eliminacion completada:\n` +
+        `- ${d.borradas_permanente} borradas permanente\n` +
+        `- ${d.desactivadas} desactivadas (tenian historial)\n` +
+        `- ${d.ignoradas} ignoradas`;
+      if (d.productos_borrados > 0) {
+        msg += `\n- ${d.productos_borrados} producto(s) padre borrado(s)`;
+      }
+      alert(msg);
+      limpiarSeleccion();
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   async function cargar() {
     const r = await api.get("/api/productos", { params: { q: busqueda || undefined } });
     setProductos(r.data);
@@ -697,6 +729,14 @@ export default function Productos() {
               padding: "8px 16px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
             }}>
             Ajustar % precio/costo
+          </button>
+          <button onClick={eliminarMasivo}
+            style={{
+              background: "#dc2626", color: "white", border: 0,
+              padding: "8px 16px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
+            }}
+            title="Borra permanente las que no tienen historial; desactiva las que si tienen">
+            🗑 Eliminar
           </button>
           <button onClick={limpiarSeleccion}
             style={{
