@@ -508,6 +508,71 @@ class CostoUpdate(BaseModel):
     costo_promedio: float = Field(ge=0)
 
 
+class AjusteMasivoIn(BaseModel):
+    """Ajuste masivo de precio/costo por % a una lista de variantes."""
+    variante_ids: list[int]
+    # Aplicar a precio_publico y/o costo_promedio
+    aplicar_precio: bool = False
+    aplicar_costo: bool = False
+    # Porcentaje: positivo = aumento, negativo = descuento. Ej. 10 = +10%, -5 = -5%
+    porcentaje: float = 0
+    # Redondear a peso entero (0 centavos)
+    redondear_a_entero: bool = False
+
+
+@router.post("/variantes/ajuste-masivo")
+def ajuste_masivo_variantes(
+    payload: AjusteMasivoIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Aplica un % de aumento/descuento a precio y/o costo de varias variantes.
+    Opcionalmente redondea a peso entero (centavos = 0)."""
+    if not payload.variante_ids:
+        raise HTTPException(400, "Selecciona al menos una variante")
+    if not payload.aplicar_precio and not payload.aplicar_costo:
+        raise HTTPException(400, "Marca aplicar_precio y/o aplicar_costo")
+    factor = 1 + (float(payload.porcentaje) / 100.0)
+    if factor <= 0:
+        raise HTTPException(400, "El porcentaje resulta en un valor negativo o cero")
+    variantes = (
+        db.query(VarianteProducto)
+        .filter(VarianteProducto.id.in_(payload.variante_ids))
+        .all()
+    )
+    aplicados = 0
+    for v in variantes:
+        producto = db.get(Producto, v.producto_id)
+        if not producto or producto.empresa_id != empresa_id:
+            continue  # ignora silenciosamente las de otras empresas
+        if payload.aplicar_precio:
+            nuevo = float(v.precio_publico or 0) * factor
+            if payload.redondear_a_entero:
+                nuevo = round(nuevo)
+            else:
+                nuevo = round(nuevo, 2)
+            v.precio_publico = nuevo
+        if payload.aplicar_costo:
+            nuevo = float(v.costo_promedio or 0) * factor
+            if payload.redondear_a_entero:
+                nuevo = round(nuevo)
+            else:
+                nuevo = round(nuevo, 2)
+            v.costo_promedio = nuevo
+        aplicados += 1
+    db.commit()
+    return {
+        "ok": True,
+        "variantes_actualizadas": aplicados,
+        "porcentaje": payload.porcentaje,
+        "aplicado_a": (
+            ("precio " if payload.aplicar_precio else "")
+            + ("costo" if payload.aplicar_costo else "")
+        ).strip(),
+        "redondeado": payload.redondear_a_entero,
+    }
+
+
 @router.patch("/variantes/{variante_id}/costo")
 def actualizar_costo(
     variante_id: int, payload: CostoUpdate,

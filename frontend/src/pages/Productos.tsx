@@ -50,6 +50,28 @@ export default function Productos() {
   const [editandoVar, setEditandoVar] = useState<{ producto: ProductoT; variante: Variante } | null>(null);
   // Edicion inline de precio/costo por doble click
   const [editCelda, setEditCelda] = useState<{ id: number; campo: "precio" | "costo"; valor: string } | null>(null);
+  // Seleccion masiva de variantes para ajuste de precio/costo
+  const [seleccionadasMasivo, setSeleccionadasMasivo] = useState<Set<number>>(new Set());
+  const [mostrarAjusteMasivo, setMostrarAjusteMasivo] = useState(false);
+
+  function toggleVariante(id: number) {
+    const s = new Set(seleccionadasMasivo);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    setSeleccionadasMasivo(s);
+  }
+  function toggleFamiliaMasivo(prods: ProductoT[], allChecked: boolean) {
+    const s = new Set(seleccionadasMasivo);
+    for (const p of prods) {
+      for (const v of p.variantes) {
+        if (allChecked) s.delete(v.id);
+        else s.add(v.id);
+      }
+    }
+    setSeleccionadasMasivo(s);
+  }
+  function limpiarSeleccion() {
+    setSeleccionadasMasivo(new Set());
+  }
 
   async function cargar() {
     const r = await api.get("/api/productos", { params: { q: busqueda || undefined } });
@@ -483,6 +505,9 @@ export default function Productos() {
             const abierta = !!familiasAbiertas[nombreFamilia];
             const totalVars = prods.reduce((a, p) => a + p.variantes.length, 0);
             const totalStock = prods.reduce((a, p) => a + p.variantes.reduce((b, v) => b + v.stock_actual, 0), 0);
+            const varIdsFamilia = prods.flatMap((p) => p.variantes.map((v) => v.id));
+            const familiaAllChecked = varIdsFamilia.length > 0 && varIdsFamilia.every((id) => seleccionadasMasivo.has(id));
+            const familiaAnyChecked = varIdsFamilia.some((id) => seleccionadasMasivo.has(id));
             return (
               <div key={nombreFamilia} style={{ borderBottom: "1px solid var(--color-border)" }}>
                 <div onClick={() => toggleFamilia(nombreFamilia)}
@@ -493,6 +518,13 @@ export default function Productos() {
                     transition: "background 0.15s",
                   }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="checkbox"
+                      checked={familiaAllChecked}
+                      ref={(el) => { if (el) el.indeterminate = !familiaAllChecked && familiaAnyChecked; }}
+                      onChange={(e) => { e.stopPropagation(); }}
+                      onClick={(e) => { e.stopPropagation(); toggleFamiliaMasivo(prods, familiaAllChecked); }}
+                      title="Seleccionar todas las variantes de esta familia"
+                      style={{ width: 16, height: 16, cursor: "pointer" }} />
                     <span style={{
                       display: "inline-block", width: 16, transform: abierta ? "rotate(90deg)" : "rotate(0deg)",
                       transition: "transform 0.15s",
@@ -510,6 +542,13 @@ export default function Productos() {
                     <table>
                       <thead>
                         <tr>
+                          <th style={{ width: 32 }} title="Seleccionar para ajuste masivo">
+                            <input type="checkbox"
+                              checked={familiaAllChecked}
+                              ref={(el) => { if (el) el.indeterminate = !familiaAllChecked && familiaAnyChecked; }}
+                              onChange={() => toggleFamiliaMasivo(prods, familiaAllChecked)}
+                              style={{ cursor: "pointer" }} />
+                          </th>
                           <th style={{ width: 32 }} title="Favorito en Caja">⭐</th>
                           <th>Producto</th><th>SKU</th><th>Presentacion</th>
                           <th>Unidad</th>
@@ -522,7 +561,16 @@ export default function Productos() {
                       <tbody>
                         {prods.flatMap((p) => [
                           ...p.variantes.map((v) => (
-                            <tr key={v.id} style={{ opacity: v.activo ? 1 : 0.4 }}>
+                            <tr key={v.id} style={{
+                              opacity: v.activo ? 1 : 0.4,
+                              background: seleccionadasMasivo.has(v.id) ? "#dbeafe" : undefined,
+                            }}>
+                              <td style={{ textAlign: "center" }}>
+                                <input type="checkbox"
+                                  checked={seleccionadasMasivo.has(v.id)}
+                                  onChange={() => toggleVariante(v.id)}
+                                  style={{ cursor: "pointer" }} />
+                              </td>
                               <td style={{ textAlign: "center" }}>
                                 <button
                                   className="btn-icon"
@@ -596,7 +644,7 @@ export default function Productos() {
                             </tr>
                           )),
                           <tr key={`add-${p.id}`} style={{ background: "#fafbfc" }}>
-                            <td colSpan={9}>
+                            <td colSpan={10}>
                               {varProductoId === p.id ? (
                                 <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 4 }}>
                                   <input className="input" placeholder="SKU" value={nuevaVar.sku} style={{ width: 160 }} onChange={(e) => setNuevaVar({ ...nuevaVar, sku: e.target.value })} />
@@ -631,6 +679,44 @@ export default function Productos() {
           variante={editandoVar.variante}
           onClose={() => setEditandoVar(null)}
           onSaved={() => { setEditandoVar(null); cargar(); }}
+        />
+      )}
+
+      {/* Barra flotante de seleccion masiva */}
+      {seleccionadasMasivo.size > 0 && (
+        <div style={{
+          position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)",
+          background: "#0f172a", color: "white", padding: "10px 16px", borderRadius: 8,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.25)", zIndex: 800,
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <strong>{seleccionadasMasivo.size}</strong> variante(s) seleccionada(s)
+          <button onClick={() => setMostrarAjusteMasivo(true)}
+            style={{
+              background: "#10b981", color: "white", border: 0,
+              padding: "8px 16px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
+            }}>
+            Ajustar % precio/costo
+          </button>
+          <button onClick={limpiarSeleccion}
+            style={{
+              background: "transparent", color: "white", border: "1px solid #475569",
+              padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+            }}>
+            Limpiar
+          </button>
+        </div>
+      )}
+
+      {mostrarAjusteMasivo && (
+        <AjusteMasivoModal
+          variantesIds={Array.from(seleccionadasMasivo)}
+          onClose={() => setMostrarAjusteMasivo(false)}
+          onSaved={() => {
+            setMostrarAjusteMasivo(false);
+            limpiarSeleccion();
+            cargar();
+          }}
         />
       )}
     </Layout>
@@ -772,6 +858,157 @@ function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
             {busy ? "Guardando..." : "Guardar cambios"}
           </button>
           <button className="btn-icon" onClick={onClose}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Modal de ajuste masivo de precio/costo por % =====
+
+function AjusteMasivoModal({ variantesIds, onClose, onSaved }: {
+  variantesIds: number[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [direccion, setDireccion] = useState<"aumentar" | "reducir">("aumentar");
+  const [pct, setPct] = useState<number>(5);
+  const [aplicarPrecio, setAplicarPrecio] = useState(true);
+  const [aplicarCosto, setAplicarCosto] = useState(false);
+  const [redondear, setRedondear] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function aplicar() {
+    setError(null);
+    if (pct <= 0) return setError("El porcentaje debe ser mayor a 0");
+    if (!aplicarPrecio && !aplicarCosto) return setError("Marca al menos uno: precio o costo");
+    const porcentaje = direccion === "aumentar" ? pct : -pct;
+    if (!confirm(
+      `Vas a ${direccion} ${pct}% en ${variantesIds.length} variante(s)\n` +
+      `Aplica a: ${aplicarPrecio ? "PRECIO " : ""}${aplicarCosto ? "COSTO" : ""}\n` +
+      `${redondear ? "Redondeo a peso entero (0 centavos)" : "Sin redondear"}\n\n` +
+      "Esta accion no se puede deshacer. Continuar?"
+    )) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/api/productos/variantes/ajuste-masivo", {
+        variante_ids: variantesIds,
+        aplicar_precio: aplicarPrecio,
+        aplicar_costo: aplicarCosto,
+        porcentaje,
+        redondear_a_entero: redondear,
+      });
+      alert(`Actualizadas: ${r.data.variantes_actualizadas} variante(s)`);
+      onSaved();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 24,
+        width: "92%", maxWidth: 460, color: "#0f172a",
+      }}>
+        <h3 style={{ margin: "0 0 4px" }}>Ajuste masivo de precios/costos</h3>
+        <p style={{ fontSize: 12, color: "#64748b", marginTop: 0 }}>
+          <strong>{variantesIds.length}</strong> variante(s) seleccionada(s)
+        </p>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Direccion</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <label style={{
+              flex: 1, padding: "10px 14px", border: "1px solid #cbd5e1", borderRadius: 6,
+              textAlign: "center", cursor: "pointer", fontWeight: 600,
+              background: direccion === "aumentar" ? "#dcfce7" : "white",
+              borderColor: direccion === "aumentar" ? "#10b981" : "#cbd5e1",
+            }}>
+              <input type="radio" checked={direccion === "aumentar"} onChange={() => setDireccion("aumentar")}
+                style={{ marginRight: 6 }} />
+              ⬆ Aumentar
+            </label>
+            <label style={{
+              flex: 1, padding: "10px 14px", border: "1px solid #cbd5e1", borderRadius: 6,
+              textAlign: "center", cursor: "pointer", fontWeight: 600,
+              background: direccion === "reducir" ? "#fee2e2" : "white",
+              borderColor: direccion === "reducir" ? "#dc2626" : "#cbd5e1",
+            }}>
+              <input type="radio" checked={direccion === "reducir"} onChange={() => setDireccion("reducir")}
+                style={{ marginRight: 6 }} />
+              ⬇ Reducir
+            </label>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Porcentaje</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" min="0.1" step="0.1" value={pct}
+              onChange={(e) => setPct(+e.target.value)}
+              style={{
+                flex: 1, padding: "10px 12px", fontSize: 18, fontWeight: 700,
+                textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 6,
+              }} />
+            <span style={{ fontSize: 22, fontWeight: 700, color: "#475569" }}>%</span>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 6 }}>
+          <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginBottom: 8 }}>
+            APLICAR A
+          </div>
+          <label style={{ display: "block", marginBottom: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={aplicarPrecio} onChange={(e) => setAplicarPrecio(e.target.checked)}
+              style={{ marginRight: 8 }} />
+            Precio de venta (publico)
+          </label>
+          <label style={{ display: "block", cursor: "pointer" }}>
+            <input type="checkbox" checked={aplicarCosto} onChange={(e) => setAplicarCosto(e.target.checked)}
+              style={{ marginRight: 8 }} />
+            Costo (promedio)
+          </label>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer", fontSize: 13 }}>
+            <input type="checkbox" checked={redondear} onChange={(e) => setRedondear(e.target.checked)}
+              style={{ marginRight: 8 }} />
+            Redondear a pesos enteros (0 centavos)
+          </label>
+        </div>
+
+        {error && (
+          <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 4, fontSize: 13, marginBottom: 10 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+          <button onClick={aplicar} disabled={busy}
+            style={{
+              flex: 1, padding: "12px 16px",
+              background: busy ? "#94a3b8" : (direccion === "aumentar" ? "#10b981" : "#dc2626"),
+              color: "white", border: 0, borderRadius: 6, fontSize: 14, fontWeight: 700,
+              cursor: busy ? "wait" : "pointer",
+            }}>
+            {busy ? "Aplicando..." : `${direccion === "aumentar" ? "+" : "-"}${pct}% Aplicar`}
+          </button>
+          <button onClick={onClose} disabled={busy}
+            style={{
+              padding: "12px 16px", background: "transparent",
+              color: "#475569", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 14, cursor: "pointer",
+            }}>
+            Cancelar
+          </button>
         </div>
       </div>
     </div>
