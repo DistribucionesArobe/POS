@@ -68,6 +68,7 @@ def _folio_cot(db: Session, empresa_id: int) -> str:
 
 def _calcular_totales(conceptos: list, db: Session, empresa_id: int) -> tuple[float, float, float, list]:
     subtotal = 0.0
+    iva_total = 0.0
     enriched = []
     for c in conceptos:
         v = db.get(VarianteProducto, c.variante_id)
@@ -77,7 +78,10 @@ def _calcular_totales(conceptos: list, db: Session, empresa_id: int) -> tuple[fl
         if prod.empresa_id != empresa_id:
             raise HTTPException(403, "Variante de otra empresa")
         importe = round(c.cantidad * c.precio_unitario, 2)
+        # Tasa IVA por variante (0% para exentos como cafe/azucar; 16% general)
+        tasa = float(v.tasa_iva) if v.tasa_iva is not None else IVA_TASA
         subtotal += importe
+        iva_total += importe * tasa
         enriched.append({
             "variante_id": v.id,
             "sku": v.sku,
@@ -86,8 +90,9 @@ def _calcular_totales(conceptos: list, db: Session, empresa_id: int) -> tuple[fl
             "cantidad": c.cantidad,
             "precio_unitario": c.precio_unitario,
             "importe": importe,
+            "tasa_iva": tasa,
         })
-    iva = round(subtotal * IVA_TASA, 2)
+    iva = round(iva_total, 2)
     total = round(subtotal + iva, 2)
     return subtotal, iva, total, enriched
 
@@ -207,6 +212,7 @@ def editar_cotizacion(
     if payload.conceptos is not None:
         # Recalcula totales y enriquece con datos del catalogo (sku, unidad si no vino)
         subtotal = 0.0
+        iva_acum = 0.0
         items_nuevos = []
         for ce in payload.conceptos:
             v = db.get(VarianteProducto, ce.variante_id)
@@ -216,7 +222,10 @@ def editar_cotizacion(
             if prod.empresa_id != empresa_id:
                 raise HTTPException(403, "Variante de otra empresa")
             importe = round(ce.cantidad * ce.precio_unitario, 2)
+            # Respeta la tasa IVA de la variante (0% para exentos, 16% default)
+            tasa = float(v.tasa_iva) if v.tasa_iva is not None else IVA_TASA
             subtotal += importe
+            iva_acum += importe * tasa
             items_nuevos.append({
                 "variante_id": v.id,
                 "sku": ce.sku or v.sku,
@@ -225,10 +234,11 @@ def editar_cotizacion(
                 "cantidad": ce.cantidad,
                 "precio_unitario": ce.precio_unitario,
                 "importe": importe,
+                "tasa_iva": tasa,
             })
         c.conceptos = items_nuevos
         c.subtotal = round(subtotal, 2)
-        c.iva = round(subtotal * IVA_TASA, 2)
+        c.iva = round(iva_acum, 2)
         c.total = round(subtotal + c.iva, 2)
 
     if payload.notas is not None:
