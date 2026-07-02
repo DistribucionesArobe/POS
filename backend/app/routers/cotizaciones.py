@@ -1,10 +1,14 @@
 """Cotizaciones - se pueden enviar por WhatsApp y convertir en venta."""
+import logging
+import traceback
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.db import get_db, SessionLocal
 from app.models import (
@@ -203,6 +207,22 @@ def editar_cotizacion(
 ):
     """Edita una cotizacion ENVIADA: conceptos, notas, vigencia, cliente.
     Recalcula totales. No se puede editar si ya fue convertida o cancelada."""
+    try:
+        return _editar_cotizacion_impl(cot_id, payload, empresa_id, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error al editar cotizacion %s", cot_id)
+        tb = traceback.format_exc().splitlines()[-3:]
+        raise HTTPException(500, f"{type(e).__name__}: {e} | {' | '.join(tb)}")
+
+
+def _editar_cotizacion_impl(
+    cot_id: int,
+    payload: CotizacionEditIn,
+    empresa_id: int,
+    db: Session,
+):
     c = db.get(Cotizacion, cot_id)
     if not c or c.empresa_id != empresa_id:
         raise HTTPException(404, "Cotizacion no existe")
