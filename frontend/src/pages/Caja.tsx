@@ -876,7 +876,7 @@ export default function Caja() {
                       <span>Subtotal:</span> <strong>{fmt(subtotal)}</strong>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>IVA trasladado (16%):</span> <strong>{fmt(iva)}</strong>
+                      <span>IVA trasladado:</span> <strong>{fmt(iva)}</strong>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
                       <span>IVA retenido (-16%):</span> <strong>-{fmt(ivaRetenido)}</strong>
@@ -1291,7 +1291,16 @@ function PreviaFacturaModal({
                           textAlign: "right", border: "1px solid #cbd5e1", borderRadius: 4,
                         }} />
                     </td>
-                    <td style={{ ...tdP, textAlign: "right", fontWeight: 700 }}>{fmt(it.cantidad * it.precio)}</td>
+                    <td style={{ ...tdP, textAlign: "right", fontWeight: 700 }}>
+                      {fmt(it.cantidad * it.precio)}
+                      {(it.tasa_iva !== undefined && it.tasa_iva === 0) && (
+                        <div style={{
+                          fontSize: 9, marginTop: 2, padding: "1px 4px",
+                          background: "#dbeafe", color: "#1e40af", borderRadius: 2,
+                          fontWeight: 700, display: "inline-block",
+                        }}>IVA 0%</div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1323,7 +1332,7 @@ function PreviaFacturaModal({
             </div>
             <div style={{ padding: 12, background: "#0f172a", color: "white", borderRadius: 6 }}>
               <FilaTotal label="Subtotal" valor={subtotal} />
-              <FilaTotal label="IVA trasladado (16%)" valor={iva} />
+              <FilaTotal label="IVA trasladado" valor={iva} />
               {ivaRetenido > 0 && (
                 <FilaTotal label="IVA retenido (-16%)" valor={-ivaRetenido} color="#fca5a5" />
               )}
@@ -1464,7 +1473,7 @@ function construirHtmlPrevia(d: {
   <div>
     <table>
       <tr><td>Subtotal</td><td class="r b">${fmtN(d.subtotal)}</td></tr>
-      <tr><td>IVA trasladado (16%)</td><td class="r">${fmtN(d.iva)}</td></tr>
+      <tr><td>IVA trasladado</td><td class="r">${fmtN(d.iva)}</td></tr>
       ${filaRet}
     </table>
     <div class="total-final">
@@ -1677,6 +1686,7 @@ type LineaCot = {
   match_sku: string | null;
   match_precio_catalogo: number | null;
   match_stock: number | null;
+  match_tasa_iva: number | null;
 };
 
 function ImportarCotizacionModal({ onClose, onAgregar }: {
@@ -1833,6 +1843,7 @@ function ImportarCotizacionModal({ onClose, onAgregar }: {
         cantidad: l.cantidad,
         stock: l.match_stock || 0,
         unidad: l.unidad,
+        tasa_iva: l.match_tasa_iva !== null ? l.match_tasa_iva : 0.16,
       });
     }
     if (items.length === 0) {

@@ -124,12 +124,46 @@ def parsear_imagen(file_bytes: bytes, mime_type: str) -> list[dict]:
     return out
 
 
+_STOPWORDS = {"de", "del", "para", "con", "sin", "la", "el", "los", "las",
+              "y", "o", "default", "pza", "pieza", "kg", "lt", "m", "cm",
+              "ml", "incluye"}
+
+
+def _tokens(s: str) -> set[str]:
+    """Tokeniza ignorando palabras comunes y caracteres no alfanumericos."""
+    import re
+    s = s.lower()
+    # Reemplaza separadores comunes con espacio
+    s = re.sub(r"[^a-z0-9áéíóúñ]+", " ", s)
+    tokens = {t for t in s.split() if len(t) > 1 and t not in _STOPWORDS}
+    return tokens
+
+
 def _similitud(a: str, b: str) -> float:
-    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+    """Combina similitud de tokens (Jaccard) con similitud de caracteres."""
+    # Jaccard sobre tokens distintivos
+    ta = _tokens(a)
+    tb = _tokens(b)
+    if ta and tb:
+        inter = len(ta & tb)
+        union = len(ta | tb)
+        jaccard = inter / union if union else 0.0
+    else:
+        jaccard = 0.0
+    # Bonus: si los tokens distintivos coinciden 100%, sube agresivo
+    if ta and ta.issubset(tb):
+        jaccard = max(jaccard, 0.85)
+    # Promedio con SequenceMatcher como tiebreaker
+    char_sim = SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+    return jaccard * 0.7 + char_sim * 0.3
 
 
-def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict]) -> list[dict]:
+def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict],
+                     umbral: float = 0.75) -> list[dict]:
     """Para cada linea busca la mejor variante en el catalogo (por nombre + presentacion).
+
+    Umbral 0.75 = match conservador. Bajalo si quieres mas matches automaticos
+    (a riesgo de falsos positivos). Subelo si quieres certeza casi total.
 
     Devuelve la misma lista enriquecida con:
       - match_variante_id (int|None)
@@ -152,6 +186,7 @@ def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict]) -> list[di
             "nombre": f"{p.nombre} {v.presentacion}".strip(),
             "precio": float(v.precio_publico or 0),
             "stock": float(v.stock_actual or 0),
+            "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
         }
         for v, p in variantes
     ]
@@ -166,7 +201,7 @@ def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict]) -> list[di
             if score > mejor_score:
                 mejor_score = score
                 mejor = c
-        if mejor and mejor_score >= 0.50:
+        if mejor and mejor_score >= umbral:
             resultado.append({
                 **linea,
                 "match_variante_id": mejor["id"],
@@ -175,6 +210,7 @@ def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict]) -> list[di
                 "match_sku": mejor["sku"],
                 "match_precio_catalogo": mejor["precio"],
                 "match_stock": mejor["stock"],
+                "match_tasa_iva": mejor["tasa_iva"],
             })
         else:
             resultado.append({
@@ -185,5 +221,6 @@ def matchear_lineas(db: Session, empresa_id: int, lineas: list[dict]) -> list[di
                 "match_sku": None,
                 "match_precio_catalogo": None,
                 "match_stock": None,
+                "match_tasa_iva": None,
             })
     return resultado
