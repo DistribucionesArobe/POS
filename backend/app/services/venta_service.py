@@ -80,6 +80,9 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         unidad_override = getattr(c, "unidad", None)
         if unidad_override:
             clave_unidad = _unidad_a_clave_sat(unidad_override) or v.clave_unidad_sat
+        # Respetar la tasa de IVA por variante (0% para alimentos basicos,
+        # 16% general, 8% frontera). Default: 16%.
+        tasa_linea = float(v.tasa_iva) if v.tasa_iva is not None else IVA_TASA
         conceptos_creados.append(ConceptoVenta(
             variante_id=v.id,
             descripcion=f"{producto.nombre} - {v.presentacion}",
@@ -89,10 +92,11 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
             importe=importe,
             clave_prod_serv_sat=producto.clave_prod_serv_sat,
             clave_unidad_sat=clave_unidad,
-            tasa_iva=IVA_TASA,
+            tasa_iva=tasa_linea,
         ))
 
-    iva = round(subtotal * IVA_TASA, 2)
+    # IVA total = suma del IVA por linea (respetando tasa por variante)
+    iva = round(sum(float(c.importe) * float(c.tasa_iva) for c in conceptos_creados), 2)
     # Retenciones (caso CFE / gobierno comprando a PF). Vienen del payload
     # opcionalmente como porcentaje sobre subtotal.
     iva_retenido_pct = float(getattr(payload, "iva_retenido_pct", 0) or 0)

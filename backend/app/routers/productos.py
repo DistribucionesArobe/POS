@@ -256,6 +256,7 @@ def listar_productos(
                     "stock_minimo": float(v.stock_minimo),
                     "activo": v.activo,
                     "favorito_caja": v.favorito_caja,
+                    "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
                 }
                 for v in p.variantes
             ],
@@ -314,6 +315,7 @@ def buscar_variante(
             "precio": float(v.precio_publico),
             "stock": float(v.stock_actual),
             "unidad": v.unidad,
+            "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
         }
         for v in rows
     ]
@@ -342,6 +344,7 @@ def obtener_por_sku(
         "precio": float(v.precio_publico),
         "stock": float(v.stock_actual),
         "unidad": v.unidad,
+        "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
     }
 
 
@@ -462,6 +465,7 @@ def listar_favoritos_caja(
             "nombre": f"{p.nombre} - {v.presentacion}",
             "precio": float(v.precio_publico),
             "stock": float(v.stock_actual),
+            "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
         }
         for v, p in rows
     ]
@@ -506,6 +510,60 @@ def actualizar_precio(
 
 class CostoUpdate(BaseModel):
     costo_promedio: float = Field(ge=0)
+
+
+class TasaIvaUpdate(BaseModel):
+    tasa_iva: float = Field(ge=0, le=1)
+
+
+@router.patch("/variantes/{variante_id}/tasa-iva")
+def actualizar_tasa_iva(
+    variante_id: int, payload: TasaIvaUpdate,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Cambia la tasa de IVA de una variante (0 = sin IVA, 0.16 = 16%, 0.08 = 8%).
+    La tasa se respeta al vender: el IVA por linea se calcula con esta tasa
+    en vez del 16% flat."""
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+    v.tasa_iva = payload.tasa_iva
+    db.commit()
+    return {"ok": True, "tasa_iva": float(v.tasa_iva)}
+
+
+class TasaIvaMasivoIn(BaseModel):
+    variante_ids: list[int]
+    tasa_iva: float = Field(ge=0, le=1)
+
+
+@router.post("/variantes/tasa-iva-masivo")
+def tasa_iva_masivo(
+    payload: TasaIvaMasivoIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Cambia la tasa IVA de varias variantes a la vez."""
+    if not payload.variante_ids:
+        raise HTTPException(400, "Selecciona al menos una variante")
+    variantes = (
+        db.query(VarianteProducto)
+        .filter(VarianteProducto.id.in_(payload.variante_ids))
+        .all()
+    )
+    n = 0
+    for v in variantes:
+        p = db.get(Producto, v.producto_id)
+        if not p or p.empresa_id != empresa_id:
+            continue
+        v.tasa_iva = payload.tasa_iva
+        n += 1
+    db.commit()
+    return {"ok": True, "actualizadas": n, "tasa_iva": payload.tasa_iva}
 
 
 class AjusteMasivoIn(BaseModel):

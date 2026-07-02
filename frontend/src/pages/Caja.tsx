@@ -12,6 +12,7 @@ type Item = {
   cantidad: number;
   stock: number;
   unidad?: string;
+  tasa_iva?: number;  // 0 = exento, 0.16 = general (default)
 };
 
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -130,10 +131,19 @@ export default function Caja() {
   }
 
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
-  const iva = subtotal * 0.16;
+  // Calculo de IVA respetando la tasa por linea (0% para exentos, 16% para el resto)
+  const iva = items.reduce((a, i) => {
+    const t = i.tasa_iva !== undefined ? i.tasa_iva : 0.16;
+    return a + i.cantidad * i.precio * t;
+  }, 0);
+  // Base gravada = subtotal de items que SI causan IVA (usado para retencion)
+  const baseGravada = items.reduce((a, i) => {
+    const t = i.tasa_iva !== undefined ? i.tasa_iva : 0.16;
+    return a + (t > 0 ? i.cantidad * i.precio : 0);
+  }, 0);
   // Retencion solo aplica a FACTURA con cliente con RFC y cuando el toggle esta activo
   const retencionAplica = retenerIva && tipo === "FACTURA" && !!cliente.rfc;
-  const ivaRetenido = retencionAplica ? +(subtotal * 0.16).toFixed(2) : 0;
+  const ivaRetenido = retencionAplica ? +(baseGravada * 0.16).toFixed(2) : 0;
   const total = +(subtotal + iva - ivaRetenido).toFixed(2);
 
   async function buscarOAgregar() {
@@ -172,6 +182,7 @@ export default function Caja() {
         variante_id: s.id, sku: s.sku, nombre: s.nombre,
         precio: s.precio, cantidad: 1, stock: s.stock,
         unidad: s.unidad,
+        tasa_iva: s.tasa_iva !== undefined ? s.tasa_iva : 0.16,
       }]);
     }
     setBusqueda("");

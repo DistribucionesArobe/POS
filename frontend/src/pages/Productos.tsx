@@ -8,6 +8,7 @@ type Variante = {
   costo_promedio: number; stock_actual: number; stock_minimo: number;
   activo: boolean;
   favorito_caja?: boolean;
+  tasa_iva?: number;
 };
 type ProductoT = {
   id: number; nombre: string; categoria: string | null; marca: string | null;
@@ -71,6 +72,24 @@ export default function Productos() {
   }
   function limpiarSeleccion() {
     setSeleccionadasMasivo(new Set());
+  }
+
+  async function marcarIvaMasivo(tasa: number) {
+    const ids = Array.from(seleccionadasMasivo);
+    if (ids.length === 0) return;
+    const label = tasa === 0 ? "SIN IVA (0%)" : `IVA ${(tasa * 100).toFixed(0)}%`;
+    if (!confirm(`Marcar ${ids.length} variante(s) como ${label}?`)) return;
+    try {
+      const r = await api.post("/api/productos/variantes/tasa-iva-masivo", {
+        variante_ids: ids,
+        tasa_iva: tasa,
+      });
+      alert(`Actualizadas ${r.data.actualizadas} variante(s) a ${label}`);
+      limpiarSeleccion();
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
   }
 
   async function eliminarMasivo() {
@@ -620,7 +639,16 @@ export default function Productos() {
                                   {v.favorito_caja ? "★" : "☆"}
                                 </button>
                               </td>
-                              <td>{p.nombre}</td>
+                              <td>
+                                {p.nombre}
+                                {(v.tasa_iva !== undefined && v.tasa_iva === 0) && (
+                                  <span style={{
+                                    marginLeft: 6, fontSize: 9, fontWeight: 700,
+                                    padding: "2px 6px", background: "#dbeafe",
+                                    color: "#1e40af", borderRadius: 3,
+                                  }}>SIN IVA</span>
+                                )}
+                              </td>
                               <td><code>{v.sku}</code></td>
                               <td>{v.presentacion}</td>
                               <td>{v.unidad}</td>
@@ -730,6 +758,24 @@ export default function Productos() {
             }}>
             Ajustar % precio/costo
           </button>
+          <button onClick={() => marcarIvaMasivo(0)}
+            style={{
+              background: "#1e40af", color: "white", border: 0,
+              padding: "8px 12px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
+              fontSize: 12,
+            }}
+            title="Marcar como productos exentos de IVA (alimentos basicos, medicinas)">
+            Sin IVA
+          </button>
+          <button onClick={() => marcarIvaMasivo(0.16)}
+            style={{
+              background: "#475569", color: "white", border: 0,
+              padding: "8px 12px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
+              fontSize: 12,
+            }}
+            title="Marcar con IVA 16% (default)">
+            IVA 16%
+          </button>
           <button onClick={eliminarMasivo}
             style={{
               background: "#dc2626", color: "white", border: 0,
@@ -783,6 +829,7 @@ function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
   const [costoPromedio, setCostoPromedio] = useState(variante.costo_promedio);
   const [stockMinimo, setStockMinimo] = useState(variante.stock_minimo);
   const [activo, setActivo] = useState(variante.activo);
+  const [sinIva, setSinIva] = useState((variante.tasa_iva ?? 0.16) === 0);
   const [busy, setBusy] = useState(false);
 
   async function guardar() {
@@ -806,6 +853,14 @@ function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
         stock_minimo: +stockMinimo,
         activo,
       });
+      // Guardar tasa IVA solo si cambio
+      const tasaAntes = variante.tasa_iva ?? 0.16;
+      const tasaAhora = sinIva ? 0 : 0.16;
+      if (Math.abs(tasaAntes - tasaAhora) > 0.001) {
+        await api.patch(`/api/productos/variantes/${variante.id}/tasa-iva`, {
+          tasa_iva: tasaAhora,
+        });
+      }
       onSaved();
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
@@ -890,6 +945,29 @@ function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
               <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} />
               Activo
             </label>
+          </div>
+          <div className="form-grid-full" style={{
+            marginTop: 8, padding: 10, background: sinIva ? "#dbeafe" : "#f8fafc",
+            border: sinIva ? "1px solid #93c5fd" : "1px solid #e2e8f0",
+            borderRadius: 6,
+          }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>
+              <input type="checkbox" checked={sinIva}
+                onChange={(e) => setSinIva(e.target.checked)}
+                style={{ width: 18, height: 18 }} />
+              <span>Sin IVA (tasa 0%)</span>
+              {sinIva && (
+                <span style={{
+                  fontSize: 10, padding: "2px 8px", background: "#1e40af",
+                  color: "white", borderRadius: 3, fontWeight: 700, letterSpacing: 0.5,
+                }}>EXENTO</span>
+              )}
+            </label>
+            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+              Marca esto para alimentos basicos (azucar, cafe, tortillas),
+              medicinas, libros o cualquier producto exento de IVA (Art. 2-A LIVA).
+              El sistema NO cobrara IVA al vender.
+            </div>
           </div>
         </div>
 
