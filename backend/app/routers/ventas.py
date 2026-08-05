@@ -75,6 +75,64 @@ def cambiar_cliente_venta(
     }
 
 
+@router.post("/{documento_id}/duplicar")
+def duplicar_venta(
+    documento_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Duplica una venta existente creando una nueva CONFIRMADO con los
+    mismos conceptos y cliente. Sin CFDI, sin pagos, folio nuevo.
+    Util cuando cancelas un CFDI mal timbrado y quieres re-timbrarlo con
+    correcciones (por ejemplo unidades o claves SAT arregladas)."""
+    from app.models import ConceptoVenta as ConceptoVentaModel
+    doc = db.get(DocumentoVenta, documento_id)
+    if not doc:
+        raise HTTPException(404, "Venta no existe")
+    if doc.empresa_id != empresa_id:
+        raise HTTPException(403, "Venta de otra empresa")
+
+    # Reconstruimos el payload con los conceptos usando los datos actuales del
+    # catalogo (para que la duplicada tome unidades/tasas/claves ACTUALIZADAS).
+    conceptos_originales = db.query(ConceptoVentaModel).filter(
+        ConceptoVentaModel.documento_id == documento_id
+    ).order_by(ConceptoVentaModel.id).all()
+    if not conceptos_originales:
+        raise HTTPException(400, "La venta original no tiene conceptos")
+
+    from app.schemas.venta import ConceptoVentaIn
+    payload = DocumentoVentaIn(
+        tipo=doc.tipo,
+        cliente_id=doc.cliente_id,
+        forma_pago_sat=doc.forma_pago_sat or "01",
+        metodo_pago_sat=doc.metodo_pago_sat or "PUE",
+        uso_cfdi=doc.uso_cfdi,
+        notas=(doc.notas or "") + f" [Duplicada de {doc.folio}]",
+        conceptos=[
+            ConceptoVentaIn(
+                variante_id=c.variante_id,
+                cantidad=float(c.cantidad),
+                precio_unitario=float(c.precio_unitario),
+                descuento=float(c.descuento or 0),
+            )
+            for c in conceptos_originales
+        ],
+        iva_retenido_pct=float(getattr(doc, "iva_retenido", 0) or 0) / float(doc.subtotal or 1) if doc.subtotal else 0,
+        isr_retenido_pct=float(getattr(doc, "isr_retenido", 0) or 0) / float(doc.subtotal or 1) if doc.subtotal else 0,
+    )
+    try:
+        nueva = venta_service.crear_documento(db, payload, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "ok": True,
+        "id": nueva.id,
+        "folio": nueva.folio,
+        "total": float(nueva.total),
+        "duplicada_de": doc.folio,
+    }
+
+
 @router.post("", response_model=DocumentoVentaOut)
 def crear_venta(
     payload: DocumentoVentaIn,

@@ -129,6 +129,22 @@ export default function Ventas() {
     nav(`/convertir-remisiones?ids=${v.id}`);
   }
 
+  async function duplicarVenta(v: VentaT) {
+    if (!confirm(
+      `Duplicar la venta ${v.folio}?\n\n` +
+      "Se creara una nueva FACTURA con los mismos productos y cliente,\n" +
+      "usando las unidades/claves SAT ACTUALES del catalogo.\n" +
+      "La nueva venta queda en estado CONFIRMADO lista para timbrar."
+    )) return;
+    try {
+      const r = await api.post(`/api/ventas/${v.id}/duplicar`);
+      alert(`Duplicada: ${r.data.folio} (total ${fmt(r.data.total)})\nRefrescando lista...`);
+      cargar();
+    } catch (err: any) {
+      alert("Error al duplicar: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   async function cambiarClienteVenta(documento_id: number, nuevo_cliente_id: number) {
     try {
       const r = await api.patch(`/api/ventas/${documento_id}/cliente`, {
@@ -460,6 +476,13 @@ export default function Ventas() {
                     <button className="btn-icon" onClick={() => descargarPdfInterno(v.id, v.folio)}>
                       PDF
                     </button>
+                    {isFactura && (
+                      <button className="btn-icon"
+                        title="Crear nueva factura con los mismos productos (usa las claves SAT/unidades actualizadas)"
+                        onClick={() => duplicarVenta(v)}>
+                        🔄 Duplicar
+                      </button>
+                    )}
                     {isRemision && !v.facturada && (
                       <button className="btn btn-sm" onClick={() => convertirUna(v)}
                         style={{ background: "var(--color-success)" }}>
