@@ -45,6 +45,9 @@ export default function Ventas() {
   // Modal de cambiar cliente de una venta
   const [cambiandoClienteVenta, setCambiandoClienteVenta] = useState<VentaT | null>(null);
 
+  // Modal de duplicar venta con overrides
+  const [duplicandoVenta, setDuplicandoVenta] = useState<VentaT | null>(null);
+
   // Modal de devolucion
   const [devolviendoFactura, setDevolviendoFactura] = useState<VentaT | null>(null);
   const [devConceptos, setDevConceptos] = useState<{ variante_id: number; descripcion: string; max: number; cantidad: number; precio: number }[]>([]);
@@ -129,16 +132,15 @@ export default function Ventas() {
     nav(`/convertir-remisiones?ids=${v.id}`);
   }
 
-  async function duplicarVenta(v: VentaT) {
-    if (!confirm(
-      `Duplicar la venta ${v.folio}?\n\n` +
-      "Se creara una nueva FACTURA con los mismos productos y cliente,\n" +
-      "usando las unidades/claves SAT ACTUALES del catalogo.\n" +
-      "La nueva venta queda en estado CONFIRMADO lista para timbrar."
-    )) return;
+  async function duplicarVenta(v: VentaT, overrides?: {
+    metodo_pago_sat?: string;
+    forma_pago_sat?: string;
+    uso_cfdi?: string;
+  }) {
     try {
-      const r = await api.post(`/api/ventas/${v.id}/duplicar`);
+      const r = await api.post(`/api/ventas/${v.id}/duplicar`, overrides || {});
       alert(`Duplicada: ${r.data.folio} (total ${fmt(r.data.total)})\nRefrescando lista...`);
+      setDuplicandoVenta(null);
       cargar();
     } catch (err: any) {
       alert("Error al duplicar: " + (err.response?.data?.detail || err.message));
@@ -478,8 +480,8 @@ export default function Ventas() {
                     </button>
                     {isFactura && (
                       <button className="btn-icon"
-                        title="Crear nueva factura con los mismos productos (usa las claves SAT/unidades actualizadas)"
-                        onClick={() => duplicarVenta(v)}>
+                        title="Crear nueva factura con los mismos productos (puedes cambiar metodo de pago)"
+                        onClick={() => setDuplicandoVenta(v)}>
                         🔄 Duplicar
                       </button>
                     )}
@@ -573,6 +575,14 @@ export default function Ventas() {
           requiereRfc={true}
           onClose={() => setCambiandoClienteVenta(null)}
           onSelect={(c) => cambiarClienteVenta(cambiandoClienteVenta.id, c.id)}
+        />
+      )}
+
+      {duplicandoVenta && (
+        <DuplicarVentaModal
+          venta={duplicandoVenta}
+          onClose={() => setDuplicandoVenta(null)}
+          onDuplicar={(overrides) => duplicarVenta(duplicandoVenta, overrides)}
         />
       )}
     </Layout>
@@ -706,6 +716,176 @@ function DevolucionModal({ factura, onClose, onSuccess }: { factura: VentaT; onC
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Modal para duplicar venta con overrides (metodo/forma pago, etc.) =====
+
+function DuplicarVentaModal({ venta, onClose, onDuplicar }: {
+  venta: VentaT;
+  onClose: () => void;
+  onDuplicar: (overrides: {
+    metodo_pago_sat?: string;
+    forma_pago_sat?: string;
+    uso_cfdi?: string;
+  }) => void;
+}) {
+  // Prellenamos con los valores originales
+  const [metodo, setMetodo] = useState<string>(venta.metodo_pago_sat || "PUE");
+  const [formaPago, setFormaPago] = useState<string>("01");
+  const [usoCfdi, setUsoCfdi] = useState<string>("G03");
+  const [busy, setBusy] = useState(false);
+
+  // Al cambiar a PPD, la forma se fuerza a 99 (Por definir) segun SAT
+  const formaEfectiva = metodo === "PPD" ? "99" : formaPago;
+
+  async function ejecutar() {
+    setBusy(true);
+    await onDuplicar({
+      metodo_pago_sat: metodo,
+      forma_pago_sat: formaEfectiva,
+      uso_cfdi: usoCfdi,
+    });
+    setBusy(false);
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 24,
+        width: "94%", maxWidth: 480, color: "#0f172a",
+      }}>
+        <h3 style={{ margin: "0 0 4px" }}>🔄 Duplicar factura {venta.folio}</h3>
+        <p style={{ fontSize: 12, color: "#64748b", marginTop: 0 }}>
+          Se crea una nueva factura con los mismos productos y cliente.
+          Puedes cambiar el metodo de pago aqui.
+        </p>
+
+        <div style={{ marginBottom: 12, marginTop: 16 }}>
+          <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Metodo de pago SAT</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <label style={{
+              flex: 1, padding: "12px", border: "1px solid #cbd5e1", borderRadius: 6,
+              textAlign: "center", cursor: "pointer", fontWeight: 600,
+              background: metodo === "PUE" ? "#dcfce7" : "white",
+              borderColor: metodo === "PUE" ? "#10b981" : "#cbd5e1",
+            }}>
+              <input type="radio" checked={metodo === "PUE"} onChange={() => setMetodo("PUE")}
+                style={{ marginRight: 6 }} />
+              PUE
+              <div style={{ fontSize: 10, color: "#64748b", fontWeight: 400 }}>
+                Pago en una sola exhibicion
+              </div>
+            </label>
+            <label style={{
+              flex: 1, padding: "12px", border: "1px solid #cbd5e1", borderRadius: 6,
+              textAlign: "center", cursor: "pointer", fontWeight: 600,
+              background: metodo === "PPD" ? "#dbeafe" : "white",
+              borderColor: metodo === "PPD" ? "#1e40af" : "#cbd5e1",
+            }}>
+              <input type="radio" checked={metodo === "PPD"} onChange={() => setMetodo("PPD")}
+                style={{ marginRight: 6 }} />
+              PPD
+              <div style={{ fontSize: 10, color: "#64748b", fontWeight: 400 }}>
+                Pago en parcialidades / credito
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {metodo === "PUE" && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Forma de pago SAT</label>
+            <select value={formaPago} onChange={(e) => setFormaPago(e.target.value)}
+              style={{
+                width: "100%", padding: "8px 10px", fontSize: 14,
+                border: "1px solid #cbd5e1", borderRadius: 4, marginTop: 4,
+              }}>
+              <option value="01">01 - Efectivo</option>
+              <option value="03">03 - Transferencia electronica</option>
+              <option value="04">04 - Tarjeta de credito</option>
+              <option value="28">28 - Tarjeta de debito</option>
+              <option value="02">02 - Cheque nominativo</option>
+            </select>
+          </div>
+        )}
+
+        {metodo === "PPD" && (
+          <div style={{
+            marginBottom: 12, padding: 10, background: "#dbeafe",
+            border: "1px solid #93c5fd", borderRadius: 6, fontSize: 12, color: "#1e40af",
+          }}>
+            <strong>ℹ Modo credito (PPD):</strong> Forma de pago sera "99 - Por definir"
+            (regla SAT). Cuando cobres, se emite Complemento de Pago (CFDI tipo P).
+          </div>
+        )}
+
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Uso CFDI</label>
+          <select value={usoCfdi} onChange={(e) => setUsoCfdi(e.target.value)}
+            style={{
+              width: "100%", padding: "8px 10px", fontSize: 14,
+              border: "1px solid #cbd5e1", borderRadius: 4, marginTop: 4,
+            }}>
+            <optgroup label="Gastos">
+              <option value="G01">G01 - Adquisicion de mercancias</option>
+              <option value="G02">G02 - Devoluciones, descuentos o bonificaciones</option>
+              <option value="G03">G03 - Gastos en general</option>
+            </optgroup>
+            <optgroup label="Inversiones / Activo fijo">
+              <option value="I01">I01 - Construcciones</option>
+              <option value="I02">I02 - Mobiliario y equipo de oficina</option>
+              <option value="I03">I03 - Equipo de transporte</option>
+              <option value="I04">I04 - Equipo de computo y accesorios</option>
+              <option value="I05">I05 - Dados, troqueles, moldes, matrices y herramental</option>
+              <option value="I06">I06 - Comunicaciones telefonicas</option>
+              <option value="I07">I07 - Comunicaciones satelitales</option>
+              <option value="I08">I08 - Otra maquinaria y equipo</option>
+            </optgroup>
+            <optgroup label="Deducciones personales">
+              <option value="D01">D01 - Honorarios medicos, dentales, hospitalarios</option>
+              <option value="D02">D02 - Gastos medicos por incapacidad</option>
+              <option value="D03">D03 - Gastos funerales</option>
+              <option value="D04">D04 - Donativos</option>
+              <option value="D05">D05 - Intereses reales por creditos hipotecarios</option>
+              <option value="D06">D06 - Aportaciones voluntarias al SAR</option>
+              <option value="D07">D07 - Primas por seguros de gastos medicos</option>
+              <option value="D08">D08 - Gastos de transportacion escolar obligatoria</option>
+              <option value="D09">D09 - Depositos en cuentas para el ahorro</option>
+              <option value="D10">D10 - Pagos por servicios educativos</option>
+            </optgroup>
+            <optgroup label="Otros">
+              <option value="S01">S01 - Sin efectos fiscales</option>
+              <option value="CP01">CP01 - Pagos</option>
+              <option value="CN01">CN01 - Nomina</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+          <button onClick={ejecutar} disabled={busy}
+            style={{
+              flex: 1, padding: "12px 16px",
+              background: busy ? "#94a3b8" : "#10b981",
+              color: "white", border: 0, borderRadius: 6, fontSize: 14, fontWeight: 700,
+              cursor: busy ? "wait" : "pointer",
+            }}>
+            {busy ? "Duplicando..." : "🔄 Duplicar"}
+          </button>
+          <button onClick={onClose} disabled={busy}
+            style={{
+              padding: "12px 16px", background: "transparent",
+              color: "#475569", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 14, cursor: "pointer",
+            }}>
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   );

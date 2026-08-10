@@ -75,16 +75,27 @@ def cambiar_cliente_venta(
     }
 
 
+class DuplicarIn(BaseModel):
+    # Overrides opcionales - si no se mandan se usa lo de la venta original
+    metodo_pago_sat: str | None = None  # 'PUE' o 'PPD'
+    forma_pago_sat: str | None = None   # '01', '03', '99', etc.
+    uso_cfdi: str | None = None
+    cliente_id: int | None = None
+
+
 @router.post("/{documento_id}/duplicar")
 def duplicar_venta(
     documento_id: int,
+    payload: DuplicarIn | None = None,
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
     """Duplica una venta existente creando una nueva CONFIRMADO con los
     mismos conceptos y cliente. Sin CFDI, sin pagos, folio nuevo.
+    Puede recibir overrides opcionales (metodo_pago_sat, forma_pago_sat,
+    uso_cfdi, cliente_id) para cambiar datos al duplicar.
     Util cuando cancelas un CFDI mal timbrado y quieres re-timbrarlo con
-    correcciones (por ejemplo unidades o claves SAT arregladas)."""
+    correcciones (por ejemplo unidades, claves SAT, PUE->PPD, etc.)."""
     from app.models import ConceptoVenta as ConceptoVentaModel
     doc = db.get(DocumentoVenta, documento_id)
     if not doc:
@@ -100,13 +111,24 @@ def duplicar_venta(
     if not conceptos_originales:
         raise HTTPException(400, "La venta original no tiene conceptos")
 
+    # Resolver overrides con fallback a lo de la venta original
+    over = payload or DuplicarIn()
+    metodo = over.metodo_pago_sat or doc.metodo_pago_sat or "PUE"
+    # Si cambio metodo a PPD, la forma_pago debe ser "99" (Por definir) segun SAT
+    if metodo == "PPD":
+        forma = "99"
+    else:
+        forma = over.forma_pago_sat or doc.forma_pago_sat or "01"
+    uso = over.uso_cfdi or doc.uso_cfdi
+    cliente_id = over.cliente_id or doc.cliente_id
+
     from app.schemas.venta import ConceptoVentaIn
-    payload = DocumentoVentaIn(
+    doc_payload = DocumentoVentaIn(
         tipo=doc.tipo,
-        cliente_id=doc.cliente_id,
-        forma_pago_sat=doc.forma_pago_sat or "01",
-        metodo_pago_sat=doc.metodo_pago_sat or "PUE",
-        uso_cfdi=doc.uso_cfdi,
+        cliente_id=cliente_id,
+        forma_pago_sat=forma,
+        metodo_pago_sat=metodo,
+        uso_cfdi=uso,
         notas=(doc.notas or "") + f" [Duplicada de {doc.folio}]",
         conceptos=[
             ConceptoVentaIn(
@@ -120,6 +142,7 @@ def duplicar_venta(
         iva_retenido_pct=float(getattr(doc, "iva_retenido", 0) or 0) / float(doc.subtotal or 1) if doc.subtotal else 0,
         isr_retenido_pct=float(getattr(doc, "isr_retenido", 0) or 0) / float(doc.subtotal or 1) if doc.subtotal else 0,
     )
+    payload = doc_payload  # alias para no romper la referencia abajo
     try:
         nueva = venta_service.crear_documento(db, payload, empresa_id)
     except ValueError as e:
