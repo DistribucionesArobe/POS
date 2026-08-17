@@ -83,9 +83,16 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         # Respetar la tasa de IVA por variante (0% para alimentos basicos,
         # 16% general, 8% frontera). Default: 16%.
         tasa_linea = float(v.tasa_iva) if v.tasa_iva is not None else IVA_TASA
+        # Descripcion: usa el override del concepto si viene, sino default
+        desc_override = getattr(c, "descripcion", None)
+        descripcion_final = (
+            desc_override.strip()
+            if desc_override and desc_override.strip()
+            else f"{producto.nombre} - {v.presentacion}"
+        )
         conceptos_creados.append(ConceptoVenta(
             variante_id=v.id,
-            descripcion=f"{producto.nombre} - {v.presentacion}",
+            descripcion=descripcion_final,
             cantidad=c.cantidad,
             precio_unitario=c.precio_unitario,
             descuento=c.descuento,

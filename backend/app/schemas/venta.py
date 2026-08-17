@@ -11,6 +11,10 @@ class ConceptoVentaIn(BaseModel):
     # Override opcional de la unidad para este concepto. Si viene, sobreescribe
     # la unidad guardada en la variante (solo para este documento).
     unidad: str | None = None
+    # Override opcional de la descripcion del concepto. Si viene, sobreescribe
+    # la descripcion default '{producto.nombre} - {v.presentacion}' solo para
+    # este documento (no toca el catalogo). Util para modificar texto antes de timbrar.
+    descripcion: str | None = None
 
 
 class PagoIn(BaseModel):

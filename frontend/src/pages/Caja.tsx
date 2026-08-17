@@ -350,6 +350,7 @@ export default function Caja() {
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
         unidad: i.unidad || undefined,
+        descripcion: i.nombre || undefined,
       })),
       iva_retenido_pct: retencionAplica ? 0.16 : 0,
       uso_cfdi: tipo === "FACTURA" ? usoCfdiSel : undefined,
@@ -1065,6 +1066,11 @@ export default function Caja() {
             c[idx].precio = precio;
             setItems(c);
           }}
+          onCambiarNombre={(idx, nombre) => {
+            const c = [...items];
+            c[idx].nombre = nombre;
+            setItems(c);
+          }}
           onCancelar={() => setMostrarPrevia(false)}
           onConfirmar={() => cobrar(true)}
         />
@@ -1134,6 +1140,7 @@ function PreviaFacturaModal({
   empresa, cliente, items, subtotal, iva, ivaRetenido, total,
   usoCfdi, tipoSel, condicionesPago, retencionAplica,
   procesando, onCambiarUnidad, onCambiarCantidad, onCambiarPrecio,
+  onCambiarNombre,
   onCancelar, onConfirmar,
 }: {
   empresa: { id: number; nombre: string } | null;
@@ -1151,6 +1158,7 @@ function PreviaFacturaModal({
   onCambiarUnidad: (idx: number, unidad: string) => void;
   onCambiarCantidad: (idx: number, cantidad: number) => void;
   onCambiarPrecio: (idx: number, precio: number) => void;
+  onCambiarNombre: (idx: number, nombre: string) => void;
   onCancelar: () => void;
   onConfirmar: () => void;
 }) {
@@ -1248,8 +1256,15 @@ function PreviaFacturaModal({
                 {items.map((it, i) => (
                   <tr key={i}>
                     <td style={tdP}>
-                      <div>{it.nombre}</div>
-                      <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU {it.sku}</div>
+                      <input type="text" value={it.nombre}
+                        onChange={(e) => onCambiarNombre(i, e.target.value)}
+                        style={{
+                          width: "100%", padding: "3px 6px", fontSize: 12,
+                          border: "1px solid #cbd5e1", borderRadius: 4,
+                          fontWeight: 500,
+                        }}
+                        title="Editable - modifica solo para esta factura" />
+                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>SKU {it.sku}</div>
                     </td>
                     <td style={{ ...tdP, textAlign: "right" }}>
                       <input type="number" min="0.01" step="0.01" value={it.cantidad}
