@@ -445,6 +445,29 @@ def generar_pdf_cfdi(
     story.append(wrapper)
     story.append(Spacer(1, 10))
 
+    # ===== Observaciones (editable post-timbre, solo aparece en el PDF) =====
+    obs_texto = (doc.observaciones or "").strip() if doc else ""
+    if obs_texto:
+        obs_html = (
+            f"<b>OBSERVACIONES:</b> "
+            f"<font color='#1e293b'>{obs_texto.replace(chr(10), '<br/>')}</font>"
+        )
+        obs_par = Paragraph(obs_html, S["small"])
+        obs_tbl = Table(
+            [[obs_par]],
+            colWidths=[PAGE_W - 2 * MARGIN_LR],
+        )
+        obs_tbl.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#f59e0b")),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fef3c7")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(obs_tbl)
+        story.append(Spacer(1, 10))
+
     # ===== QR + Sellos (en la ultima parte) =====
     qr_im = Image(qr_img, width=32 * mm, height=32 * mm)
 

@@ -15,6 +15,7 @@ type VentaT = {
   cliente_id: number; cliente_nombre?: string; cliente_rfc?: string | null;
   fecha: string; total: number; saldo?: number; facturada?: boolean;
   metodo_pago_sat?: string;
+  observaciones?: string | null;
   cfdi?: CfdiInfo | null;
   conceptos?: any[];
 };
@@ -130,6 +131,25 @@ export default function Ventas() {
   }
   function convertirUna(v: VentaT) {
     nav(`/convertir-remisiones?ids=${v.id}`);
+  }
+
+  async function editarObservaciones(v: VentaT) {
+    const nuevo = window.prompt(
+      "Observaciones que aparecen en el PDF de la factura\n" +
+      "(no afectan el XML fiscal ni el sello SAT)\n\n" +
+      "Ejemplo: Contrato DG-ITACE/DA/RM/009/2026",
+      v.observaciones || ""
+    );
+    if (nuevo === null) return;
+    try {
+      await api.patch(`/api/ventas/${v.id}/observaciones`, {
+        observaciones: nuevo,
+      });
+      alert("Observaciones actualizadas. Vuelve a descargar el PDF para verlas.");
+      cargar();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
   }
 
   async function duplicarVenta(v: VentaT, overrides?: {
@@ -483,6 +503,14 @@ export default function Ventas() {
                         title="Crear nueva factura con los mismos productos (puedes cambiar metodo de pago)"
                         onClick={() => setDuplicandoVenta(v)}>
                         🔄 Duplicar
+                      </button>
+                    )}
+                    {isFactura && (
+                      <button className="btn-icon"
+                        title="Editar observaciones del PDF (funciona incluso timbrada; no cambia el XML/UUID)"
+                        onClick={() => editarObservaciones(v)}
+                        style={v.observaciones ? { background: "#fef3c7", color: "#92400e" } : undefined}>
+                        📝 Obs
                       </button>
                     )}
                     {isRemision && !v.facturada && (

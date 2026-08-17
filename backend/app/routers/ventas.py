@@ -26,6 +26,31 @@ class CambiarClienteIn(BaseModel):
     cliente_id: int
 
 
+class ObservacionesIn(BaseModel):
+    observaciones: str | None = None
+
+
+@router.patch("/{documento_id}/observaciones")
+def editar_observaciones(
+    documento_id: int,
+    payload: ObservacionesIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Edita las observaciones de una venta. Funciona incluso con CFDI timbrado
+    porque las observaciones NO forman parte del XML fiscal.
+    Solo cambia el PDF propio del CFDI (el que generamos nosotros).
+    El UUID, el sello SAT y todo lo legal quedan intactos."""
+    doc = db.get(DocumentoVenta, documento_id)
+    if not doc:
+        raise HTTPException(404, "Venta no existe")
+    if doc.empresa_id != empresa_id:
+        raise HTTPException(403, "Venta de otra empresa")
+    doc.observaciones = (payload.observaciones or "").strip() or None
+    db.commit()
+    return {"ok": True, "observaciones": doc.observaciones}
+
+
 @router.patch("/{documento_id}/cliente")
 def cambiar_cliente_venta(
     documento_id: int,
@@ -216,6 +241,7 @@ def listar_ventas(
             "subtotal": float(d.subtotal), "iva": float(d.iva), "total": float(d.total),
             "saldo": saldo, "facturada": d.factura_padre_id is not None,
             "metodo_pago_sat": d.metodo_pago_sat,
+            "observaciones": d.observaciones,
         })
     return out
 
