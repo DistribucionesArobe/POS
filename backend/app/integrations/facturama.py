@@ -129,6 +129,11 @@ class FacturamaClient:
             },
             "Items": items,
         }
+        # Observaciones (texto libre que Facturama pone en el PDF, no en XML fiscal).
+        # Se usa para numero de contrato, orden de compra, referencia del cliente.
+        obs = getattr(documento, "observaciones", None)
+        if obs:
+            payload["Observations"] = obs
         try:
             return self._post("/3/cfdis", payload)
         except FacturamaError as e:

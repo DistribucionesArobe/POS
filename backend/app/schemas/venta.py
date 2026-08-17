@@ -15,6 +15,10 @@ class ConceptoVentaIn(BaseModel):
     # la descripcion default '{producto.nombre} - {v.presentacion}' solo para
     # este documento (no toca el catalogo). Util para modificar texto antes de timbrar.
     descripcion: str | None = None
+    # Override opcional de la clave SAT ProductCode. Si viene, se usa esta y
+    # NO se actualiza el catalogo. Util para corregir claves invalidas al vuelo
+    # sin tocar el producto original.
+    clave_prod_serv_sat: str | None = None
 
 
 class PagoIn(BaseModel):
@@ -41,6 +45,10 @@ class DocumentoVentaIn(BaseModel):
     # Caso CFE: iva_retenido_pct=0.16 (gobierno retiene IVA completo a PF).
     iva_retenido_pct: float = 0
     isr_retenido_pct: float = 0
+    # Observaciones - texto libre que se pasa a Facturama como Observations
+    # y aparece en el PDF (no en el XML fiscal). Util para numeros de contrato,
+    # ordenes de compra, referencias del cliente, etc.
+    observaciones: str | None = None
 
 
 class ConceptoVentaOut(BaseModel):

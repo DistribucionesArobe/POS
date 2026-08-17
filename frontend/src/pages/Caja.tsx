@@ -13,6 +13,7 @@ type Item = {
   stock: number;
   unidad?: string;
   tasa_iva?: number;  // 0 = exento, 0.16 = general (default)
+  clave_sat?: string; // override de ProductCode (opcional)
 };
 
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -62,6 +63,8 @@ export default function Caja() {
   const [condicionesPagoSel, setCondicionesPagoSel] = useState<string>("");
   // Vista previa de la factura antes de timbrar
   const [mostrarPrevia, setMostrarPrevia] = useState<boolean>(false);
+  // Observaciones de la factura (Facturama Observations - sale en PDF, no XML)
+  const [observaciones, setObservaciones] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
   const recibidoRef = useRef<HTMLInputElement>(null);
 
@@ -351,10 +354,12 @@ export default function Caja() {
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
         unidad: i.unidad || undefined,
         descripcion: i.nombre || undefined,
+        clave_prod_serv_sat: i.clave_sat || undefined,
       })),
       iva_retenido_pct: retencionAplica ? 0.16 : 0,
       uso_cfdi: tipo === "FACTURA" ? usoCfdiSel : undefined,
       notas: condicionesPagoSel ? `Condiciones de pago: ${condicionesPagoSel}` : undefined,
+      observaciones: observaciones || undefined,
     };
     if (!esCredito) {
       const pagosFinales = pagos
@@ -1071,6 +1076,13 @@ export default function Caja() {
             c[idx].nombre = nombre;
             setItems(c);
           }}
+          onCambiarClaveSat={(idx, clave) => {
+            const c = [...items];
+            c[idx].clave_sat = clave;
+            setItems(c);
+          }}
+          observaciones={observaciones}
+          onCambiarObservaciones={setObservaciones}
           onCancelar={() => setMostrarPrevia(false)}
           onConfirmar={() => cobrar(true)}
         />
@@ -1140,7 +1152,8 @@ function PreviaFacturaModal({
   empresa, cliente, items, subtotal, iva, ivaRetenido, total,
   usoCfdi, tipoSel, condicionesPago, retencionAplica,
   procesando, onCambiarUnidad, onCambiarCantidad, onCambiarPrecio,
-  onCambiarNombre,
+  onCambiarNombre, onCambiarClaveSat,
+  observaciones, onCambiarObservaciones,
   onCancelar, onConfirmar,
 }: {
   empresa: { id: number; nombre: string } | null;
@@ -1159,6 +1172,9 @@ function PreviaFacturaModal({
   onCambiarCantidad: (idx: number, cantidad: number) => void;
   onCambiarPrecio: (idx: number, precio: number) => void;
   onCambiarNombre: (idx: number, nombre: string) => void;
+  onCambiarClaveSat: (idx: number, clave: string) => void;
+  observaciones: string;
+  onCambiarObservaciones: (v: string) => void;
   onCancelar: () => void;
   onConfirmar: () => void;
 }) {
@@ -1246,6 +1262,7 @@ function PreviaFacturaModal({
               <thead>
                 <tr style={{ background: "#f3f4f6" }}>
                   <th style={{ ...thP, textAlign: "left" }}>Descripción</th>
+                  <th style={{ ...thP, textAlign: "left", width: 90 }} title="Clave SAT ProductCode">Clave SAT</th>
                   <th style={{ ...thP, textAlign: "right", width: 60 }}>Cant</th>
                   <th style={{ ...thP, textAlign: "left", width: 70 }}>Unidad</th>
                   <th style={{ ...thP, textAlign: "right", width: 110 }}>Precio</th>
@@ -1265,6 +1282,18 @@ function PreviaFacturaModal({
                         }}
                         title="Editable - modifica solo para esta factura" />
                       <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>SKU {it.sku}</div>
+                    </td>
+                    <td style={tdP}>
+                      <input type="text" value={it.clave_sat || ""}
+                        onChange={(e) => onCambiarClaveSat(i, e.target.value)}
+                        placeholder="Auto"
+                        maxLength={8}
+                        style={{
+                          width: 80, padding: "3px 6px", fontSize: 11,
+                          border: "1px solid #cbd5e1", borderRadius: 4,
+                          fontFamily: "monospace",
+                        }}
+                        title="Override de Clave SAT (8 digitos). Vacio = usa la del catalogo" />
                     </td>
                     <td style={{ ...tdP, textAlign: "right" }}>
                       <input type="number" min="0.01" step="0.01" value={it.cantidad}
@@ -1320,6 +1349,25 @@ function PreviaFacturaModal({
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Observaciones (aparecen en PDF, no en XML fiscal) */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: "#64748b", fontWeight: 700, letterSpacing: "0.05em" }}>
+              OBSERVACIONES (opcional — aparece en el PDF)
+            </label>
+            <textarea value={observaciones}
+              onChange={(e) => onCambiarObservaciones(e.target.value)}
+              placeholder='Ej. "Contrato DG-ITACE/DA/RM/009/2026" u "Orden de compra #12345"'
+              style={{
+                width: "100%", padding: "6px 10px", fontSize: 12,
+                border: "1px solid #cbd5e1", borderRadius: 4,
+                marginTop: 4, minHeight: 50, resize: "vertical",
+              }} />
+            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 3 }}>
+              Se envía a Facturama como <code>Observations</code> y aparece en el PDF.
+              No forma parte del XML fiscal ni del sello SAT.
+            </div>
           </div>
 
           {/* Totales + datos CFDI */}

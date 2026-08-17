@@ -86,6 +86,9 @@ class DocumentoVenta(Base):
     )
 
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Observaciones - texto libre que se pasa a Facturama Observations y sale
+    # en el PDF (no en XML fiscal). Numero de contrato, orden de compra, etc.
+    observaciones: Mapped[str | None] = mapped_column(Text, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     conceptos: Mapped[list["ConceptoVenta"]] = relationship(

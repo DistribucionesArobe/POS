@@ -90,6 +90,13 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
             if desc_override and desc_override.strip()
             else f"{producto.nombre} - {v.presentacion}"
         )
+        # Clave SAT del producto: usa override del concepto si viene, sino la del catalogo
+        clave_sat_override = getattr(c, "clave_prod_serv_sat", None)
+        clave_sat_final = (
+            clave_sat_override.strip()
+            if clave_sat_override and clave_sat_override.strip()
+            else producto.clave_prod_serv_sat
+        )
         conceptos_creados.append(ConceptoVenta(
             variante_id=v.id,
             descripcion=descripcion_final,
@@ -97,7 +104,7 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
             precio_unitario=c.precio_unitario,
             descuento=c.descuento,
             importe=importe,
-            clave_prod_serv_sat=producto.clave_prod_serv_sat,
+            clave_prod_serv_sat=clave_sat_final,
             clave_unidad_sat=clave_unidad,
             tasa_iva=tasa_linea,
         ))
@@ -147,6 +154,7 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         metodo_pago_sat=payload.metodo_pago_sat,
         uso_cfdi=payload.uso_cfdi,
         notas=payload.notas,
+        observaciones=getattr(payload, "observaciones", None),
     )
     if cliente.dias_credito > 0:
         doc.fecha_vencimiento = doc.fecha + timedelta(days=cliente.dias_credito)
