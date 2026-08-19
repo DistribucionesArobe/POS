@@ -26,6 +26,147 @@ class CambiarClienteIn(BaseModel):
     cliente_id: int
 
 
+class ConceptoEditIn(BaseModel):
+    id: int  # concepto_venta.id
+    descripcion: str | None = None
+    cantidad: float | None = None
+    precio_unitario: float | None = None
+    clave_prod_serv_sat: str | None = None
+    clave_unidad_sat: str | None = None
+    tasa_iva: float | None = None
+
+
+class ActualizarPrevisTimbreIn(BaseModel):
+    """Payload para actualizar la venta y sus conceptos antes de timbrar."""
+    observaciones: str | None = None
+    conceptos: list[ConceptoEditIn] | None = None
+    uso_cfdi: str | None = None
+    metodo_pago_sat: str | None = None
+    forma_pago_sat: str | None = None
+
+
+@router.get("/{documento_id}/detalle-completo")
+def detalle_completo_venta(
+    documento_id: int,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Detalle completo con conceptos ya guardados (para la vista previa antes de timbrar)."""
+    doc = db.get(DocumentoVenta, documento_id)
+    if not doc:
+        raise HTTPException(404, "Venta no existe")
+    if doc.empresa_id != empresa_id:
+        raise HTTPException(403, "Venta de otra empresa")
+    cli = db.get(Cliente, doc.cliente_id)
+    emp = db.get(Empresa, doc.empresa_id)
+    conceptos = (
+        db.query(ConceptoVenta)
+        .filter(ConceptoVenta.documento_id == doc.id)
+        .order_by(ConceptoVenta.id)
+        .all()
+    )
+    return {
+        "id": doc.id, "folio": doc.folio, "tipo": doc.tipo,
+        "fecha": doc.fecha.isoformat(),
+        "subtotal": float(doc.subtotal), "iva": float(doc.iva), "total": float(doc.total),
+        "metodo_pago_sat": doc.metodo_pago_sat,
+        "forma_pago_sat": doc.forma_pago_sat,
+        "uso_cfdi": doc.uso_cfdi,
+        "observaciones": doc.observaciones,
+        "cliente": {
+            "id": cli.id, "nombre": cli.nombre, "razon_social": cli.razon_social,
+            "rfc": cli.rfc, "codigo_postal": cli.codigo_postal,
+            "regimen_fiscal": cli.regimen_fiscal, "correo": cli.correo,
+        } if cli else None,
+        "empresa": {"id": emp.id, "nombre": emp.nombre} if emp else None,
+        "conceptos": [
+            {
+                "id": c.id, "descripcion": c.descripcion,
+                "cantidad": float(c.cantidad),
+                "precio_unitario": float(c.precio_unitario),
+                "importe": float(c.importe),
+                "clave_prod_serv_sat": c.clave_prod_serv_sat,
+                "clave_unidad_sat": c.clave_unidad_sat,
+                "tasa_iva": float(c.tasa_iva) if c.tasa_iva is not None else 0.16,
+            }
+            for c in conceptos
+        ],
+    }
+
+
+@router.patch("/{documento_id}/preparar-timbre")
+def preparar_timbre(
+    documento_id: int,
+    payload: ActualizarPrevisTimbreIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Aplica cambios de la vista previa a una FACTURA antes de timbrarla.
+    Modifica descripcion/cant/precio/clave SAT/unidad/tasa IVA por concepto.
+    Tambien actualiza observaciones, uso_cfdi, metodo/forma pago del documento."""
+    doc = db.get(DocumentoVenta, documento_id)
+    if not doc:
+        raise HTTPException(404, "Venta no existe")
+    if doc.empresa_id != empresa_id:
+        raise HTTPException(403, "Venta de otra empresa")
+    if doc.tipo != "FACTURA":
+        raise HTTPException(400, "Solo se preparan facturas")
+    # Verificar que no este timbrada aun
+    cfdi = db.query(Cfdi).filter(Cfdi.documento_venta_id == doc.id).first()
+    if cfdi and not cfdi.cancelado:
+        raise HTTPException(400, "Ya esta timbrada; no se puede modificar")
+
+    # Actualizar campos del documento
+    if payload.observaciones is not None:
+        doc.observaciones = payload.observaciones.strip() or None
+    if payload.uso_cfdi is not None:
+        doc.uso_cfdi = payload.uso_cfdi.strip() or None
+    if payload.metodo_pago_sat is not None:
+        doc.metodo_pago_sat = payload.metodo_pago_sat
+        if payload.metodo_pago_sat == "PPD":
+            doc.forma_pago_sat = "99"
+    if payload.forma_pago_sat is not None and (doc.metodo_pago_sat or "") != "PPD":
+        doc.forma_pago_sat = payload.forma_pago_sat
+
+    # Actualizar conceptos
+    if payload.conceptos:
+        nuevo_subtotal = 0.0
+        nuevo_iva = 0.0
+        for cin in payload.conceptos:
+            cv = db.get(ConceptoVenta, cin.id)
+            if not cv or cv.documento_id != doc.id:
+                continue  # ignora conceptos que no pertenecen
+            if cin.descripcion is not None:
+                cv.descripcion = cin.descripcion.strip() or cv.descripcion
+            if cin.cantidad is not None and cin.cantidad > 0:
+                cv.cantidad = cin.cantidad
+            if cin.precio_unitario is not None and cin.precio_unitario >= 0:
+                cv.precio_unitario = cin.precio_unitario
+            if cin.clave_prod_serv_sat is not None:
+                cv.clave_prod_serv_sat = cin.clave_prod_serv_sat.strip() or cv.clave_prod_serv_sat
+            if cin.clave_unidad_sat is not None:
+                cv.clave_unidad_sat = cin.clave_unidad_sat.strip() or cv.clave_unidad_sat
+            if cin.tasa_iva is not None:
+                cv.tasa_iva = cin.tasa_iva
+            # Recalcular importe
+            cv.importe = round(float(cv.cantidad) * float(cv.precio_unitario), 2)
+        # Recalcular totales del doc con TODOS los conceptos actualizados
+        todos = db.query(ConceptoVenta).filter(ConceptoVenta.documento_id == doc.id).all()
+        for c in todos:
+            nuevo_subtotal += float(c.importe)
+            nuevo_iva += float(c.importe) * float(c.tasa_iva or 0.16)
+        doc.subtotal = round(nuevo_subtotal, 2)
+        doc.iva = round(nuevo_iva, 2)
+        doc.total = round(nuevo_subtotal + nuevo_iva, 2)
+    db.commit()
+    return {
+        "ok": True,
+        "subtotal": float(doc.subtotal),
+        "iva": float(doc.iva),
+        "total": float(doc.total),
+    }
+
+
 class ObservacionesIn(BaseModel):
     observaciones: str | None = None
 

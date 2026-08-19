@@ -49,6 +49,9 @@ export default function Ventas() {
   // Modal de duplicar venta con overrides
   const [duplicandoVenta, setDuplicandoVenta] = useState<VentaT | null>(null);
 
+  // Modal vista previa antes de timbrar
+  const [previaTimbre, setPreviaTimbre] = useState<VentaT | null>(null);
+
   // Modal de devolucion
   const [devolviendoFactura, setDevolviendoFactura] = useState<VentaT | null>(null);
   const [devConceptos, setDevConceptos] = useState<{ variante_id: number; descripcion: string; max: number; cantidad: number; precio: number }[]>([]);
@@ -522,8 +525,9 @@ export default function Ventas() {
                     {isFactura && !timbrada && !v.cfdi?.cancelado && (
                       <>
                         <button className="btn btn-sm" disabled={busy === v.id}
-                          onClick={() => timbrar(v.id)}>
-                          {busy === v.id ? "..." : "Timbrar"}
+                          onClick={() => setPreviaTimbre(v)}
+                          title="Ver vista previa editable antes de timbrar">
+                          {busy === v.id ? "..." : "👁 Previa y timbrar"}
                         </button>
                         <button className="btn-icon"
                           title="Cambiar cliente receptor antes de timbrar"
@@ -611,6 +615,16 @@ export default function Ventas() {
           venta={duplicandoVenta}
           onClose={() => setDuplicandoVenta(null)}
           onDuplicar={(overrides) => duplicarVenta(duplicandoVenta, overrides)}
+        />
+      )}
+      {previaTimbre && (
+        <PreviaTimbreModal
+          venta={previaTimbre}
+          onClose={() => setPreviaTimbre(null)}
+          onTimbrado={() => {
+            setPreviaTimbre(null);
+            cargar();
+          }}
         />
       )}
     </Layout>
@@ -912,6 +926,327 @@ function DuplicarVentaModal({ venta, onClose, onDuplicar }: {
               color: "#475569", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 14, cursor: "pointer",
             }}>
             Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Modal Vista Previa antes de timbrar (edicion + timbre en un solo flujo) =====
+
+type ConceptoPrevia = {
+  id: number;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  importe: number;
+  clave_prod_serv_sat: string | null;
+  clave_unidad_sat: string | null;
+  tasa_iva: number;
+};
+
+type DetalleVenta = {
+  id: number; folio: string; tipo: string; fecha: string;
+  subtotal: number; iva: number; total: number;
+  metodo_pago_sat: string | null;
+  forma_pago_sat: string | null;
+  uso_cfdi: string | null;
+  observaciones: string | null;
+  cliente: {
+    id: number; nombre: string; razon_social: string | null;
+    rfc: string | null; codigo_postal: string | null;
+    regimen_fiscal: string | null; correo: string | null;
+  } | null;
+  empresa: { id: number; nombre: string } | null;
+  conceptos: ConceptoPrevia[];
+};
+
+const USOS_CFDI_LIST: [string, string][] = [
+  ["G01", "Adquisicion de mercancias"],
+  ["G02", "Devoluciones, descuentos o bonificaciones"],
+  ["G03", "Gastos en general"],
+  ["I01", "Construcciones"],
+  ["I02", "Mobiliario y equipo de oficina"],
+  ["I03", "Equipo de transporte"],
+  ["I04", "Equipo de computo"],
+  ["I08", "Otra maquinaria"],
+  ["S01", "Sin efectos fiscales"],
+  ["CP01", "Pagos"],
+];
+
+function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
+  venta: VentaT;
+  onClose: () => void;
+  onTimbrado: () => void;
+}) {
+  const [detalle, setDetalle] = useState<DetalleVenta | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [conceptos, setConceptos] = useState<ConceptoPrevia[]>([]);
+  const [observaciones, setObservaciones] = useState<string>("");
+  const [usoCfdi, setUsoCfdi] = useState<string>("G03");
+  const [metodo, setMetodo] = useState<string>("PUE");
+  const [formaPago, setFormaPago] = useState<string>("01");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setCargando(true);
+      try {
+        const r = await api.get(`/api/ventas/${venta.id}/detalle-completo`);
+        setDetalle(r.data);
+        setConceptos(r.data.conceptos || []);
+        setObservaciones(r.data.observaciones || "");
+        setUsoCfdi(r.data.uso_cfdi || "G03");
+        setMetodo(r.data.metodo_pago_sat || "PUE");
+        setFormaPago(r.data.forma_pago_sat || "01");
+      } catch (err: any) {
+        alert("Error cargando detalle: " + (err.response?.data?.detail || err.message));
+        onClose();
+      } finally {
+        setCargando(false);
+      }
+    })();
+  }, [venta.id]);
+
+  function cambiarConcepto(idx: number, patch: Partial<ConceptoPrevia>) {
+    setConceptos(prev => {
+      const c = [...prev];
+      c[idx] = { ...c[idx], ...patch };
+      if (patch.cantidad !== undefined || patch.precio_unitario !== undefined) {
+        c[idx].importe = +(c[idx].cantidad * c[idx].precio_unitario).toFixed(2);
+      }
+      return c;
+    });
+  }
+
+  const subtotal = conceptos.reduce((a, c) => a + c.importe, 0);
+  const iva = conceptos.reduce((a, c) => a + c.importe * (c.tasa_iva || 0), 0);
+  const total = subtotal + iva;
+
+  async function guardarYTimbrar() {
+    if (!detalle) return;
+    setBusy(true);
+    try {
+      // 1. Guardar cambios (preparar-timbre)
+      await api.patch(`/api/ventas/${venta.id}/preparar-timbre`, {
+        observaciones: observaciones,
+        uso_cfdi: usoCfdi,
+        metodo_pago_sat: metodo,
+        forma_pago_sat: metodo === "PPD" ? "99" : formaPago,
+        conceptos: conceptos.map(c => ({
+          id: c.id,
+          descripcion: c.descripcion,
+          cantidad: c.cantidad,
+          precio_unitario: c.precio_unitario,
+          clave_prod_serv_sat: c.clave_prod_serv_sat || undefined,
+          clave_unidad_sat: c.clave_unidad_sat || undefined,
+          tasa_iva: c.tasa_iva,
+        })),
+      });
+      // 2. Timbrar
+      const r = await api.post(`/api/cfdi/timbrar/${venta.id}`);
+      let msg = `Timbrado OK\nUUID: ${r.data.uuid}\nFolio: ${r.data.serie}-${r.data.folio}`;
+      if (r.data.correo_enviado_a) msg += `\nEnviado a: ${r.data.correo_enviado_a}`;
+      alert(msg);
+      onTimbrado();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const usoLabel = USOS_CFDI_LIST.find(([c]) => c === usoCfdi)?.[1] || "";
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10,
+        width: "97%", maxWidth: 1100, maxHeight: "95vh", overflow: "auto",
+      }}>
+        <div style={{
+          background: "#0f172a", color: "white", padding: "14px 20px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          borderRadius: "10px 10px 0 0",
+        }}>
+          <div>
+            <strong style={{ fontSize: 16 }}>👁 Vista previa · Factura {venta.folio}</strong>
+            <div style={{ fontSize: 11, opacity: 0.8 }}>
+              Edita lo que necesites y confirma para timbrar
+            </div>
+          </div>
+          <button onClick={onClose} disabled={busy} style={{
+            background: "transparent", border: 0, color: "white", fontSize: 22, cursor: "pointer",
+          }}>×</button>
+        </div>
+
+        {cargando ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>Cargando...</div>
+        ) : !detalle ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#dc2626" }}>Sin datos</div>
+        ) : (
+          <div style={{ padding: 16 }}>
+            {/* Emisor + Receptor */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div style={{ padding: 10, background: "#f1f5f9", borderRadius: 6 }}>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>EMISOR</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{detalle.empresa?.nombre || "-"}</div>
+              </div>
+              <div style={{ padding: 10, background: "#dbeafe", borderRadius: 6, border: "1px solid #93c5fd" }}>
+                <div style={{ fontSize: 10, color: "#1e40af", fontWeight: 700 }}>RECEPTOR</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  {detalle.cliente?.razon_social || detalle.cliente?.nombre}
+                </div>
+                <div style={{ fontSize: 11, color: "#475569" }}>
+                  RFC: <b>{detalle.cliente?.rfc || "-"}</b> · CP: <b>{detalle.cliente?.codigo_postal || "-"}</b>
+                </div>
+                <div style={{ fontSize: 11, color: "#475569" }}>
+                  Regimen: <b>{detalle.cliente?.regimen_fiscal || "-"}</b>
+                </div>
+              </div>
+            </div>
+
+            {/* Datos CFDI editables */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <div>
+                <label style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>Metodo de pago</label>
+                <select value={metodo} onChange={(e) => setMetodo(e.target.value)}
+                  style={{ width: "100%", padding: 6, marginTop: 3, border: "1px solid #cbd5e1", borderRadius: 4 }}>
+                  <option value="PUE">PUE - Una sola exhibicion</option>
+                  <option value="PPD">PPD - Parcialidades / credito</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>Forma de pago</label>
+                {metodo === "PPD" ? (
+                  <input value="99 - Por definir" disabled
+                    style={{ width: "100%", padding: 6, marginTop: 3, background: "#f1f5f9",
+                      border: "1px solid #cbd5e1", borderRadius: 4 }} />
+                ) : (
+                  <select value={formaPago} onChange={(e) => setFormaPago(e.target.value)}
+                    style={{ width: "100%", padding: 6, marginTop: 3, border: "1px solid #cbd5e1", borderRadius: 4 }}>
+                    <option value="01">01 - Efectivo</option>
+                    <option value="03">03 - Transferencia</option>
+                    <option value="04">04 - Tarjeta credito</option>
+                    <option value="28">28 - Tarjeta debito</option>
+                  </select>
+                )}
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>Uso CFDI</label>
+                <select value={usoCfdi} onChange={(e) => setUsoCfdi(e.target.value)}
+                  style={{ width: "100%", padding: 6, marginTop: 3, border: "1px solid #cbd5e1", borderRadius: 4 }}>
+                  {USOS_CFDI_LIST.map(([c, l]) => (
+                    <option key={c} value={c}>{c} - {l}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Conceptos editables */}
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>
+              CONCEPTOS ({conceptos.length})
+            </div>
+            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse", marginBottom: 12 }}>
+              <thead>
+                <tr style={{ background: "#f3f4f6" }}>
+                  <th style={{ padding: 4, textAlign: "left" }}>Descripcion</th>
+                  <th style={{ padding: 4, textAlign: "left", width: 80 }}>Clave SAT</th>
+                  <th style={{ padding: 4, textAlign: "right", width: 55 }}>Cant</th>
+                  <th style={{ padding: 4, textAlign: "left", width: 55 }}>UnidSAT</th>
+                  <th style={{ padding: 4, textAlign: "right", width: 90 }}>Precio</th>
+                  <th style={{ padding: 4, textAlign: "right", width: 90 }}>Importe</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conceptos.map((c, i) => (
+                  <tr key={c.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: 3 }}>
+                      <input type="text" value={c.descripcion}
+                        onChange={(e) => cambiarConcepto(i, { descripcion: e.target.value })}
+                        style={{ width: "100%", padding: "3px 5px", fontSize: 11, border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                    </td>
+                    <td style={{ padding: 3 }}>
+                      <input type="text" value={c.clave_prod_serv_sat || ""} maxLength={8}
+                        onChange={(e) => cambiarConcepto(i, { clave_prod_serv_sat: e.target.value })}
+                        style={{ width: 75, padding: "3px 5px", fontSize: 11, fontFamily: "monospace",
+                          border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                    </td>
+                    <td style={{ padding: 3 }}>
+                      <input type="number" min="0.01" step="0.01" value={c.cantidad}
+                        onChange={(e) => cambiarConcepto(i, { cantidad: +e.target.value })}
+                        style={{ width: 55, padding: "3px 5px", fontSize: 11, textAlign: "right",
+                          border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                    </td>
+                    <td style={{ padding: 3 }}>
+                      <input type="text" value={c.clave_unidad_sat || ""} maxLength={3}
+                        onChange={(e) => cambiarConcepto(i, { clave_unidad_sat: e.target.value })}
+                        style={{ width: 50, padding: "3px 5px", fontSize: 11, fontFamily: "monospace",
+                          border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                    </td>
+                    <td style={{ padding: 3 }}>
+                      <input type="number" min="0" step="0.01" value={c.precio_unitario}
+                        onChange={(e) => cambiarConcepto(i, { precio_unitario: +e.target.value })}
+                        style={{ width: 85, padding: "3px 5px", fontSize: 11, textAlign: "right",
+                          border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                    </td>
+                    <td style={{ padding: 3, textAlign: "right", fontWeight: 700 }}>
+                      {fmt(c.importe)}
+                      {c.tasa_iva === 0 && (
+                        <div style={{ fontSize: 9, color: "#1e40af", fontWeight: 700 }}>0% IVA</div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Observaciones */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+                OBSERVACIONES (aparece en PDF, no en XML fiscal)
+              </label>
+              <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
+                placeholder='Ej. Contrato DG-ITACE/DA/RM/009/2026'
+                style={{ width: "100%", padding: 6, fontSize: 12, marginTop: 3, minHeight: 45,
+                  border: "1px solid #cbd5e1", borderRadius: 4 }} />
+            </div>
+
+            {/* Totales */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <div style={{ minWidth: 260, padding: 12, background: "#0f172a", color: "white", borderRadius: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span>Subtotal</span><span>{fmt(subtotal)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span>IVA</span><span>{fmt(iva)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 20, fontWeight: 800,
+                  marginTop: 6, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.3)" }}>
+                  <span>TOTAL</span><span>{fmt(total)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb",
+          display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <button onClick={onClose} disabled={busy}
+            style={{ padding: "10px 18px", background: "transparent",
+              border: "1px solid #cbd5e1", borderRadius: 6, cursor: "pointer" }}>
+            ← Cancelar
+          </button>
+          <button onClick={guardarYTimbrar} disabled={busy || cargando}
+            style={{ padding: "10px 22px", background: busy ? "#94a3b8" : "#10b981",
+              color: "white", border: 0, borderRadius: 6, fontWeight: 700, fontSize: 14,
+              cursor: busy ? "wait" : "pointer" }}>
+            {busy ? "Timbrando..." : "✓ Guardar y timbrar"}
           </button>
         </div>
       </div>
