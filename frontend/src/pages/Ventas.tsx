@@ -1060,6 +1060,24 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
 
   const usoLabel = USOS_CFDI_LIST.find(([c]) => c === usoCfdi)?.[1] || "";
 
+  function imprimirPrevia() {
+    if (!detalle) return;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    const html = construirHtmlPrevia({
+      folio: detalle.folio,
+      empresa: detalle.empresa?.nombre || "-",
+      cliente: detalle.cliente,
+      conceptos, subtotal, iva, total,
+      usoCfdi, usoLabel, metodo, formaPago,
+      observaciones,
+    });
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch {} }, 300);
+  }
+
   return (
     <div onClick={onClose} style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
@@ -1236,20 +1254,159 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
         )}
 
         <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb",
-          display: "flex", justifyContent: "space-between", gap: 8 }}>
+          display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
           <button onClick={onClose} disabled={busy}
             style={{ padding: "10px 18px", background: "transparent",
               border: "1px solid #cbd5e1", borderRadius: 6, cursor: "pointer" }}>
             ← Cancelar
           </button>
-          <button onClick={guardarYTimbrar} disabled={busy || cargando}
-            style={{ padding: "10px 22px", background: busy ? "#94a3b8" : "#10b981",
-              color: "white", border: 0, borderRadius: 6, fontWeight: 700, fontSize: 14,
-              cursor: busy ? "wait" : "pointer" }}>
-            {busy ? "Timbrando..." : "✓ Guardar y timbrar"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={imprimirPrevia} disabled={busy || cargando}
+              style={{ padding: "10px 16px", background: "white",
+                color: "#0ea5e9", border: "1px solid #0ea5e9",
+                borderRadius: 6, fontWeight: 600, fontSize: 13,
+                cursor: busy ? "wait" : "pointer" }}
+              title="Abre ventana nueva con la previa: puedes imprimir o guardar como PDF sin timbrar">
+              🖨 Imprimir/Guardar PDF
+            </button>
+            <button onClick={guardarYTimbrar} disabled={busy || cargando}
+              style={{ padding: "10px 22px", background: busy ? "#94a3b8" : "#10b981",
+                color: "white", border: 0, borderRadius: 6, fontWeight: 700, fontSize: 14,
+                cursor: busy ? "wait" : "pointer" }}>
+              {busy ? "Timbrando..." : "✓ Guardar y timbrar"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+
+// ===== HTML imprimible de vista previa =====
+
+function construirHtmlPrevia(d: {
+  folio: string;
+  empresa: string;
+  cliente: DetalleVenta["cliente"];
+  conceptos: ConceptoPrevia[];
+  subtotal: number;
+  iva: number;
+  total: number;
+  usoCfdi: string;
+  usoLabel: string;
+  metodo: string;
+  formaPago: string;
+  observaciones: string;
+}): string {
+  const fmtN = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const esc = (s: any) => String(s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
+  const rows = d.conceptos.map((c, i) => `
+    <tr>
+      <td style="text-align:center;color:#94a3b8">${i + 1}</td>
+      <td>${esc(c.descripcion)}<br/><span class="muted">Clave SAT ${esc(c.clave_prod_serv_sat || "-")} · Unidad ${esc(c.clave_unidad_sat || "-")}</span></td>
+      <td class="r">${c.cantidad}</td>
+      <td class="r">${fmtN(c.precio_unitario)}</td>
+      <td class="r b">${fmtN(c.importe)}${c.tasa_iva === 0 ? '<br/><small style="color:#1e40af">IVA 0%</small>' : ""}</td>
+    </tr>`).join("");
+  const fecha = new Date();
+  const fFecha = fecha.toLocaleString("es-MX", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
+  const metodoTxt = d.metodo === "PPD"
+    ? "PPD — Pago en parcialidades"
+    : "PUE — Una sola exhibicion";
+  const formaTxt = d.metodo === "PPD" ? "99 — Por definir" : d.formaPago;
+
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<title>Previa factura ${esc(d.folio)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; font-size: 12px; padding: 24px; color: #0f172a; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #0f172a; }
+  h2 { font-size: 13px; margin: 0; color: #475569; letter-spacing: 0.08em; text-transform: uppercase; }
+  .muted { color: #94a3b8; font-size: 10px; }
+  .aviso { background: #fef3c7; border: 1px solid #f59e0b; padding: 10px;
+           border-radius: 4px; margin-bottom: 14px; font-size: 11px; color: #92400e; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start;
+            margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #0f172a; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .box { padding: 10px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fafafa; }
+  .label { font-size: 9px; color: #64748b; letter-spacing: 0.04em; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  th { background: #0f172a; color: white; padding: 6px 8px; text-align: left; font-size: 10px;
+       text-transform: uppercase; }
+  td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .r { text-align: right; }
+  .b { font-weight: 700; }
+  .total-final { background: #0f172a; color: white; padding: 10px 14px; border-radius: 4px;
+                 display: flex; justify-content: space-between; font-size: 18px; font-weight: 800; }
+  .obs { background: #fef3c7; border: 1px solid #f59e0b; padding: 8px 12px;
+         border-radius: 4px; margin-top: 8px; font-size: 12px; color: #92400e; }
+  @media print { body { padding: 12px; } .no-print { display: none; } }
+</style></head><body>
+<div class="aviso">
+  <strong>📄 VISTA PREVIA — NO ES UNA FACTURA TIMBRADA.</strong>
+  Generado ${esc(fFecha)}. Al timbrar se emite el CFDI real con UUID del SAT.
+</div>
+<div class="header">
+  <div>
+    <h1>${esc(d.empresa)}</h1>
+    <div class="muted">Emisor</div>
+  </div>
+  <div style="text-align:right">
+    <h2>Factura preliminar</h2>
+    <div style="font-size:18px;font-weight:800;color:#0ea5e9">${esc(d.folio)}</div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <div class="label">RECEPTOR</div>
+    <div class="b" style="font-size:13px">${esc(d.cliente?.razon_social || d.cliente?.nombre || "-")}</div>
+    <div class="muted"><b>RFC:</b> ${esc(d.cliente?.rfc || "-")} · <b>CP:</b> ${esc(d.cliente?.codigo_postal || "-")}</div>
+    <div class="muted"><b>Regimen:</b> ${esc(d.cliente?.regimen_fiscal || "-")}</div>
+  </div>
+  <div class="box">
+    <div class="label">DATOS CFDI</div>
+    <div><b>Uso CFDI:</b> ${esc(d.usoCfdi)} — ${esc(d.usoLabel)}</div>
+    <div><b>Metodo pago:</b> ${esc(metodoTxt)}</div>
+    <div><b>Forma pago:</b> ${esc(formaTxt)}</div>
+  </div>
+</div>
+
+<div class="label" style="margin-bottom:4px">CONCEPTOS (${d.conceptos.length})</div>
+<table>
+  <thead><tr>
+    <th style="width:30px;text-align:center">#</th>
+    <th>Descripcion</th>
+    <th class="r" style="width:60px;color:white">Cant</th>
+    <th class="r" style="width:90px;color:white">P. Unit.</th>
+    <th class="r" style="width:100px;color:white">Importe</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+
+<div style="display:flex;justify-content:flex-end">
+  <div style="min-width:280px">
+    <table style="width:100%">
+      <tr><td>Subtotal</td><td class="r b">${fmtN(d.subtotal)}</td></tr>
+      <tr><td>IVA trasladado</td><td class="r">${fmtN(d.iva)}</td></tr>
+    </table>
+    <div class="total-final"><span>TOTAL</span><span>${fmtN(d.total)}</span></div>
+  </div>
+</div>
+
+${d.observaciones ? `<div class="obs"><b>OBSERVACIONES:</b> ${esc(d.observaciones)}</div>` : ""}
+
+<div class="no-print" style="text-align:center;margin-top:20px">
+  <button onclick="window.print()" style="padding:10px 20px;font-size:14px;background:#0ea5e9;color:white;border:0;border-radius:4px;cursor:pointer">
+    🖨 Imprimir / Guardar como PDF
+  </button>
+  <button onclick="window.close()" style="padding:10px 20px;font-size:14px;background:transparent;border:1px solid #ccc;border-radius:4px;cursor:pointer;margin-left:8px">
+    Cerrar
+  </button>
+</div>
+</body></html>`;
 }
