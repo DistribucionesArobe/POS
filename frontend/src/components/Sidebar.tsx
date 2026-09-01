@@ -13,10 +13,13 @@ const Icon = {
   logout: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   chevron: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
   key: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
+  chat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
 };
 
 const items = [
   { to: "/", label: "Dashboard", icon: Icon.dashboard },
+  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true },
+  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart },
   { to: "/caja", label: "Caja rapida", icon: Icon.cart },
   { to: "/venta", label: "Nueva venta", icon: Icon.cart },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list },
@@ -52,7 +55,24 @@ export default function Sidebar() {
 
   const [showEmpresaMenu, setShowEmpresaMenu] = useState(false);
   const [mostrarCambioPwd, setMostrarCambioPwd] = useState(false);
+  const [noLeidos, setNoLeidos] = useState<number>(0);
   const puedeCambiar = empresas.length > 1;
+
+  // Poll cada 30s para actualizar el badge de Mensajes Ventas
+  React.useEffect(() => {
+    let alive = true;
+    async function fetch() {
+      try {
+        const r = await api.get("/api/inbox/contador-no-leidos");
+        if (alive) setNoLeidos(r.data?.total || 0);
+      } catch {
+        if (alive) setNoLeidos(0);
+      }
+    }
+    fetch();
+    const iv = setInterval(fetch, 30000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
 
   async function cambiarEmpresa(id: number) {
     try {
@@ -133,7 +153,15 @@ export default function Sidebar() {
             className={`sidebar-link ${loc.pathname === it.to ? "active" : ""}`}
           >
             {it.icon}
-            <span>{it.label}</span>
+            <span style={{ flex: 1 }}>{it.label}</span>
+            {(it as any).showBadge && noLeidos > 0 && (
+              <span style={{
+                background: "#dc2626", color: "white",
+                fontSize: 10, fontWeight: 700,
+                padding: "1px 7px", borderRadius: 10,
+                minWidth: 16, textAlign: "center",
+              }}>{noLeidos > 99 ? "99+" : noLeidos}</span>
+            )}
           </Link>
         ))}
         {(rol === "admin" || superAdmin) && (
