@@ -16,23 +16,25 @@ const Icon = {
   chat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
 };
 
+// Items del sidebar. Cada uno tiene 'roles' (que roles lo ven) o si es undefined lo ven todos.
+// Roles: 'cajero' | 'admin' | 'super_admin'. super_admin ve TODO siempre.
 const items = [
-  { to: "/", label: "Dashboard", icon: Icon.dashboard },
-  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true },
-  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart },
-  { to: "/caja", label: "Caja rapida", icon: Icon.cart },
-  { to: "/venta", label: "Nueva venta", icon: Icon.cart },
-  { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list },
-  { to: "/ventas", label: "Mis ventas", icon: Icon.list },
-  { to: "/productos", label: "Productos", icon: Icon.package },
-  { to: "/clientes", label: "Clientes", icon: Icon.users },
-  { to: "/proveedores", label: "Proveedores", icon: Icon.users },
-  { to: "/compras", label: "Compras y CxP", icon: Icon.package },
-  { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar },
-  { to: "/cartera", label: "Cartera", icon: Icon.dollar },
-  { to: "/monedero", label: "Monedero", icon: Icon.dollar },
-  { to: "/corte", label: "Corte de caja", icon: Icon.dollar },
-  { to: "/reportes", label: "Reportes", icon: Icon.list },
+  { to: "/", label: "Dashboard", icon: Icon.dashboard, roles: ["admin"] },
+  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true, roles: ["cajero", "admin"] },
+  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["cajero", "admin"] },
+  { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["cajero", "admin"] },
+  { to: "/venta", label: "Nueva venta", icon: Icon.cart, roles: ["admin"] },
+  { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin"] },
+  { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["cajero", "admin"] },
+  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin"] },
+  { to: "/clientes", label: "Clientes", icon: Icon.users, roles: ["admin"] },
+  { to: "/proveedores", label: "Proveedores", icon: Icon.users, roles: ["admin"] },
+  { to: "/compras", label: "Compras y CxP", icon: Icon.package, roles: ["admin"] },
+  { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar, roles: ["admin"] },
+  { to: "/cartera", label: "Cartera", icon: Icon.dollar, roles: ["admin"] },
+  { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin"] },
+  { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["cajero", "admin"] },
+  { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin"] },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }
@@ -146,7 +148,14 @@ export default function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
-        {items.map((it) => (
+        {items.filter((it) => {
+          // Super admin ve todo
+          if (superAdmin) return true;
+          // Si el item no tiene 'roles', lo ven todos
+          if (!(it as any).roles) return true;
+          // Si el rol del usuario esta en la lista, lo ve
+          return (it as any).roles.includes(rol);
+        }).map((it) => (
           <Link
             key={it.to}
             to={it.to}
