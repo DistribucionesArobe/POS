@@ -33,6 +33,7 @@ export default function Mostrador() {
   const [cobrando, setCobrando] = useState(false);
   const [ultimaVenta, setUltimaVenta] = useState<any | null>(null);
   const [busqueda, setBusqueda] = useState("");
+  const [clienteGenericoId, setClienteGenericoId] = useState<number | null>(null);
 
   async function cargar() {
     try {
@@ -53,7 +54,15 @@ export default function Mostrador() {
       // silent
     }
   }
-  useEffect(() => { cargar(); }, []);
+  async function cargarClienteGenerico() {
+    try {
+      const r = await api.get("/api/clientes/publico-general");
+      setClienteGenericoId(r.data.id);
+    } catch (err) {
+      // silent
+    }
+  }
+  useEffect(() => { cargar(); cargarClienteGenerico(); }, []);
 
   function agregar(p: Variante) {
     setItems(prev => {
@@ -98,11 +107,23 @@ export default function Mostrador() {
 
   async function cobrar(formaSat: string) {
     if (items.length === 0) return;
+    // Asegurar que tenemos cliente generico (lo cargamos on-demand si aun no esta)
+    let clienteId = clienteGenericoId;
+    if (!clienteId) {
+      try {
+        const r0 = await api.get("/api/clientes/publico-general");
+        clienteId = r0.data.id;
+        setClienteGenericoId(clienteId);
+      } catch (err: any) {
+        alert("No se pudo obtener el cliente generico: " + (err.response?.data?.detail || err.message));
+        return;
+      }
+    }
     setCobrando(true);
     try {
       const r = await api.post("/api/ventas", {
         tipo: "TICKET",
-        cliente_id: 1,  // Publico en general (asumimos id=1 en cada empresa)
+        cliente_id: clienteId,
         forma_pago_sat: formaSat,
         metodo_pago_sat: "PUE",
         conceptos: items.map(i => ({

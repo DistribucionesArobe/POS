@@ -12,6 +12,45 @@ from app.services.security import get_active_empresa_id
 router = APIRouter()
 
 
+@router.get("/publico-general")
+def publico_general(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Busca (o crea) el cliente 'PUBLICO EN GENERAL' de la empresa activa.
+    Usado por el Mostrador para tickets rapidos sin cliente registrado."""
+    cli = (
+        db.query(Cliente)
+        .filter(Cliente.empresa_id == empresa_id)
+        .filter(
+            or_(
+                Cliente.rfc == "XAXX010101000",
+                Cliente.nombre.ilike("publico en general%"),
+                Cliente.razon_social.ilike("publico en general%"),
+            )
+        )
+        .first()
+    )
+    if not cli:
+        cli = Cliente(
+            empresa_id=empresa_id,
+            nombre="PUBLICO EN GENERAL",
+            razon_social="PUBLICO EN GENERAL",
+            rfc="XAXX010101000",
+            codigo_postal="87000",
+            regimen_fiscal="616",
+            activo=True,
+            creado_en=datetime.utcnow(),
+        )
+        db.add(cli)
+        db.commit()
+        db.refresh(cli)
+    return {
+        "id": cli.id, "nombre": cli.nombre,
+        "razon_social": cli.razon_social, "rfc": cli.rfc,
+    }
+
+
 @router.post("/parsear-csf")
 async def parsear_csf(
     file: UploadFile = File(...),
@@ -96,6 +135,9 @@ def obtener_cliente(
         "id": c.id, "nombre": c.nombre, "rfc": c.rfc, "razon_social": c.razon_social,
         "regimen_fiscal": c.regimen_fiscal, "codigo_postal": c.codigo_postal,
         "uso_cfdi_default": c.uso_cfdi_default,
+        "forma_pago_default": getattr(c, "forma_pago_default", None),
+        "metodo_pago_default": getattr(c, "metodo_pago_default", None),
+        "condiciones_pago": getattr(c, "condiciones_pago", None),
         "correo": c.correo, "telefono": c.telefono, "whatsapp": c.whatsapp,
         "direccion": c.direccion, "notas": c.notas,
         "dias_credito": c.dias_credito,
