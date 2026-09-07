@@ -137,8 +137,30 @@ class FacturamaClient:
         try:
             return self._post("/3/cfdis", payload)
         except FacturamaError as e:
-            # Log el payload completo para debug en Render Logs
             import json as _json
+            import re
+            err_str = str(e)
+            # Auto-retry: si Facturama rechaza por claves SAT invalidas,
+            # sustituir esas claves por 01010101 (comodin universal SAT)
+            # y reintentar UNA vez. Evita que el usuario tenga que arreglar
+            # claves a mano cada vez.
+            if "ProductCode" in err_str and "no se encuentra en los catalogos" in err_str:
+                idxs = sorted(set(int(m) for m in re.findall(r"items\[(\d+)\]\.ProductCode", err_str)))
+                claves_sustituidas = []
+                for idx in idxs:
+                    if 0 <= idx < len(payload["Items"]):
+                        vieja = payload["Items"][idx]["ProductCode"]
+                        desc = payload["Items"][idx].get("Description", "")
+                        payload["Items"][idx]["ProductCode"] = "01010101"
+                        claves_sustituidas.append(f"item[{idx}] '{desc[:30]}' {vieja}->01010101")
+                if claves_sustituidas:
+                    logger.warning("RETRY sustituyendo claves SAT invalidas: %s", claves_sustituidas)
+                    try:
+                        return self._post("/3/cfdis", payload)
+                    except FacturamaError as e2:
+                        logger.error("FACTURAMA RECHAZO tras retry. Payload: %s", _json.dumps(payload, default=str))
+                        logger.error("FACTURAMA ERROR retry: %s", str(e2))
+                        raise
             logger.error("FACTURAMA RECHAZO. Payload: %s", _json.dumps(payload, default=str))
             logger.error("FACTURAMA ERROR: %s", str(e))
             raise
