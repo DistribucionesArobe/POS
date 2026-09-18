@@ -26,7 +26,7 @@ const items = [
   { to: "/venta", label: "Nueva venta", icon: Icon.cart, roles: ["admin"] },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin"] },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["cajero", "admin"] },
-  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin"] },
+  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["cajero", "admin"] },
   { to: "/clientes", label: "Clientes", icon: Icon.users, roles: ["admin"] },
   { to: "/proveedores", label: "Proveedores", icon: Icon.users, roles: ["admin"] },
   { to: "/compras", label: "Compras y CxP", icon: Icon.package, roles: ["admin"] },
