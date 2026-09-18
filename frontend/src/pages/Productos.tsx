@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
@@ -25,6 +25,10 @@ const FORM_VACIO = {
 const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function Productos() {
+  // El cajero ve una version simplificada: sin campos fiscales, inputs grandes,
+  // botones de IA/Excel ocultos. Solo edita nombre, precio, activo.
+  const esCajero = localStorage.getItem("rol") === "cajero";
+
   const [productos, setProductos] = useState<ProductoT[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [form, setForm] = useState(FORM_VACIO);
@@ -388,19 +392,24 @@ export default function Productos() {
       subtitle={`${productos.length} producto(s) en ${familias.length} familia(s)`}
       actions={
         <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn-icon" onClick={abrirSugerenciasBulk} disabled={sugiriendoSat}
-            title="Sugiere claves SAT con IA para todos los productos sin clave">
-            {sugiriendoSat ? "..." : "🪄 Asignar SAT con IA"}
-          </button>
-          <button className="btn-icon" onClick={descargarPlantilla} title="Descarga XLSX vacia para llenar y subir">
-            Plantilla XLSX
-          </button>
-          <button className="btn-icon" onClick={() => fileRef.current?.click()} disabled={importando}>
-            {importando ? "Importando..." : "Importar Excel"}
-          </button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xlsm" style={{ display: "none" }}
-            onChange={(e) => e.target.files?.[0] && importarExcel(e.target.files[0])} />
-          <button className="btn" onClick={() => setMostrarForm(!mostrarForm)}>
+          {!esCajero && (
+            <>
+              <button className="btn-icon" onClick={abrirSugerenciasBulk} disabled={sugiriendoSat}
+                title="Sugiere claves SAT con IA para todos los productos sin clave">
+                {sugiriendoSat ? "..." : "🪄 Asignar SAT con IA"}
+              </button>
+              <button className="btn-icon" onClick={descargarPlantilla} title="Descarga XLSX vacia para llenar y subir">
+                Plantilla XLSX
+              </button>
+              <button className="btn-icon" onClick={() => fileRef.current?.click()} disabled={importando}>
+                {importando ? "Importando..." : "Importar Excel"}
+              </button>
+              <input ref={fileRef} type="file" accept=".xlsx,.xlsm" style={{ display: "none" }}
+                onChange={(e) => e.target.files?.[0] && importarExcel(e.target.files[0])} />
+            </>
+          )}
+          <button className="btn" onClick={() => setMostrarForm(!mostrarForm)}
+            style={esCajero ? { fontSize: 16, padding: "12px 20px" } : undefined}>
             {mostrarForm ? "Cancelar" : "+ Nuevo producto"}
           </button>
         </div>
@@ -737,6 +746,7 @@ export default function Productos() {
         <EditarVarianteModal
           producto={editandoVar.producto}
           variante={editandoVar.variante}
+          esCajero={esCajero}
           onClose={() => setEditandoVar(null)}
           onSaved={() => { setEditandoVar(null); cargar(); }}
         />
@@ -810,10 +820,18 @@ export default function Productos() {
 }
 
 
-function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
+function EditarVarianteModal({ producto, variante, onClose, onSaved, esCajero = false }: {
   producto: ProductoT; variante: Variante;
   onClose: () => void; onSaved: () => void;
+  esCajero?: boolean;
 }) {
+  // Estilos grandes para tablet cuando el usuario es cajero
+  const inputBig: CSSProperties = esCajero
+    ? { fontSize: 18, padding: "12px 14px", height: 48 }
+    : {};
+  const labelBig: CSSProperties = esCajero
+    ? { fontSize: 14, fontWeight: 600 }
+    : {};
   // Producto fields
   const [nombre, setNombre] = useState(producto.nombre);
   const [categoria, setCategoria] = useState(producto.categoria || "");
@@ -888,94 +906,115 @@ function EditarVarianteModal({ producto, variante, onClose, onSaved }: {
         <h4 style={{ margin: "12px 0 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>Producto</h4>
         <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div className="form-grid-full">
-            <label>Nombre *</label>
-            <input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+            <label style={labelBig}>Nombre *</label>
+            <input className="input" style={inputBig} value={nombre} onChange={(e) => setNombre(e.target.value)} />
           </div>
           <div>
-            <label>Familia / Categoría</label>
-            <input className="input" value={categoria} onChange={(e) => setCategoria(e.target.value)} />
+            <label style={labelBig}>Familia / Categoría</label>
+            <input className="input" style={inputBig} value={categoria} onChange={(e) => setCategoria(e.target.value)} />
           </div>
-          <div>
-            <label>Marca</label>
-            <input className="input" value={marca} onChange={(e) => setMarca(e.target.value)} />
-          </div>
-          <div className="form-grid-full">
-            <label>Clave SAT (8 dígitos)</label>
-            <input className="input" maxLength={8} value={claveSat}
-              onChange={(e) => setClaveSat(e.target.value.replace(/\D/g, ""))} />
-          </div>
+          {!esCajero && (
+            <>
+              <div>
+                <label>Marca</label>
+                <input className="input" value={marca} onChange={(e) => setMarca(e.target.value)} />
+              </div>
+              <div className="form-grid-full">
+                <label>Clave SAT (8 dígitos)</label>
+                <input className="input" maxLength={8} value={claveSat}
+                  onChange={(e) => setClaveSat(e.target.value.replace(/\D/g, ""))} />
+              </div>
+            </>
+          )}
         </div>
 
-        <h4 style={{ margin: "16px 0 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>Variante</h4>
-        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <h4 style={{ margin: "16px 0 8px", fontSize: 14, color: "var(--color-text-secondary)" }}>
+          {esCajero ? "Precio y stock" : "Variante"}
+        </h4>
+        <div className="form-grid" style={{ gridTemplateColumns: esCajero ? "1fr 1fr" : "1fr 1fr 1fr" }}>
+          {!esCajero && (
+            <>
+              <div>
+                <label>SKU *</label>
+                <input className="input" value={sku} onChange={(e) => setSku(e.target.value)} />
+              </div>
+              <div>
+                <label>Presentación</label>
+                <input className="input" value={presentacion} onChange={(e) => setPresentacion(e.target.value)} />
+              </div>
+              <div>
+                <label>Unidad</label>
+                <input className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)} />
+              </div>
+            </>
+          )}
           <div>
-            <label>SKU *</label>
-            <input className="input" value={sku} onChange={(e) => setSku(e.target.value)} />
-          </div>
-          <div>
-            <label>Presentación</label>
-            <input className="input" value={presentacion} onChange={(e) => setPresentacion(e.target.value)} />
-          </div>
-          <div>
-            <label>Unidad</label>
-            <input className="input" value={unidad} onChange={(e) => setUnidad(e.target.value)} />
-          </div>
-          <div>
-            <label>Precio público</label>
-            <input className="input" type="number" step="0.01" value={precioPublico}
+            <label style={labelBig}>Precio público</label>
+            <input className="input" style={inputBig} type="number" step="0.01" value={precioPublico}
               onChange={(e) => setPrecioPublico(+e.target.value)} />
           </div>
+          {!esCajero && (
+            <div>
+              <label>Precio mayoreo</label>
+              <input className="input" type="number" step="0.01" value={precioMayoreo}
+                onChange={(e) => setPrecioMayoreo(+e.target.value)} />
+            </div>
+          )}
           <div>
-            <label>Precio mayoreo</label>
-            <input className="input" type="number" step="0.01" value={precioMayoreo}
-              onChange={(e) => setPrecioMayoreo(+e.target.value)} />
-          </div>
-          <div>
-            <label>Costo promedio</label>
-            <input className="input" type="number" step="0.01" value={costoPromedio}
+            <label style={labelBig}>{esCajero ? "Costo (opcional)" : "Costo promedio"}</label>
+            <input className="input" style={inputBig} type="number" step="0.01" value={costoPromedio}
               onChange={(e) => setCostoPromedio(+e.target.value)} />
           </div>
-          <div>
-            <label>Stock mínimo</label>
-            <input className="input" type="number" step="1" value={stockMinimo}
-              onChange={(e) => setStockMinimo(+e.target.value)} />
-          </div>
-          <div style={{ display: "flex", alignItems: "end" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, cursor: "pointer" }}>
-              <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} />
-              Activo
-            </label>
-          </div>
-          <div className="form-grid-full" style={{
-            marginTop: 8, padding: 10, background: sinIva ? "#dbeafe" : "#f8fafc",
-            border: sinIva ? "1px solid #93c5fd" : "1px solid #e2e8f0",
-            borderRadius: 6,
-          }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>
-              <input type="checkbox" checked={sinIva}
-                onChange={(e) => setSinIva(e.target.checked)}
-                style={{ width: 18, height: 18 }} />
-              <span>Sin IVA (tasa 0%)</span>
-              {sinIva && (
-                <span style={{
-                  fontSize: 10, padding: "2px 8px", background: "#1e40af",
-                  color: "white", borderRadius: 3, fontWeight: 700, letterSpacing: 0.5,
-                }}>EXENTO</span>
-              )}
-            </label>
-            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-              Marca esto para alimentos basicos (azucar, cafe, tortillas),
-              medicinas, libros o cualquier producto exento de IVA (Art. 2-A LIVA).
-              El sistema NO cobrara IVA al vender.
+          {!esCajero && (
+            <div>
+              <label>Stock mínimo</label>
+              <input className="input" type="number" step="1" value={stockMinimo}
+                onChange={(e) => setStockMinimo(+e.target.value)} />
             </div>
+          )}
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: esCajero ? 18 : 14, cursor: "pointer", fontWeight: esCajero ? 600 : 400 }}>
+              <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)}
+                style={esCajero ? { width: 24, height: 24 } : undefined} />
+              Activo (aparece en Mostrador)
+            </label>
           </div>
+          {!esCajero && (
+            <div className="form-grid-full" style={{
+              marginTop: 8, padding: 10, background: sinIva ? "#dbeafe" : "#f8fafc",
+              border: sinIva ? "1px solid #93c5fd" : "1px solid #e2e8f0",
+              borderRadius: 6,
+            }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>
+                <input type="checkbox" checked={sinIva}
+                  onChange={(e) => setSinIva(e.target.checked)}
+                  style={{ width: 18, height: 18 }} />
+                <span>Sin IVA (tasa 0%)</span>
+                {sinIva && (
+                  <span style={{
+                    fontSize: 10, padding: "2px 8px", background: "#1e40af",
+                    color: "white", borderRadius: 3, fontWeight: 700, letterSpacing: 0.5,
+                  }}>EXENTO</span>
+                )}
+              </label>
+              <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                Marca esto para alimentos basicos (azucar, cafe, tortillas),
+                medicinas, libros o cualquier producto exento de IVA (Art. 2-A LIVA).
+                El sistema NO cobrara IVA al vender.
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-          <button className="btn" disabled={busy} onClick={guardar} style={{ flex: 1, justifyContent: "center" }}>
+          <button className="btn" disabled={busy} onClick={guardar}
+            style={{ flex: 1, justifyContent: "center", ...(esCajero ? { fontSize: 18, padding: "14px", height: 56 } : {}) }}>
             {busy ? "Guardando..." : "Guardar cambios"}
           </button>
-          <button className="btn-icon" onClick={onClose}>Cancelar</button>
+          <button className="btn-icon" onClick={onClose}
+            style={esCajero ? { fontSize: 16, padding: "14px 20px" } : undefined}>
+            Cancelar
+          </button>
         </div>
       </div>
     </div>

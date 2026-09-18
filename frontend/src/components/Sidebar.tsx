@@ -96,7 +96,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <span className="sidebar-logo-dot"></span>
-        ACEROMAX
+        POS
       </div>
 
       <div style={{ marginBottom: 24, position: "relative" }}>
