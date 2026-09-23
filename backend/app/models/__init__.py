@@ -19,3 +19,10 @@ from app.models.activo import Activo  # noqa
 from app.models.tarjeta_credito import ConceptoTarjeta, TarjetaTotal, TarjetaSubcuenta  # noqa
 from app.models.gastos_personales import GastoPersonal, IngresoPersonal  # noqa
 from app.models.monedero import MonederoMovimiento  # noqa
+from app.models.inbox import (  # noqa
+    CanalMensajeria, Conversacion, Mensaje, PlantillaWa,
+)
+from app.models.auditoria import CxpAuditoria  # noqa
+from app.models.importacion import (  # noqa
+    Importacion, ImportacionRenglon, ImportacionGasto, ImportacionGastoDefault,
+)
