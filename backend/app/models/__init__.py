@@ -26,3 +26,4 @@ from app.models.auditoria import CxpAuditoria  # noqa
 from app.models.importacion import (  # noqa
     Importacion, ImportacionRenglon, ImportacionGasto, ImportacionGastoDefault,
 )
+from app.models.academia import AcademiaPago  # noqa

@@ -24,6 +24,7 @@ from app.routers import (
     monedero,
     inbox,
     importaciones,
+    academia,
 )
 
 settings = get_settings()
@@ -74,3 +75,4 @@ app.include_router(tarjetas.router, prefix="/api/tarjetas", tags=["tarjetas"])
 app.include_router(monedero.router, prefix="/api/monedero", tags=["monedero"])
 app.include_router(inbox.router, prefix="/api/inbox", tags=["inbox"])
 app.include_router(importaciones.router, prefix="/api")
+app.include_router(academia.router, prefix="/api")

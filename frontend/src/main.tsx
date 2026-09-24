@@ -59,6 +59,7 @@ import Inbox from "./pages/Inbox";
 import Mostrador from "./pages/Mostrador";
 import Importaciones from "./pages/Importaciones";
 import ImportacionEditar from "./pages/ImportacionEditar";
+import Academia from "./pages/Academia";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -99,6 +100,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/cartera" element={<Cartera />} />
           <Route path="/importaciones" element={<Importaciones />} />
           <Route path="/importaciones/:id" element={<ImportacionEditar />} />
+          <Route path="/academia" element={<Academia />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}

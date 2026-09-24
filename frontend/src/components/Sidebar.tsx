@@ -36,6 +36,7 @@ const items = [
   { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["cajero", "admin"] },
   { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin"] },
   { to: "/importaciones", label: "Importaciones", icon: Icon.package, roles: ["admin"] },
+  { to: "/academia", label: "Academia", icon: Icon.users, roles: ["cajero", "admin"] },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }
