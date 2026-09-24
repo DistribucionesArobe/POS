@@ -34,8 +34,9 @@ from app.models import (
 )
 from app.models.venta import EstatusDocumento, TipoDocumento
 from app.schemas.compra import CompraIn, AbonoCxPIn
-from app.services import compra_service
-from app.services.security import get_active_empresa_id
+from app.services import compra_service, auditoria_service
+from app.services.security import get_active_empresa_id, get_current_user
+from app.models import CxpAuditoria, Usuario
 
 router = APIRouter()
 
@@ -220,6 +221,7 @@ def crear_cxp_manual(
 def actualizar_cxp_manual(
     cxp_id: int,
     payload: dict,
+    user: Usuario = Depends(get_current_user),
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
@@ -234,6 +236,9 @@ def actualizar_cxp_manual(
         compra = db.get(Compra, cxp.compra_id)
         if compra and compra.empresa_id != empresa_id:
             raise HTTPException(403, "CxP de otra empresa")
+
+    # Snapshot ANTES para poder deshacer
+    snap_antes = auditoria_service.snapshot(cxp)
 
     if "folio_factura" in payload:
         cxp.folio_factura = payload["folio_factura"] or None
@@ -278,13 +283,52 @@ def actualizar_cxp_manual(
         cxp.pagado = cxp.saldo <= 0.01
     if "corto_plazo" in payload:
         cxp.corto_plazo = bool(payload["corto_plazo"])
+    db.flush()
+    # Registrar auditoria del cambio
+    snap_despues = auditoria_service.snapshot(cxp)
+    campos_cambiados = [
+        k for k in snap_despues
+        if snap_antes.get(k) != snap_despues.get(k)
+    ]
+    resumen = _construir_resumen_cambio(
+        snap_antes, snap_despues, campos_cambiados,
+        prefijo=f"CxP {cxp.folio_factura or cxp.id}"
+    )
+    auditoria_service.registrar_cambio(
+        db, tabla="cuentas_por_pagar", registro_id=cxp.id,
+        accion="update", snapshot_antes=snap_antes,
+        snapshot_despues=snap_despues, resumen=resumen,
+        empresa_id=empresa_id, user=user,
+    )
     db.commit()
     return {"ok": True}
+
+
+def _construir_resumen_cambio(snap_antes: dict, snap_despues: dict, campos: list, prefijo: str = "") -> str:
+    """Genera un resumen legible de que cambio."""
+    if not campos:
+        return f"{prefijo}: sin cambios"
+    partes = []
+    for c in campos[:3]:  # solo los primeros 3 cambios
+        a = snap_antes.get(c)
+        d = snap_despues.get(c)
+        # Formato bonito por tipo
+        if isinstance(a, (int, float)) and isinstance(d, (int, float)):
+            partes.append(f"{c}: {a} → {d}")
+        else:
+            a_str = str(a)[:30] if a else "vacio"
+            d_str = str(d)[:30] if d else "vacio"
+            partes.append(f"{c}: {a_str} → {d_str}")
+    resto = len(campos) - 3
+    if resto > 0:
+        partes.append(f"y {resto} mas")
+    return f"{prefijo}: " + ", ".join(partes)
 
 
 @router.delete("/manual/{cxp_id}")
 def borrar_cxp_manual(
     cxp_id: int,
+    user: Usuario = Depends(get_current_user),
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
@@ -296,9 +340,61 @@ def borrar_cxp_manual(
         raise HTTPException(400, "Esta CxP esta ligada a una Compra; no se puede borrar suelta")
     if cxp.empresa_id and cxp.empresa_id != empresa_id:
         raise HTTPException(403, "CxP de otra empresa")
+    # Snapshot para poder deshacer el borrado (recrear el registro)
+    snap = auditoria_service.snapshot(cxp)
+    folio = cxp.folio_factura or f"#{cxp.id}"
     db.delete(cxp)
+    db.flush()
+    auditoria_service.registrar_cambio(
+        db, tabla="cuentas_por_pagar", registro_id=cxp_id,
+        accion="delete", snapshot_antes=snap,
+        snapshot_despues=None, resumen=f"Elimino CxP {folio}",
+        empresa_id=empresa_id, user=user,
+    )
     db.commit()
     return {"ok": True}
+
+
+# ===== HISTORIAL / AUDITORIA CxP =====
+
+@router.get("/historial")
+def listar_historial(
+    limit: int = Query(50, ge=1, le=200),
+    tabla: str | None = None,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Lista las ultimas acciones en el Tablero CxP (para poder deshacer)."""
+    q = db.query(CxpAuditoria).filter(CxpAuditoria.empresa_id == empresa_id)
+    if tabla:
+        q = q.filter(CxpAuditoria.tabla == tabla)
+    rows = q.order_by(CxpAuditoria.fecha.desc()).limit(limit).all()
+    return [
+        {
+            "id": r.id, "tabla": r.tabla, "registro_id": r.registro_id,
+            "accion": r.accion, "resumen": r.resumen,
+            "usuario_id": r.usuario_id, "usuario_email": r.usuario_email,
+            "fecha": r.fecha.isoformat(),
+            "revertido_por": r.revertido_por,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/historial/{auditoria_id}/deshacer")
+def deshacer_accion(
+    auditoria_id: int,
+    user: Usuario = Depends(get_current_user),
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Revierte una accion especifica del historial."""
+    try:
+        r = auditoria_service.restaurar_snapshot(db, auditoria_id, empresa_id, user)
+        db.commit()
+        return r
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ===== Panel mensual (tablero estilo Excel) =====

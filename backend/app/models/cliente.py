@@ -19,6 +19,11 @@ class Cliente(Base):
     regimen_fiscal: Mapped[str | None] = mapped_column(String(8), nullable=True)
     codigo_postal: Mapped[str | None] = mapped_column(String(5), nullable=True)
     uso_cfdi_default: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Defaults para CFDI - se pre-seleccionan en el modal de cobro pero el usuario
+    # los puede cambiar antes de timbrar. Reduce errores y captura repetitiva.
+    forma_pago_default: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    metodo_pago_default: Mapped[str | None] = mapped_column(String(3), nullable=True)  # PUE | PPD
+    condiciones_pago: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     telefono: Mapped[str | None] = mapped_column(String(32), nullable=True)
