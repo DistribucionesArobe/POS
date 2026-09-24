@@ -133,8 +133,21 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             r["igi_mxn"] = round(cif_renglon * r["arancel_pct"], 2)
             igi_total += r["igi_mxn"]
 
+    def _detect_formula(concepto: str) -> str | None:
+        """Fallback: si el gasto no tiene formula guardada, detectar por nombre."""
+        c = (concepto or "").lower().strip()
+        if c.startswith("iva"):
+            return "iva_valor_aduana"
+        if c.startswith("dta"):
+            return "dta_valor_aduana"
+        if c.startswith("padron"):
+            return "padron_5pct"
+        if c.startswith("igi"):
+            return "igi_por_arancel"
+        return None
+
     def _monto_formula(g) -> float | None:
-        f = getattr(g, "formula", None)
+        f = getattr(g, "formula", None) or _detect_formula(g.concepto)
         if not f:
             return None
         if f == "iva_valor_aduana":
@@ -347,13 +360,20 @@ def obtener(
         }
         for r in imp.renglones
     ]
+    def _detect(concepto: str) -> str | None:
+        c = (concepto or "").lower().strip()
+        if c.startswith("iva"): return "iva_valor_aduana"
+        if c.startswith("dta"): return "dta_valor_aduana"
+        if c.startswith("padron"): return "padron_5pct"
+        if c.startswith("igi"): return "igi_por_arancel"
+        return None
     d["gastos_raw"] = [
         {
             "id": g.id, "orden": g.orden, "concepto": g.concepto,
             "categoria": g.categoria, "monto": float(g.monto), "moneda": g.moneda,
             "causa_iva": g.causa_iva, "tasa_iva": float(g.tasa_iva),
             "reembolsable": g.reembolsable, "notas": g.notas,
-            "formula": getattr(g, "formula", None),
+            "formula": getattr(g, "formula", None) or _detect(g.concepto),
         }
         for g in imp.gastos
     ]
