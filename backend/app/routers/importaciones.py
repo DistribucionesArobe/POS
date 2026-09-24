@@ -50,6 +50,7 @@ class GastoIn(BaseModel):
     tasa_iva: float = 0.16
     reembolsable: bool = False
     notas: str | None = None
+    formula: str | None = None
 
 
 class ImportacionIn(BaseModel):
@@ -104,13 +105,39 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             "margen_sugerido_pct": float(r.margen_sugerido_pct or 2.5),
         })
 
+    # Primera pasada: calcular monto de gastos con formula.
+    # Valor aduana simplificado = mercancia + flete maritimo
+    flete_maritimo_mxn = 0.0
+    for g in imp.gastos:
+        # Heuristica: cualquier gasto en categoria "flete" con concepto que empiece por
+        # "Flete maritimo" (case insensitive) suma al valor aduana como flete internacional
+        cat = (g.categoria or "").lower()
+        con = (g.concepto or "").lower()
+        if cat == "flete" and ("maritim" in con or "internacional" in con):
+            flete_maritimo_mxn += float(g.monto or 0)
+    valor_aduana = total_mercancia_mxn + flete_maritimo_mxn
+
+    def _monto_formula(g) -> float | None:
+        f = getattr(g, "formula", None)
+        if not f:
+            return None
+        if f == "iva_valor_aduana":
+            return round(valor_aduana * 0.16, 2)
+        if f == "dta_valor_aduana":
+            return round(valor_aduana * 0.008, 2)
+        if f == "padron_5pct":
+            return round(valor_aduana * 0.05, 2)
+        return None
+
     # Gastos: sumar solo NO reembolsables. Los que causan IVA suman IVA tambien.
     total_gastos_prorrateables = 0.0
     total_iva_gastos = 0.0
     total_gastos_reembolsables = 0.0
     gastos_calc = []
     for g in imp.gastos:
-        monto = float(g.monto or 0)
+        # Si tiene formula, el monto se auto-calcula (ignora monto manual)
+        monto_auto = _monto_formula(g)
+        monto = monto_auto if monto_auto is not None else float(g.monto or 0)
         iva = monto * float(g.tasa_iva or 0) if g.causa_iva else 0.0
         subtotal_con_iva = monto + iva
         if g.reembolsable:
@@ -122,7 +149,7 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             "id": g.id, "orden": g.orden, "concepto": g.concepto,
             "categoria": g.categoria, "monto": monto, "moneda": g.moneda,
             "causa_iva": g.causa_iva, "tasa_iva": float(g.tasa_iva or 0),
-            "reembolsable": g.reembolsable,
+            "reembolsable": g.reembolsable, "formula": getattr(g, "formula", None),
             "iva": round(iva, 2), "total": round(subtotal_con_iva, 2),
             "notas": g.notas,
         })
@@ -276,6 +303,7 @@ def gastos_default(
             "id": g.id, "orden": g.orden, "concepto": g.concepto,
             "categoria": g.categoria, "monto_referencia": float(g.monto_referencia),
             "moneda": g.moneda, "causa_iva": g.causa_iva, "reembolsable": g.reembolsable,
+            "formula": getattr(g, "formula", None),
         }
         for g in rows
     ]
@@ -306,6 +334,7 @@ def obtener(
             "categoria": g.categoria, "monto": float(g.monto), "moneda": g.moneda,
             "causa_iva": g.causa_iva, "tasa_iva": float(g.tasa_iva),
             "reembolsable": g.reembolsable, "notas": g.notas,
+            "formula": getattr(g, "formula", None),
         }
         for g in imp.gastos
     ]
@@ -352,7 +381,7 @@ def crear(
             importacion_id=imp.id, orden=g.orden, concepto=g.concepto,
             categoria=g.categoria, monto=g.monto, moneda=g.moneda,
             causa_iva=g.causa_iva, tasa_iva=g.tasa_iva,
-            reembolsable=g.reembolsable, notas=g.notas,
+            reembolsable=g.reembolsable, notas=g.notas, formula=g.formula,
         ))
     db.commit()
     db.refresh(imp)
@@ -404,7 +433,7 @@ def actualizar(
             importacion_id=imp.id, orden=g.orden, concepto=g.concepto,
             categoria=g.categoria, monto=g.monto, moneda=g.moneda,
             causa_iva=g.causa_iva, tasa_iva=g.tasa_iva,
-            reembolsable=g.reembolsable, notas=g.notas,
+            reembolsable=g.reembolsable, notas=g.notas, formula=g.formula,
         ))
     db.commit()
     db.refresh(imp)

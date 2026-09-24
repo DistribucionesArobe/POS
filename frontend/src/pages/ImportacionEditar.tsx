@@ -12,6 +12,7 @@ type Gasto = {
   id?: number; orden: number; concepto: string; categoria: string | null;
   monto: number; moneda: string; causa_iva: boolean; tasa_iva: number;
   reembolsable: boolean; notas: string | null;
+  formula?: string | null;  // iva_valor_aduana | dta_valor_aduana | padron_5pct
 };
 type Imp = {
   id: number; folio: string; proveedor: string | null;
@@ -57,7 +58,7 @@ export default function ImportacionEditar() {
           orden: (i + 1) * 10, concepto: d.concepto, categoria: d.categoria,
           monto: d.monto_referencia, moneda: d.moneda,
           causa_iva: d.causa_iva, tasa_iva: 0.16, reembolsable: d.reembolsable,
-          notas: null,
+          notas: null, formula: d.formula || null,
         })));
       }
     } catch (e: any) {
@@ -77,11 +78,33 @@ export default function ImportacionEditar() {
       totalMercanciaMxn += monto_mxn;
       return { ...r, monto_moneda, monto_mxn };
     });
+    // Valor aduana simplificado = mercancia MXN + flete maritimo MXN
+    let fleteMaritimo = 0;
+    for (const g of gastos) {
+      const cat = (g.categoria || "").toLowerCase();
+      const con = (g.concepto || "").toLowerCase();
+      if (cat === "flete" && (con.includes("maritim") || con.includes("internacional"))) {
+        fleteMaritimo += num(g.monto);
+      }
+    }
+    const valorAduana = totalMercanciaMxn + fleteMaritimo;
+
+    const montoAuto = (g: Gasto): number | null => {
+      switch (g.formula) {
+        case "iva_valor_aduana": return Math.round(valorAduana * 0.16 * 100) / 100;
+        case "dta_valor_aduana": return Math.round(valorAduana * 0.008 * 100) / 100;
+        case "padron_5pct":      return Math.round(valorAduana * 0.05 * 100) / 100;
+        default: return null;
+      }
+    };
+
     let totalGastosProrr = 0;
     let totalReembolsables = 0;
     for (const g of gastos) {
-      const iva = g.causa_iva ? num(g.monto) * num(g.tasa_iva) : 0;
-      const subtotal = num(g.monto) + iva;
+      const mAuto = montoAuto(g);
+      const monto = mAuto !== null ? mAuto : num(g.monto);
+      const iva = g.causa_iva ? monto * num(g.tasa_iva) : 0;
+      const subtotal = monto + iva;
       if (g.reembolsable) totalReembolsables += subtotal;
       else totalGastosProrr += subtotal;
     }
@@ -402,15 +425,34 @@ export default function ImportacionEditar() {
                 </thead>
                 <tbody>
                   {gastos.map((g, i) => {
-                    const iva = g.causa_iva ? num(g.monto) * num(g.tasa_iva) : 0;
-                    const total = num(g.monto) + iva;
+                    // Aplicar formula si existe (mismo helper que el calculo)
+                    let fleteMar = 0;
+                    for (const gg of gastos) {
+                      const cc = (gg.categoria || "").toLowerCase();
+                      const co = (gg.concepto || "").toLowerCase();
+                      if (cc === "flete" && (co.includes("maritim") || co.includes("internacional")))
+                        fleteMar += num(gg.monto);
+                    }
+                    const valAduana = calc.total_mercancia_mxn + fleteMar;
+                    let montoMostrado = num(g.monto);
+                    let esAuto = false;
+                    if (g.formula === "iva_valor_aduana") { montoMostrado = valAduana * 0.16; esAuto = true; }
+                    else if (g.formula === "dta_valor_aduana") { montoMostrado = valAduana * 0.008; esAuto = true; }
+                    else if (g.formula === "padron_5pct") { montoMostrado = valAduana * 0.05; esAuto = true; }
+                    const iva = g.causa_iva ? montoMostrado * num(g.tasa_iva) : 0;
+                    const total = montoMostrado + iva;
                     return (
                       <tr key={i} style={{ borderBottom: "1px solid #f1f5f9",
                         background: g.reembolsable ? "#fef3c7" : undefined }}>
                         <td style={{ padding: 2 }}>
-                          <input value={g.concepto}
-                            onChange={(e) => updateGasto(i, { concepto: e.target.value })}
-                            style={cellInput} />
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input value={g.concepto}
+                              onChange={(e) => updateGasto(i, { concepto: e.target.value })}
+                              style={cellInput} />
+                            {esAuto && <span style={{ fontSize: 9, padding: "1px 5px",
+                              background: "#3b82f6", color: "white", borderRadius: 3,
+                              fontWeight: 700, letterSpacing: 0.5 }}>AUTO</span>}
+                          </div>
                         </td>
                         <td style={{ padding: 2 }}>
                           <select value={g.categoria || "otro"}
@@ -420,9 +462,18 @@ export default function ImportacionEditar() {
                           </select>
                         </td>
                         <td style={{ padding: 2 }}>
-                          <input type="number" value={g.monto} step="0.01"
-                            onChange={(e) => updateGasto(i, { monto: +e.target.value })}
-                            style={cellInputNum} />
+                          {esAuto ? (
+                            <div style={{ padding: "4px 6px", textAlign: "right",
+                              fontVariantNumeric: "tabular-nums", background: "#dbeafe",
+                              borderRadius: 3, fontWeight: 700, color: "#1e40af" }}
+                              title={`Calculado: ${g.formula}`}>
+                              {fmt(montoMostrado)}
+                            </div>
+                          ) : (
+                            <input type="number" value={g.monto} step="0.01"
+                              onChange={(e) => updateGasto(i, { monto: +e.target.value })}
+                              style={cellInputNum} />
+                          )}
                         </td>
                         <td style={{ padding: 2, textAlign: "center" }}>
                           <input type="checkbox" checked={g.causa_iva}

@@ -91,6 +91,12 @@ class ImportacionGasto(Base):
     reembolsable = Column(Boolean, nullable=False, default=False)
     # ej: garantia de contenedor - no debe sumarse al costo prorrateado
     notas = Column(String(300))
+    # Formula auto-calculada. Opciones:
+    #  iva_valor_aduana  -> 16% (mercancia_mxn + flete_maritimo)
+    #  dta_valor_aduana  -> 0.008 * (mercancia_mxn + flete_maritimo)
+    #  padron_5pct       -> 0.05 * (mercancia_mxn + flete_maritimo)
+    # None = monto manual editable
+    formula = Column(String(50), nullable=True)
 
     importacion = relationship("Importacion", back_populates="gastos")
 
@@ -111,3 +117,4 @@ class ImportacionGastoDefault(Base):
     causa_iva = Column(Boolean, nullable=False, default=False)
     reembolsable = Column(Boolean, nullable=False, default=False)
     activo = Column(Boolean, nullable=False, default=True)
+    formula = Column(String(50), nullable=True)  # ver ImportacionGasto.formula
