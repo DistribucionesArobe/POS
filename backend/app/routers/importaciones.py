@@ -37,6 +37,7 @@ class RenglonIn(BaseModel):
     kg_pieza: float = 0
     variante_id: int | None = None
     margen_sugerido_pct: float = 2.5
+    arancel_pct: float = 0.15  # IGI del renglon
 
 
 class GastoIn(BaseModel):
@@ -103,19 +104,34 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             "monto_mxn": round(monto_mxn, 2),
             "variante_id": r.variante_id,
             "margen_sugerido_pct": float(r.margen_sugerido_pct or 2.5),
+            "arancel_pct": float(getattr(r, "arancel_pct", 0.15) or 0.15),
         })
 
-    # Primera pasada: calcular monto de gastos con formula.
-    # Valor aduana simplificado = mercancia + flete maritimo
+    # Valor aduana (CIF) = mercancia + flete maritimo + seguro (los del catalogo LDP)
+    # IGI por arancel: suma de (monto_renglon_CIF x arancel_renglon)
     flete_maritimo_mxn = 0.0
+    seguro_mxn = 0.0
     for g in imp.gastos:
-        # Heuristica: cualquier gasto en categoria "flete" con concepto que empiece por
-        # "Flete maritimo" (case insensitive) suma al valor aduana como flete internacional
         cat = (g.categoria or "").lower()
         con = (g.concepto or "").lower()
         if cat == "flete" and ("maritim" in con or "internacional" in con):
             flete_maritimo_mxn += float(g.monto or 0)
-    valor_aduana = total_mercancia_mxn + flete_maritimo_mxn
+        elif cat == "seguro":
+            seguro_mxn += float(g.monto or 0)
+    valor_aduana = total_mercancia_mxn + flete_maritimo_mxn + seguro_mxn
+
+    # IGI se calcula por renglon: cada uno absorbe su parte del flete+seguro por
+    # prorrateo de mercancia, y sobre ese CIF proporcional se aplica su arancel.
+    # Total IGI = suma. Este IGI luego se prorratea junto con los otros gastos.
+    igi_total = 0.0
+    if total_mercancia_mxn > 0:
+        cif_extra = flete_maritimo_mxn + seguro_mxn  # a prorratear por mercancia
+        for r in renglones_calc:
+            pct_r = r["monto_mxn"] / total_mercancia_mxn
+            cif_renglon = r["monto_mxn"] + pct_r * cif_extra
+            r["cif_mxn"] = round(cif_renglon, 2)
+            r["igi_mxn"] = round(cif_renglon * r["arancel_pct"], 2)
+            igi_total += r["igi_mxn"]
 
     def _monto_formula(g) -> float | None:
         f = getattr(g, "formula", None)
@@ -127,6 +143,8 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             return round(valor_aduana * 0.008, 2)
         if f == "padron_5pct":
             return round(valor_aduana * 0.05, 2)
+        if f == "igi_por_arancel":
+            return round(igi_total, 2)
         return None
 
     # Gastos: sumar solo NO reembolsables. Los que causan IVA suman IVA tambien.
@@ -325,6 +343,7 @@ def obtener(
             "piezas": float(r.piezas), "precio_unit_mercancia": float(r.precio_unit_mercancia),
             "kg_pieza": float(r.kg_pieza), "variante_id": r.variante_id,
             "margen_sugerido_pct": float(r.margen_sugerido_pct),
+            "arancel_pct": float(getattr(r, "arancel_pct", 0.15) or 0.15),
         }
         for r in imp.renglones
     ]
@@ -375,6 +394,7 @@ def crear(
             piezas=r.piezas, precio_unit_mercancia=r.precio_unit_mercancia,
             kg_pieza=r.kg_pieza, variante_id=r.variante_id,
             margen_sugerido_pct=r.margen_sugerido_pct,
+            arancel_pct=r.arancel_pct,
         ))
     for g in payload.gastos:
         db.add(ImportacionGasto(
@@ -422,6 +442,7 @@ def actualizar(
             piezas=r.piezas, precio_unit_mercancia=r.precio_unit_mercancia,
             kg_pieza=r.kg_pieza, variante_id=r.variante_id,
             margen_sugerido_pct=r.margen_sugerido_pct,
+            arancel_pct=r.arancel_pct,
         ))
 
     # Sincronizar gastos

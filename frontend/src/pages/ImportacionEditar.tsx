@@ -7,6 +7,7 @@ type Renglon = {
   id?: number; orden: number; descripcion: string;
   piezas: number; precio_unit_mercancia: number; kg_pieza: number;
   variante_id: number | null; margen_sugerido_pct: number;
+  arancel_pct: number;
 };
 type Gasto = {
   id?: number; orden: number; concepto: string; categoria: string | null;
@@ -78,22 +79,36 @@ export default function ImportacionEditar() {
       totalMercanciaMxn += monto_mxn;
       return { ...r, monto_moneda, monto_mxn };
     });
-    // Valor aduana simplificado = mercancia MXN + flete maritimo MXN
+    // Valor aduana (CIF) = mercancia MXN + flete maritimo MXN + seguro MXN
     let fleteMaritimo = 0;
+    let seguro = 0;
     for (const g of gastos) {
       const cat = (g.categoria || "").toLowerCase();
       const con = (g.concepto || "").toLowerCase();
       if (cat === "flete" && (con.includes("maritim") || con.includes("internacional"))) {
         fleteMaritimo += num(g.monto);
+      } else if (cat === "seguro") {
+        seguro += num(g.monto);
       }
     }
-    const valorAduana = totalMercanciaMxn + fleteMaritimo;
+    const valorAduana = totalMercanciaMxn + fleteMaritimo + seguro;
+
+    // IGI por renglon: cada uno absorbe su parte del flete+seguro y aplica su arancel
+    const cifExtra = fleteMaritimo + seguro;
+    let igiTotal = 0;
+    for (const r of rc) {
+      const pctR = totalMercanciaMxn > 0 ? r.monto_mxn / totalMercanciaMxn : 0;
+      const cifRenglon = r.monto_mxn + pctR * cifExtra;
+      const igi = cifRenglon * num(r.arancel_pct);
+      igiTotal += igi;
+    }
 
     const montoAuto = (g: Gasto): number | null => {
       switch (g.formula) {
-        case "iva_valor_aduana": return Math.round(valorAduana * 0.16 * 100) / 100;
-        case "dta_valor_aduana": return Math.round(valorAduana * 0.008 * 100) / 100;
-        case "padron_5pct":      return Math.round(valorAduana * 0.05 * 100) / 100;
+        case "iva_valor_aduana":  return Math.round(valorAduana * 0.16 * 100) / 100;
+        case "dta_valor_aduana":  return Math.round(valorAduana * 0.008 * 100) / 100;
+        case "padron_5pct":       return Math.round(valorAduana * 0.05 * 100) / 100;
+        case "igi_por_arancel":   return Math.round(igiTotal * 100) / 100;
         default: return null;
       }
     };
@@ -144,6 +159,7 @@ export default function ImportacionEditar() {
     setRenglones([...renglones, {
       orden: renglones.length * 10, descripcion: "", piezas: 1,
       precio_unit_mercancia: 0, kg_pieza: 0, variante_id: null, margen_sugerido_pct: 2.5,
+      arancel_pct: 0.15,
     }]);
   }
   function updateRenglon(i: number, patch: Partial<Renglon>) {
@@ -315,13 +331,14 @@ export default function ImportacionEditar() {
                   <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
                     <th style={{ padding: 4, width: 28 }}></th>
                     <th style={{ padding: 4 }}>Descripcion</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 70 }}>Piezas</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 90 }}>P.Unit {imp.moneda_mercancia}</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 70 }}>Kg/pza</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 100 }}>Monto MXN</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 100 }}>Costo unit</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 70 }}>Markup</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 100 }}>P.Venta</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 60 }}>Piezas</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 80 }}>P.Unit {imp.moneda_mercancia}</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 55 }}>Kg/pza</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 65 }} title="IGI - Arancel de importacion">Arancel</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 90 }}>Monto MXN</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 90 }}>Costo unit</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 55 }}>Markup</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 90 }}>P.Venta</th>
                     <th style={{ padding: 4, width: 30 }}></th>
                   </tr>
                 </thead>
@@ -359,6 +376,15 @@ export default function ImportacionEditar() {
                           <input type="number" value={r.kg_pieza} step="0.01"
                             onChange={(e) => updateRenglon(i, { kg_pieza: +e.target.value })}
                             style={cellInputNum} />
+                        </td>
+                        <td style={{ padding: 2 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                            <input type="number" value={(r.arancel_pct || 0) * 100} step="1" min="0" max="100"
+                              onChange={(e) => updateRenglon(i, { arancel_pct: (+e.target.value) / 100 })}
+                              style={cellInputNum}
+                              title="IGI del renglon. Ej: 0 = insumo exento, 10 = manufactura, 15 = ropa/plafones" />
+                            <span style={{ fontSize: 10, color: "#64748b" }}>%</span>
+                          </div>
                         </td>
                         <td style={{ padding: 4, textAlign: "right", fontVariantNumeric: "tabular-nums", background: "#f8fafc" }}>
                           {fmt(c?.monto_mxn || 0)}
@@ -425,20 +451,29 @@ export default function ImportacionEditar() {
                 </thead>
                 <tbody>
                   {gastos.map((g, i) => {
-                    // Aplicar formula si existe (mismo helper que el calculo)
-                    let fleteMar = 0;
+                    // Recalcular CIF y IGI para preview del monto AUTO
+                    let fleteMar = 0, seg = 0;
                     for (const gg of gastos) {
                       const cc = (gg.categoria || "").toLowerCase();
                       const co = (gg.concepto || "").toLowerCase();
                       if (cc === "flete" && (co.includes("maritim") || co.includes("internacional")))
                         fleteMar += num(gg.monto);
+                      else if (cc === "seguro") seg += num(gg.monto);
                     }
-                    const valAduana = calc.total_mercancia_mxn + fleteMar;
+                    const valAduana = calc.total_mercancia_mxn + fleteMar + seg;
+                    // IGI por arancel: usar calc.renglones que ya vienen con arancel_pct
+                    let igiTot = 0;
+                    const cifExtra = fleteMar + seg;
+                    for (const r of calc.renglones) {
+                      const pctR = calc.total_mercancia_mxn > 0 ? r.monto_mxn / calc.total_mercancia_mxn : 0;
+                      igiTot += (r.monto_mxn + pctR * cifExtra) * num(r.arancel_pct);
+                    }
                     let montoMostrado = num(g.monto);
                     let esAuto = false;
                     if (g.formula === "iva_valor_aduana") { montoMostrado = valAduana * 0.16; esAuto = true; }
                     else if (g.formula === "dta_valor_aduana") { montoMostrado = valAduana * 0.008; esAuto = true; }
                     else if (g.formula === "padron_5pct") { montoMostrado = valAduana * 0.05; esAuto = true; }
+                    else if (g.formula === "igi_por_arancel") { montoMostrado = igiTot; esAuto = true; }
                     const iva = g.causa_iva ? montoMostrado * num(g.tasa_iva) : 0;
                     const total = montoMostrado + iva;
                     return (

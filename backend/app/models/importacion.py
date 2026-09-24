@@ -67,6 +67,10 @@ class ImportacionRenglon(Base):
     costo_unit_final_mxn = Column(Numeric(14, 4), nullable=False, default=0)
     precio_venta_sugerido_mxn = Column(Numeric(14, 4), nullable=False, default=0)
     margen_sugerido_pct = Column(Numeric(6, 3), nullable=False, default=2.5)  # 2.5x default
+    # Arancel de importacion (IGI) especifico de este renglon. Default 15%.
+    # Ejemplos comunes: 0% para insumos exentos, 10% para muchos productos manufacturados,
+    # 15% para ropa/plafones/puertas. Buscar en fracciones arancelarias del SAT.
+    arancel_pct = Column(Numeric(6, 4), nullable=False, default=0.15)
 
     importacion = relationship("Importacion", back_populates="renglones")
 
