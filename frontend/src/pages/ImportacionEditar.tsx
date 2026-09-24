@@ -79,6 +79,13 @@ export default function ImportacionEditar() {
       totalMercanciaMxn += monto_mxn;
       return { ...r, monto_moneda, monto_mxn };
     });
+    // Convertir monto de cada gasto a MXN segun su moneda
+    const gastoMxn = (g: Gasto): number => {
+      const m = num(g.monto);
+      const moneda = (g.moneda || "MXN").toUpperCase();
+      return moneda === "MXN" ? m : m * tc;
+    };
+
     // Valor aduana (CIF) = mercancia MXN + flete maritimo MXN + seguro MXN
     let fleteMaritimo = 0;
     let seguro = 0;
@@ -86,9 +93,9 @@ export default function ImportacionEditar() {
       const cat = (g.categoria || "").toLowerCase();
       const con = (g.concepto || "").toLowerCase();
       if (cat === "flete" && (con.includes("maritim") || con.includes("internacional"))) {
-        fleteMaritimo += num(g.monto);
+        fleteMaritimo += gastoMxn(g);
       } else if (cat === "seguro") {
-        seguro += num(g.monto);
+        seguro += gastoMxn(g);
       }
     }
     const valorAduana = totalMercanciaMxn + fleteMaritimo + seguro;
@@ -117,7 +124,7 @@ export default function ImportacionEditar() {
     let totalReembolsables = 0;
     for (const g of gastos) {
       const mAuto = montoAuto(g);
-      const monto = mAuto !== null ? mAuto : num(g.monto);
+      const monto = mAuto !== null ? mAuto : gastoMxn(g);
       const iva = g.causa_iva ? monto * num(g.tasa_iva) : 0;
       const subtotal = monto + iva;
       if (g.reembolsable) totalReembolsables += subtotal;
@@ -441,41 +448,48 @@ export default function ImportacionEditar() {
                 <thead>
                   <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
                     <th style={{ padding: 4 }}>Concepto</th>
-                    <th style={{ padding: 4, width: 90 }}>Categoria</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 110 }}>Monto</th>
-                    <th style={{ padding: 4, textAlign: "center", width: 60 }}>IVA?</th>
-                    <th style={{ padding: 4, textAlign: "center", width: 90 }}>Reembolsable</th>
-                    <th style={{ padding: 4, textAlign: "right", width: 100 }}>Total con IVA</th>
+                    <th style={{ padding: 4, width: 80 }}>Categoria</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 100 }}>Monto</th>
+                    <th style={{ padding: 4, width: 60 }}>Moneda</th>
+                    <th style={{ padding: 4, textAlign: "center", width: 50 }}>IVA?</th>
+                    <th style={{ padding: 4, textAlign: "center", width: 70 }}>Reembols.</th>
+                    <th style={{ padding: 4, textAlign: "right", width: 110 }}>Total MXN c/IVA</th>
                     <th style={{ padding: 4, width: 30 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {gastos.map((g, i) => {
-                    // Recalcular CIF y IGI para preview del monto AUTO
+                    // Helper local: convertir gasto a MXN segun su moneda
+                    const gastoMxnLocal = (gg: Gasto) => {
+                      const m = num(gg.monto);
+                      const mon = (gg.moneda || "MXN").toUpperCase();
+                      return mon === "MXN" ? m : m * num(imp.tipo_cambio);
+                    };
                     let fleteMar = 0, seg = 0;
                     for (const gg of gastos) {
                       const cc = (gg.categoria || "").toLowerCase();
                       const co = (gg.concepto || "").toLowerCase();
                       if (cc === "flete" && (co.includes("maritim") || co.includes("internacional")))
-                        fleteMar += num(gg.monto);
-                      else if (cc === "seguro") seg += num(gg.monto);
+                        fleteMar += gastoMxnLocal(gg);
+                      else if (cc === "seguro") seg += gastoMxnLocal(gg);
                     }
                     const valAduana = calc.total_mercancia_mxn + fleteMar + seg;
-                    // IGI por arancel: usar calc.renglones que ya vienen con arancel_pct
                     let igiTot = 0;
                     const cifExtra = fleteMar + seg;
                     for (const r of calc.renglones) {
                       const pctR = calc.total_mercancia_mxn > 0 ? r.monto_mxn / calc.total_mercancia_mxn : 0;
                       igiTot += (r.monto_mxn + pctR * cifExtra) * num(r.arancel_pct);
                     }
-                    let montoMostrado = num(g.monto);
+                    // Monto en MXN (para el total con IVA)
+                    let montoMxn = gastoMxnLocal(g);
                     let esAuto = false;
-                    if (g.formula === "iva_valor_aduana") { montoMostrado = valAduana * 0.16; esAuto = true; }
-                    else if (g.formula === "dta_valor_aduana") { montoMostrado = valAduana * 0.008; esAuto = true; }
-                    else if (g.formula === "padron_5pct") { montoMostrado = valAduana * 0.05; esAuto = true; }
-                    else if (g.formula === "igi_por_arancel") { montoMostrado = igiTot; esAuto = true; }
-                    const iva = g.causa_iva ? montoMostrado * num(g.tasa_iva) : 0;
-                    const total = montoMostrado + iva;
+                    if (g.formula === "iva_valor_aduana") { montoMxn = valAduana * 0.16; esAuto = true; }
+                    else if (g.formula === "dta_valor_aduana") { montoMxn = valAduana * 0.008; esAuto = true; }
+                    else if (g.formula === "padron_5pct") { montoMxn = valAduana * 0.05; esAuto = true; }
+                    else if (g.formula === "igi_por_arancel") { montoMxn = igiTot; esAuto = true; }
+                    const iva = g.causa_iva ? montoMxn * num(g.tasa_iva) : 0;
+                    const total = montoMxn + iva;
+                    const monedaEsExt = (g.moneda || "MXN").toUpperCase() !== "MXN" && !esAuto;
                     return (
                       <tr key={i} style={{ borderBottom: "1px solid #f1f5f9",
                         background: g.reembolsable ? "#fef3c7" : undefined }}>
@@ -502,12 +516,31 @@ export default function ImportacionEditar() {
                               fontVariantNumeric: "tabular-nums", background: "#dbeafe",
                               borderRadius: 3, fontWeight: 700, color: "#1e40af" }}
                               title={`Calculado: ${g.formula}`}>
-                              {fmt(montoMostrado)}
+                              {fmt(montoMxn)}
                             </div>
                           ) : (
                             <input type="number" value={g.monto} step="0.01"
                               onChange={(e) => updateGasto(i, { monto: +e.target.value })}
                               style={cellInputNum} />
+                          )}
+                        </td>
+                        <td style={{ padding: 2 }}>
+                          {esAuto ? (
+                            <span style={{ fontSize: 11, color: "#64748b" }}>MXN</span>
+                          ) : (
+                            <select value={g.moneda || "MXN"}
+                              onChange={(e) => updateGasto(i, { moneda: e.target.value })}
+                              style={cellInput}>
+                              <option value="MXN">MXN</option>
+                              <option value="USD">USD</option>
+                              <option value="EUR">EUR</option>
+                              <option value="CNY">CNY</option>
+                            </select>
+                          )}
+                          {monedaEsExt && (
+                            <div style={{ fontSize: 9, color: "#1e40af", textAlign: "right", marginTop: 2 }}>
+                              = {fmt(montoMxn)}
+                            </div>
                           )}
                         </td>
                         <td style={{ padding: 2, textAlign: "center" }}>

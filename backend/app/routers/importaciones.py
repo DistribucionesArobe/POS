@@ -107,6 +107,18 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             "arancel_pct": float(getattr(r, "arancel_pct", 0.15) or 0.15),
         })
 
+    # Convertir monto de cada gasto a MXN segun su moneda y el TC de la importacion.
+    # Ej: flete maritimo en USD se recalcula cuando cambias el tipo de cambio.
+    def _monto_mxn(g) -> float:
+        m = float(g.monto or 0)
+        moneda = (g.moneda or "MXN").upper()
+        if moneda == "MXN":
+            return m
+        # Cualquier otra moneda (USD/EUR/CNY) se multiplica por TC.
+        # Asumimos que el TC de la importacion aplica igual (aproximado para
+        # otras monedas, correcto para USD que es lo mas comun).
+        return m * tc
+
     # Valor aduana (CIF) = mercancia + flete maritimo + seguro (los del catalogo LDP)
     # IGI por arancel: suma de (monto_renglon_CIF x arancel_renglon)
     flete_maritimo_mxn = 0.0
@@ -114,10 +126,11 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
     for g in imp.gastos:
         cat = (g.categoria or "").lower()
         con = (g.concepto or "").lower()
+        m_mxn = _monto_mxn(g)
         if cat == "flete" and ("maritim" in con or "internacional" in con):
-            flete_maritimo_mxn += float(g.monto or 0)
+            flete_maritimo_mxn += m_mxn
         elif cat == "seguro":
-            seguro_mxn += float(g.monto or 0)
+            seguro_mxn += m_mxn
     valor_aduana = total_mercancia_mxn + flete_maritimo_mxn + seguro_mxn
 
     # IGI se calcula por renglon: cada uno absorbe su parte del flete+seguro por
@@ -166,9 +179,10 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
     total_gastos_reembolsables = 0.0
     gastos_calc = []
     for g in imp.gastos:
-        # Si tiene formula, el monto se auto-calcula (ignora monto manual)
+        # Si tiene formula, el monto se auto-calcula (ignora monto manual y moneda)
+        # Si no, convertir de moneda origen a MXN con el TC
         monto_auto = _monto_formula(g)
-        monto = monto_auto if monto_auto is not None else float(g.monto or 0)
+        monto = monto_auto if monto_auto is not None else _monto_mxn(g)
         iva = monto * float(g.tasa_iva or 0) if g.causa_iva else 0.0
         subtotal_con_iva = monto + iva
         if g.reembolsable:
@@ -178,7 +192,10 @@ def _calcular(imp: Importacion) -> dict[str, Any]:
             total_iva_gastos += iva
         gastos_calc.append({
             "id": g.id, "orden": g.orden, "concepto": g.concepto,
-            "categoria": g.categoria, "monto": monto, "moneda": g.moneda,
+            "categoria": g.categoria,
+            "monto_original": float(g.monto or 0),  # en su moneda origen
+            "monto": monto,  # ya en MXN
+            "moneda": g.moneda,
             "causa_iva": g.causa_iva, "tasa_iva": float(g.tasa_iva or 0),
             "reembolsable": g.reembolsable, "formula": getattr(g, "formula", None),
             "iva": round(iva, 2), "total": round(subtotal_con_iva, 2),
