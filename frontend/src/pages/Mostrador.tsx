@@ -11,6 +11,7 @@ type Variante = {
   nombre: string; presentacion: string;
   precio: number; unidad: string;
   tasa_iva?: number;
+  categoria?: string;
 };
 
 type Item = {
@@ -39,6 +40,8 @@ export default function Mostrador() {
   const [mostrarEfectivo, setMostrarEfectivo] = useState(false);
   // Modal de cerrar caja (corte del dia)
   const [mostrarCorte, setMostrarCorte] = useState(false);
+  // Filtro por categoria (tab). "" = todas
+  const [categoriaSel, setCategoriaSel] = useState<string>("");
 
   async function cargar() {
     try {
@@ -54,6 +57,7 @@ export default function Mostrador() {
         presentacion: p.presentacion || "",
         precio: p.precio, unidad: p.unidad || "Pieza",
         tasa_iva: p.tasa_iva,
+        categoria: p.categoria || "Otros",
       })));
     } catch (err) {
       // silent
@@ -163,13 +167,36 @@ export default function Mostrador() {
     }
   }
 
+  // Categorias unicas presentes en los productos (para tabs)
+  const categorias = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of productos) set.add(p.categoria || "Otros");
+    return Array.from(set).sort();
+  }, [productos]);
+
   const productosFiltrados = useMemo(() => {
-    if (!busqueda.trim()) return productos;
-    const q = busqueda.toLowerCase();
-    return productos.filter(p =>
-      p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
-    );
-  }, [productos, busqueda]);
+    let lista = productos;
+    if (categoriaSel) lista = lista.filter(p => (p.categoria || "Otros") === categoriaSel);
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      lista = lista.filter(p =>
+        p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
+      );
+    }
+    return lista;
+  }, [productos, busqueda, categoriaSel]);
+
+  // Emoji por categoria para hacer las tabs mas visuales
+  const emojiCat = (c: string): string => {
+    const k = c.toLowerCase();
+    if (k.includes("bebid")) return "🥤";
+    if (k.includes("cerveza")) return "🍺";
+    if (k.includes("comid") || k.includes("aliment") || k.includes("snack")) return "🍔";
+    if (k.includes("cancha")) return "🎾";
+    if (k.includes("shop") || k.includes("pro")) return "🎽";
+    if (k.includes("clase") || k.includes("academ")) return "📚";
+    return "📦";
+  };
 
   return (
     <Layout title="Mostrador" subtitle="Toca producto para agregarlo"
@@ -196,6 +223,38 @@ export default function Mostrador() {
               padding: "10px 14px", fontSize: 16, border: "1px solid #cbd5e1",
               borderRadius: 6, background: "white",
             }} />
+
+          {/* Tabs de categoria */}
+          {categorias.length > 1 && (
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
+              <button onClick={() => setCategoriaSel("")}
+                style={{
+                  padding: "10px 18px", border: 0, borderRadius: 8,
+                  fontSize: 15, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                  background: categoriaSel === "" ? "#0f172a" : "#e2e8f0",
+                  color: categoriaSel === "" ? "white" : "#334155",
+                  minHeight: 44,
+                }}>
+                📋 Todo ({productos.length})
+              </button>
+              {categorias.map((c) => {
+                const count = productos.filter(p => (p.categoria || "Otros") === c).length;
+                const active = categoriaSel === c;
+                return (
+                  <button key={c} onClick={() => setCategoriaSel(c)}
+                    style={{
+                      padding: "10px 18px", border: 0, borderRadius: 8,
+                      fontSize: 15, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                      background: active ? "#0f172a" : "#e2e8f0",
+                      color: active ? "white" : "#334155",
+                      minHeight: 44,
+                    }}>
+                    {emojiCat(c)} {c} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div style={{
             flex: 1, overflowY: "auto",
             display: "grid",

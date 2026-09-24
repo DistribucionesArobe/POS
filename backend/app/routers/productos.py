@@ -466,6 +466,7 @@ def listar_favoritos_caja(
             "precio": float(v.precio_publico),
             "stock": float(v.stock_actual),
             "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
+            "categoria": p.categoria or "Otros",
         }
         for v, p in rows
     ]
