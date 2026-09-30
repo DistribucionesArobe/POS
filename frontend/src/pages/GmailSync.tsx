@@ -32,8 +32,16 @@ export default function GmailSync() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dias, setDias] = useState(60);
+  const [dias, setDias] = useState(1);
   const [diasCredito, setDiasCredito] = useState(30);
+
+  // Sugerido = dias desde ultima sync + 1 de overlap. Sin sync previa = 1
+  const diasSugeridos = (): number => {
+    if (!status?.ultima_sync_en) return 1;
+    const ms = Date.now() - new Date(status.ultima_sync_en).getTime();
+    const dias = Math.ceil(ms / (1000 * 60 * 60 * 24));
+    return Math.max(1, dias + 1);  // +1 dia overlap para no perder correos borderline
+  };
 
   async function cargarStatus() {
     try {
@@ -63,6 +71,11 @@ export default function GmailSync() {
       setLoading(false);
     })();
   }, [tab]);
+
+  // Cuando cambia status, auto-set dias sugeridos si el user no cambio manualmente
+  useEffect(() => {
+    if (status?.conectado) setDias(diasSugeridos());
+  }, [status?.ultima_sync_en]);
 
   // Detectar callback ?connected=email
   useEffect(() => {
@@ -152,24 +165,62 @@ export default function GmailSync() {
                   <div style={{ fontSize: 18, fontWeight: 700 }}>📧 {status.email}</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
                     Modo: {status.modo === "auto" ? "🤖 automatico" : "👁 requiere aprobacion"} ·
-                    Ultima sync: {status.ultima_sync_en ? new Date(status.ultima_sync_en).toLocaleString("es-MX") : "nunca"} ·
                     Pendientes: <strong>{status.pendientes_aprobacion || 0}</strong>
                   </div>
+
+                  {/* Bloque de ultima sincronizacion, mas prominente */}
+                  <div style={{
+                    marginTop: 10, padding: "8px 12px", borderRadius: 6,
+                    background: status.ultima_sync_en ? "#dcfce7" : "#fef3c7",
+                    display: "inline-flex", flexDirection: "column", gap: 2,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      ⏱ Ultima sincronizacion
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                      {status.ultima_sync_en ? relativeTime(status.ultima_sync_en) : "Nunca (haz click en Sincronizar ahora)"}
+                    </div>
+                    {status.ultima_sync_en && (
+                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                        {new Date(status.ultima_sync_en).toLocaleString("es-MX", {
+                          day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                        })}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: "#059669", marginTop: 4 }}>
+                      🤖 Sync automatico: cada 60 min (8am-8pm hora MX)
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 13, color: "#64748b" }}>Dias atras:</span>
-                  <input type="number" value={dias} onChange={e => setDias(+e.target.value)}
-                    style={{ width: 60, padding: 6, border: "1px solid #cbd5e1", borderRadius: 4 }} />
-                  <button onClick={sincronizar} disabled={busy}
-                    style={{ background: busy ? "#94a3b8" : "#059669", color: "white", border: 0,
-                      padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-                    {busy ? "Sincronizando..." : "🔄 Sincronizar ahora"}
-                  </button>
-                  <button onClick={desconectar}
-                    style={{ background: "#fee2e2", color: "#991b1b", border: 0,
-                      padding: "10px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
-                    Desconectar
-                  </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: "#64748b" }}>Dias atras:</span>
+                    <input type="number" value={dias} onChange={e => setDias(+e.target.value)} min={1}
+                      style={{ width: 60, padding: 6, border: "1px solid #cbd5e1", borderRadius: 4 }} />
+                    {status.ultima_sync_en && dias !== diasSugeridos() && (
+                      <button onClick={() => setDias(diasSugeridos())}
+                        style={{ background: "#dbeafe", color: "#1e40af", border: 0,
+                          padding: "6px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                        title={`Sugerido segun ultima sync`}>
+                        📌 Sugerido: {diasSugeridos()}d
+                      </button>
+                    )}
+                    <button onClick={sincronizar} disabled={busy}
+                      style={{ background: busy ? "#94a3b8" : "#059669", color: "white", border: 0,
+                        padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                      {busy ? "Sincronizando..." : "🔄 Sincronizar ahora"}
+                    </button>
+                    <button onClick={desconectar}
+                      style={{ background: "#fee2e2", color: "#991b1b", border: 0,
+                        padding: "10px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                      Desconectar
+                    </button>
+                  </div>
+                  {status.ultima_sync_en && (
+                    <div style={{ fontSize: 11, color: "#64748b", fontStyle: "italic" }}>
+                      💡 Sugerido: {diasSugeridos()} dias (ultima sync + 1 dia overlap)
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -288,3 +339,17 @@ export default function GmailSync() {
 
 const th: React.CSSProperties = { padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#334155", textTransform: "uppercase", letterSpacing: 0.5 };
 const td: React.CSSProperties = { padding: "10px 12px", fontSize: 13 };
+
+// "hace X min / hace Y horas / hace Z dias"
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "hace unos segundos";
+  if (min < 60) return `hace ${min} minuto${min === 1 ? "" : "s"}`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} hora${h === 1 ? "" : "s"}`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `hace ${d} día${d === 1 ? "" : "s"}`;
+  const meses = Math.floor(d / 30);
+  return `hace ${meses} mes${meses === 1 ? "" : "es"}`;
+}

@@ -33,7 +33,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Arrancar scheduler Gmail (corre cada 60 min en horario laboral MX)
+    try:
+        from app.services.gmail_scheduler import start_scheduler, stop_scheduler
+        start_scheduler()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("No pude arrancar scheduler Gmail: %s", e)
     yield
+    try:
+        stop_scheduler()
+    except Exception:
+        pass
 
 
 app = FastAPI(
