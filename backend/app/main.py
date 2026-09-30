@@ -25,6 +25,7 @@ from app.routers import (
     inbox,
     importaciones,
     academia,
+    gmail_sync,
 )
 
 settings = get_settings()
@@ -76,3 +77,4 @@ app.include_router(monedero.router, prefix="/api/monedero", tags=["monedero"])
 app.include_router(inbox.router, prefix="/api/inbox", tags=["inbox"])
 app.include_router(importaciones.router, prefix="/api")
 app.include_router(academia.router, prefix="/api")
+app.include_router(gmail_sync.router, prefix="/api")

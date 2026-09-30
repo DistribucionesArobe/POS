@@ -27,3 +27,4 @@ from app.models.importacion import (  # noqa
     Importacion, ImportacionRenglon, ImportacionGasto, ImportacionGastoDefault,
 )
 from app.models.academia import AcademiaPago  # noqa
+from app.models.gmail_sync import GmailConexion, GmailImportacionLog  # noqa
