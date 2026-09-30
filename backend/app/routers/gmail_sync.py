@@ -318,16 +318,18 @@ def aprobar_pendiente(
 
     # Crear CxP
     fecha_recepcion = log.fecha_emision or datetime.utcnow()
+    monto = float(log.total or 0)
     cxp = CuentaPorPagar(
         empresa_id=empresa_id,
         proveedor_id=prov.id,
         folio_factura=f"{log.xml_serie or ''}{log.xml_folio or ''}" or None,
         fecha_recepcion=fecha_recepcion,
         fecha_vencimiento=fecha_recepcion + timedelta(days=payload.dias_credito),
-        total=log.total or 0,
-        saldo=log.total or 0,
+        monto_original=monto,
+        saldo=monto,
         pagado=False,
         corto_plazo=True,
+        moneda=log.moneda or "MXN",
         observaciones=f"Importada de Gmail. UUID: {log.xml_uuid}",
         creado_en=datetime.utcnow(),
     )
