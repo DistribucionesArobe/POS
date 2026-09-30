@@ -99,15 +99,17 @@ def refresh_access_token(refresh_token: str) -> dict:
 
 
 def get_user_email(access_token: str) -> str:
-    """Regresa el email del usuario dueno del access_token."""
+    """Regresa el email del usuario dueno del access_token.
+    Usa Gmail API (users/me/profile) que ya tiene el email y funciona con
+    el scope gmail.readonly sin requerir userinfo.email adicional."""
     r = httpx.get(
-        "https://www.googleapis.com/oauth2/v2/userinfo",
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=15,
     )
     if r.status_code >= 400:
-        raise RuntimeError(f"userinfo fallo: {r.text}")
-    return r.json().get("email", "")
+        raise RuntimeError(f"gmail profile fallo: {r.status_code} {r.text[:200]}")
+    return r.json().get("emailAddress", "")
 
 
 # ============ GMAIL API ============
