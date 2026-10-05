@@ -194,6 +194,7 @@ export default function Mostrador() {
     if (k.includes("comid") || k.includes("aliment") || k.includes("snack")) return "🍔";
     if (k.includes("cancha")) return "🎾";
     if (k.includes("shop") || k.includes("pro")) return "🎽";
+    if (k.includes("pala") || k.includes("raqueta")) return "🏓";
     if (k.includes("clase") || k.includes("academ")) return "📚";
     return "📦";
   };
