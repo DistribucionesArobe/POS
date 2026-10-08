@@ -496,108 +496,127 @@ function imprimirRecibo() {
 
 function ReciboCorte({ cerrado, preview }: { cerrado: any; preview: any }) {
   const ahora = new Date();
-  // Rango del corte: desde 00:00 hasta ahora (o hasta 23:59 del día del preview)
-  const fechaStr = preview?.fecha
-    ? new Date(preview.fecha + "T12:00:00").toLocaleDateString("es-MX", {
-        day: "2-digit", month: "long", year: "numeric", weekday: "long",
-      })
-    : ahora.toLocaleDateString("es-MX");
   const horaCierre = ahora.toLocaleString("es-MX", {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
   const cajero = localStorage.getItem("nombre") || "Cajero";
+  const estacion = (() => {
+    const uid = localStorage.getItem("usuario_id") || "";
+    return uid.padStart(2, "0");
+  })();
   const empresaNombre = (() => {
     try { return JSON.parse(localStorage.getItem("empresa_activa") || "{}").nombre || ""; }
     catch { return ""; }
   })();
+  const row = (l: string, r: string, bold?: boolean) => (
+    <div style={{ display: "flex", justifyContent: "space-between",
+      fontWeight: bold ? 700 : 400 }}>
+      <span>{l}</span><span>{r}</span>
+    </div>
+  );
+
+  const vt = preview?.ventas_por_tasa || {};
+  const docs = preview?.por_tipo_documento || {};
+  const totalEgresos = 0; // futuro: retiros de caja
+  const totalIngresos = cerrado.efectivo_real;
+  const totalEnCaja = totalIngresos - totalEgresos;
 
   return (
     <div style={{ color: "#000", fontFamily: "'Courier New', monospace", fontSize: 12 }}>
-      <div style={{ textAlign: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 16, fontWeight: 800 }}>CORTE DE CAJA</div>
-        <div style={{ fontSize: 11 }}>{empresaNombre}</div>
+      <div style={{ textAlign: "center", marginBottom: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 800 }}>*** CORTE Z EN MONEDA: MXN ***</div>
+        <div style={{ fontSize: 13, fontWeight: 800 }}>{empresaNombre.toUpperCase()}</div>
       </div>
 
-      <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", padding: "6px 0", marginBottom: 8 }}>
-        <div><strong>Corte #:</strong> {cerrado.id}</div>
-        <div><strong>Fecha:</strong> {fechaStr}</div>
-        <div><strong>Periodo:</strong> {preview?.fecha} 00:00 — 23:59</div>
-        <div><strong>Cajero:</strong> {cajero}</div>
-        <div><strong>Impreso:</strong> {horaCierre}</div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ textAlign: "center", fontSize: 11 }}>
+          *** Corte Z {cerrado.numero_z || cerrado.id} ***
+        </div>
+        <div style={{ fontSize: 11 }}>
+          ESTACION{estacion} {horaCierre}
+        </div>
       </div>
 
-      {/* Documentos */}
-      {preview?.por_tipo_documento && (
-        <div style={{ marginBottom: 8 }}>
-          <strong>DOCUMENTOS DEL PERIODO</strong>
-          {([
-            ["tickets",           "Tickets"],
-            ["facturas_contado",  "Facturas contado"],
-            ["facturas_credito",  "Facturas credito"],
-            ["complementos_pago", "Complementos pago"],
-          ] as const).map(([k, label]) => {
-            const d = preview.por_tipo_documento[k];
-            if (!d || !d.n) return null;
-            return (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>{label} ({d.n})</span>
-                <span>{fmt(d.total)}</span>
-              </div>
-            );
-          })}
-          <div style={{ borderTop: "1px solid #000", marginTop: 4, paddingTop: 4,
-            display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
-            <span>TOTAL VENDIDO</span>
-            <span>{fmt(cerrado.total_vendido)}</span>
+      {/* INGRESOS */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontWeight: 700 }}>** Ingresos **</div>
+        {Object.entries(preview?.cobros_contado_por_forma || {}).map(([k, v]: [string, any]) => (
+          <div key={"i"+k}>{row(`${v.label} Pago de clientes`, fmt(v.monto))}</div>
+        ))}
+        {Object.entries(preview?.cobros_credito_por_forma || {}).map(([k, v]: [string, any]) => (
+          <div key={"c"+k}>{row(`${v.label} Cobranza credito`, fmt(v.monto))}</div>
+        ))}
+        <div style={{ marginTop: 4 }}>
+          {row("Total de Ingresos:", fmt(preview?.total_entrada_dinero || cerrado.total_vendido), true)}
+        </div>
+      </div>
+
+      {/* EGRESOS */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontWeight: 700 }}>** Egresos **</div>
+        {row("Total de Egresos:", fmt(totalEgresos), true)}
+      </div>
+
+      <div style={{ borderTop: "1px dashed #000", padding: "4px 0", marginBottom: 6 }}>
+        {row("Total en caja:", fmt(totalEnCaja), true)}
+      </div>
+
+      {/* VENTAS DEL CORTE */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ textAlign: "center", fontWeight: 700 }}>
+          ********* VENTAS DEL CORTE *********
+        </div>
+        {row("Ventas 16%", fmt(vt["16"]?.subtotal || 0))}
+        {row("Impuesto 16%", fmt(vt["16"]?.impuesto || 0))}
+        {row("Ventas 10%", fmt(vt["10"]?.subtotal || 0))}
+        {row("Impuesto 10%", fmt(vt["10"]?.impuesto || 0))}
+        <div style={{ marginTop: 4 }}>
+          {row("Ventas gravadas", fmt((vt["16"]?.subtotal || 0) + (vt["10"]?.subtotal || 0)))}
+          {row("Impuesto", fmt((vt["16"]?.impuesto || 0) + (vt["10"]?.impuesto || 0)))}
+          {row("Ventas no gravadas:", fmt(vt.exentas || 0))}
+        </div>
+        <div style={{ borderTop: "1px dashed #000", marginTop: 4, paddingTop: 4 }}>
+          {row("Redondeos", fmt(0))}
+          {row("Total de ventas:", fmt(cerrado.total_vendido), true)}
+          {row("Ventas credito:", fmt(preview?.ventas_credito_total || 0))}
+        </div>
+      </div>
+
+      {/* COBRANZA DEL DIA */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ textAlign: "center", fontWeight: 700 }}>
+          ****** Cobranza del dia ******
+        </div>
+        {row("Ingresos por cobranza:", fmt(preview?.total_cobros_credito || 0))}
+      </div>
+
+      {/* VENTAS POR ARTICULO */}
+      {preview?.top_productos && preview.top_productos.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontWeight: 700 }}>** Ventas por articulo **</div>
+          {preview.top_productos.slice(0, 15).map((p: any, i: number) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ maxWidth: "60%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.nombre}
+              </span>
+              <span>{p.cantidad} — {fmt(p.importe)}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 4 }}>
+            {row("Total ventas del dia:", fmt(cerrado.total_vendido), true)}
+            {row("Total venta en unidades:", (preview?.total_unidades || 0).toString())}
+            {row("Clientes atendidos:", (preview?.clientes_atendidos || 0).toString())}
           </div>
         </div>
       )}
 
-      {/* Cobros contado */}
-      {preview?.cobros_contado_por_forma && Object.keys(preview.cobros_contado_por_forma).length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <strong>COBROS CONTADO</strong>
-          {Object.entries(preview.cobros_contado_por_forma).map(([k, v]: [string, any]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>{v.label} ({v.n})</span>
-              <span>{fmt(v.monto)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Cobros credito */}
-      {preview?.cobros_credito_por_forma && Object.keys(preview.cobros_credito_por_forma).length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <strong>COBROS CREDITO (complementos)</strong>
-          {Object.entries(preview.cobros_credito_por_forma).map(([k, v]: [string, any]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>{v.label} ({v.n})</span>
-              <span>{fmt(v.monto)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       <div style={{ borderTop: "1px dashed #000", paddingTop: 6, marginBottom: 6 }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Total venta periodo:</span>
-          <span>{fmt(cerrado.total_vendido)}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Efectivo esperado:</span>
-          <span>{fmt(cerrado.efectivo_esperado)}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>Efectivo contado:</span>
-          <span>{fmt(cerrado.efectivo_real)}</span>
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between",
-          borderTop: "1px solid #000", marginTop: 4, paddingTop: 4,
-          fontSize: 14, fontWeight: 800 }}>
-          <span>DIFERENCIA</span>
-          <span>{cerrado.diferencia >= 0 ? "+" : ""}{fmt(cerrado.diferencia)}</span>
+        {row("Efectivo esperado:", fmt(cerrado.efectivo_esperado))}
+        {row("Efectivo contado:", fmt(cerrado.efectivo_real))}
+        <div style={{ borderTop: "1px solid #000", marginTop: 4, paddingTop: 4,
+          fontSize: 13, fontWeight: 800 }}>
+          {row("DIFERENCIA", (cerrado.diferencia >= 0 ? "+" : "") + fmt(cerrado.diferencia))}
         </div>
       </div>
 
@@ -683,13 +702,31 @@ function CerrarCajaModal({ onClose }: { onClose: () => void }) {
               <ReciboCorte cerrado={cerrado} preview={preview} />
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 14 }} className="no-print">
+            {/* Aviso de tickets pendientes de factura global */}
+            {cerrado.tickets_pendientes_fg > 0 && (
+              <div style={{ background: "#fef3c7", border: "1px solid #f59e0b",
+                padding: 12, borderRadius: 8, marginTop: 14, textAlign: "center",
+                color: "#78350f" }} className="no-print">
+                <strong>⚠️ Hay {cerrado.tickets_pendientes_fg} tickets sin facturar globalmente.</strong>
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  Puedes generar la Factura Global de hoy ahora o después desde el menú.
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }} className="no-print">
               <button onClick={() => imprimirRecibo()} style={{
-                flex: 1, background: "#1e40af", color: "white",
+                flex: 1, minWidth: 140, background: "#1e40af", color: "white",
                 border: 0, padding: 14, borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
-              }}>🖨️ Imprimir recibo</button>
+              }}>🖨️ Imprimir Z</button>
+              {cerrado.tickets_pendientes_fg > 0 && (
+                <button onClick={() => { window.location.href = "/factura-global"; }} style={{
+                  flex: 1, minWidth: 140, background: "#059669", color: "white",
+                  border: 0, padding: 14, borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
+                }}>📄 Factura Global ({cerrado.tickets_pendientes_fg})</button>
+              )}
               <button onClick={onClose} style={{
-                flex: 1, background: "#0f172a", color: "white",
+                flex: 1, minWidth: 100, background: "#0f172a", color: "white",
                 border: 0, padding: 14, borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
               }}>Listo</button>
             </div>

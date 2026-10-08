@@ -329,12 +329,55 @@ def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> d
     efectivo_esperado = desglose.get("01", {}).get("monto", 0.0) + \
                         cobros_credito.get("01", {}).get("monto", 0.0)
 
+    # Ventas gravadas por tasa IVA (16%, 10% zona fronteriza, exentas)
+    ventas_16 = 0.0; impuesto_16 = 0.0
+    ventas_10 = 0.0; impuesto_10 = 0.0
+    ventas_exentas = 0.0
+    for v in ventas:
+        sub = float(v.subtotal or 0)
+        iva_doc = float(v.iva or 0)
+        if sub > 0:
+            tasa = iva_doc / sub
+            if tasa > 0.14 and tasa < 0.18:
+                ventas_16 += sub
+                impuesto_16 += iva_doc
+            elif tasa > 0.08 and tasa < 0.12:
+                ventas_10 += sub
+                impuesto_10 += iva_doc
+            else:
+                ventas_exentas += sub
+
+    # Clientes atendidos (distintos)
+    clientes_atendidos = len({v.cliente_id for v in ventas if v.cliente_id})
+
+    # Top productos vendidos del dia
+    from app.models import ConceptoVenta, VarianteProducto, Producto
+    venta_ids = [v.id for v in ventas]
+    productos_data = {}
+    if venta_ids:
+        conceptos = db.query(ConceptoVenta).filter(
+            ConceptoVenta.documento_id.in_(venta_ids)
+        ).all()
+        for c in conceptos:
+            key = c.variante_id
+            if key not in productos_data:
+                productos_data[key] = {
+                    "nombre": c.descripcion[:40] if c.descripcion else "?",
+                    "cantidad": 0.0, "importe": 0.0,
+                }
+            productos_data[key]["cantidad"] += float(c.cantidad or 0)
+            productos_data[key]["importe"] += float(c.importe or 0)
+    # Top 15 por importe
+    top_productos = sorted(
+        productos_data.values(), key=lambda x: x["importe"], reverse=True
+    )[:15]
+    total_unidades = sum(p["cantidad"] for p in productos_data.values())
+
     return {
         "n_ventas": n_ventas,
         "total_vendido": round(total_vendido, 2),
         "desglose_pagos": desglose,
         "efectivo_esperado": round(efectivo_esperado, 2),
-        # Nuevo detalle
         "por_tipo_documento": {
             "tickets":           {"n": len(tickets),       "total": round(sum(float(v.total) for v in tickets), 2)},
             "facturas_contado":  {"n": len(fact_contado),  "total": round(sum(float(v.total) for v in fact_contado), 2)},
@@ -347,6 +390,16 @@ def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> d
         "total_entrada_dinero": round(
             sum(d["monto"] for d in desglose.values()) + total_cobros_credito, 2
         ),
+        # NUEVO: formato tipo Corte Z
+        "ventas_por_tasa": {
+            "16": {"subtotal": round(ventas_16, 2), "impuesto": round(impuesto_16, 2)},
+            "10": {"subtotal": round(ventas_10, 2), "impuesto": round(impuesto_10, 2)},
+            "exentas": round(ventas_exentas, 2),
+        },
+        "ventas_credito_total": round(sum(float(v.total) for v in fact_credito), 2),
+        "clientes_atendidos": clientes_atendidos,
+        "top_productos": top_productos,
+        "total_unidades": round(total_unidades, 2),
     }
 
 
@@ -386,9 +439,15 @@ def corte_cerrar(
     efectivo_esp = data["efectivo_esperado"]
     diferencia = round(payload.efectivo_real - efectivo_esp, 2)
 
+    # Numero Z correlativo por empresa
+    ultimo_z = db.query(func.coalesce(func.max(CorteCaja.numero_z), 0))\
+                 .filter(CorteCaja.empresa_id == empresa_id).scalar() or 0
+    numero_z = ultimo_z + 1
+
     corte = CorteCaja(
         empresa_id=empresa_id,
         usuario_id=usuario.id,
+        numero_z=numero_z,
         fecha_corte=datetime.utcnow(),
         fecha_desde=ini,
         fecha_hasta=fin,
@@ -403,11 +462,24 @@ def corte_cerrar(
     db.add(corte)
     db.commit()
     db.refresh(corte)
+    # Contar tickets no facturados del dia para sugerir factura global
+    tickets_pendientes_fg = (
+        db.query(DocumentoVenta)
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(DocumentoVenta.tipo == "TICKET")
+        .filter(DocumentoVenta.fecha >= ini, DocumentoVenta.fecha < fin)
+        .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
+        .filter(DocumentoVenta.factura_global_id.is_(None))
+        .count()
+    )
+
     return {
         "id": corte.id,
+        "numero_z": corte.numero_z,
         "fecha": f.isoformat(),
         "diferencia": diferencia,
         "total_vendido": data["total_vendido"],
+        "tickets_pendientes_fg": tickets_pendientes_fg,
     }
 
 

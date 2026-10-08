@@ -31,3 +31,7 @@ class CorteCaja(Base):
 
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Corte Z: numero correlativo por empresa + estacion (ej. '02' para caja 2)
+    numero_z: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estacion: Mapped[str | None] = mapped_column(String(20), nullable=True)
