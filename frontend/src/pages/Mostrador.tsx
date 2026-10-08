@@ -470,6 +470,146 @@ export default function Mostrador() {
 
 // ===== Modal de Cerrar Caja (corte del dia, super simple para tablet) =====
 
+function imprimirRecibo() {
+  // Imprime solo el contenido con id="recibo-corte-print"
+  const el = document.getElementById("recibo-corte-print");
+  if (!el) { window.print(); return; }
+  const w = window.open("", "_blank", "width=400,height=600");
+  if (!w) { window.print(); return; }
+  w.document.write(`<!DOCTYPE html><html><head><title>Corte de caja</title>
+    <style>
+      body { font-family: 'Courier New', monospace; font-size: 12px; padding: 12px; color: #000; }
+      h1,h2,h3 { margin: 4px 0; }
+      .row { display: flex; justify-content: space-between; margin: 2px 0; }
+      .sep { border-top: 1px dashed #000; margin: 8px 0; }
+      .total { font-weight: bold; font-size: 14px; }
+      .center { text-align: center; }
+      table { width: 100%; font-size: 11px; border-collapse: collapse; }
+      td { padding: 2px 0; }
+    </style>
+  </head><body>${el.innerHTML}</body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 300);
+}
+
+
+function ReciboCorte({ cerrado, preview }: { cerrado: any; preview: any }) {
+  const ahora = new Date();
+  // Rango del corte: desde 00:00 hasta ahora (o hasta 23:59 del día del preview)
+  const fechaStr = preview?.fecha
+    ? new Date(preview.fecha + "T12:00:00").toLocaleDateString("es-MX", {
+        day: "2-digit", month: "long", year: "numeric", weekday: "long",
+      })
+    : ahora.toLocaleDateString("es-MX");
+  const horaCierre = ahora.toLocaleString("es-MX", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+  const cajero = localStorage.getItem("nombre") || "Cajero";
+  const empresaNombre = (() => {
+    try { return JSON.parse(localStorage.getItem("empresa_activa") || "{}").nombre || ""; }
+    catch { return ""; }
+  })();
+
+  return (
+    <div style={{ color: "#000", fontFamily: "'Courier New', monospace", fontSize: 12 }}>
+      <div style={{ textAlign: "center", marginBottom: 8 }}>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>CORTE DE CAJA</div>
+        <div style={{ fontSize: 11 }}>{empresaNombre}</div>
+      </div>
+
+      <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", padding: "6px 0", marginBottom: 8 }}>
+        <div><strong>Corte #:</strong> {cerrado.id}</div>
+        <div><strong>Fecha:</strong> {fechaStr}</div>
+        <div><strong>Periodo:</strong> {preview?.fecha} 00:00 — 23:59</div>
+        <div><strong>Cajero:</strong> {cajero}</div>
+        <div><strong>Impreso:</strong> {horaCierre}</div>
+      </div>
+
+      {/* Documentos */}
+      {preview?.por_tipo_documento && (
+        <div style={{ marginBottom: 8 }}>
+          <strong>DOCUMENTOS DEL PERIODO</strong>
+          {([
+            ["tickets",           "Tickets"],
+            ["facturas_contado",  "Facturas contado"],
+            ["facturas_credito",  "Facturas credito"],
+            ["complementos_pago", "Complementos pago"],
+          ] as const).map(([k, label]) => {
+            const d = preview.por_tipo_documento[k];
+            if (!d || !d.n) return null;
+            return (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{label} ({d.n})</span>
+                <span>{fmt(d.total)}</span>
+              </div>
+            );
+          })}
+          <div style={{ borderTop: "1px solid #000", marginTop: 4, paddingTop: 4,
+            display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+            <span>TOTAL VENDIDO</span>
+            <span>{fmt(cerrado.total_vendido)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Cobros contado */}
+      {preview?.cobros_contado_por_forma && Object.keys(preview.cobros_contado_por_forma).length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <strong>COBROS CONTADO</strong>
+          {Object.entries(preview.cobros_contado_por_forma).map(([k, v]: [string, any]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>{v.label} ({v.n})</span>
+              <span>{fmt(v.monto)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Cobros credito */}
+      {preview?.cobros_credito_por_forma && Object.keys(preview.cobros_credito_por_forma).length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <strong>COBROS CREDITO (complementos)</strong>
+          {Object.entries(preview.cobros_credito_por_forma).map(([k, v]: [string, any]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>{v.label} ({v.n})</span>
+              <span>{fmt(v.monto)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ borderTop: "1px dashed #000", paddingTop: 6, marginBottom: 6 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Total venta periodo:</span>
+          <span>{fmt(cerrado.total_vendido)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Efectivo esperado:</span>
+          <span>{fmt(cerrado.efectivo_esperado)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>Efectivo contado:</span>
+          <span>{fmt(cerrado.efectivo_real)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between",
+          borderTop: "1px solid #000", marginTop: 4, paddingTop: 4,
+          fontSize: 14, fontWeight: 800 }}>
+          <span>DIFERENCIA</span>
+          <span>{cerrado.diferencia >= 0 ? "+" : ""}{fmt(cerrado.diferencia)}</span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 24, textAlign: "center", fontSize: 10 }}>
+        <div style={{ borderTop: "1px solid #000", margin: "40px 20px 4px" }}></div>
+        FIRMA DEL CAJERO
+      </div>
+    </div>
+  );
+}
+
+
 function CerrarCajaModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<any>(null);
@@ -529,41 +669,30 @@ function CerrarCajaModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : cerrado ? (
           <>
-            <div style={{ textAlign: "center", padding: "10px 0 20px" }}>
+            <div style={{ textAlign: "center", padding: "10px 0 20px" }}
+              className="no-print">
               <div style={{ fontSize: 64, marginBottom: 8 }}>✅</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "#059669" }}>Caja cerrada</div>
               <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
                 Corte #{cerrado.id} guardado
               </div>
             </div>
-            <div style={{ background: "#f8fafc", padding: 16, borderRadius: 8, marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 }}>
-                <span>Total vendido:</span>
-                <strong>{fmt(cerrado.total_vendido)}</strong>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 }}>
-                <span>Efectivo esperado:</span>
-                <span>{fmt(cerrado.efectivo_esperado)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 }}>
-                <span>Efectivo contado:</span>
-                <span>{fmt(cerrado.efectivo_real)}</span>
-              </div>
-              <div style={{
-                display: "flex", justifyContent: "space-between",
-                padding: "10px 12px", marginTop: 8, borderRadius: 6,
-                background: Math.abs(cerrado.diferencia) < 0.01 ? "#dcfce7"
-                  : cerrado.diferencia > 0 ? "#fef3c7" : "#fee2e2",
-                fontSize: 18, fontWeight: 800,
-              }}>
-                <span>Diferencia:</span>
-                <span>{cerrado.diferencia >= 0 ? "+" : ""}{fmt(cerrado.diferencia)}</span>
-              </div>
+
+            {/* Area imprimible */}
+            <div id="recibo-corte-print">
+              <ReciboCorte cerrado={cerrado} preview={preview} />
             </div>
-            <button onClick={onClose} style={{
-              width: "100%", background: "#0f172a", color: "white",
-              border: 0, padding: 16, borderRadius: 8, fontSize: 18, fontWeight: 700, cursor: "pointer",
-            }}>Listo</button>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }} className="no-print">
+              <button onClick={() => imprimirRecibo()} style={{
+                flex: 1, background: "#1e40af", color: "white",
+                border: 0, padding: 14, borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
+              }}>🖨️ Imprimir recibo</button>
+              <button onClick={onClose} style={{
+                flex: 1, background: "#0f172a", color: "white",
+                border: 0, padding: 14, borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
+              }}>Listo</button>
+            </div>
           </>
         ) : (
           <>
