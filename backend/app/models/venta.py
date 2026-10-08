@@ -78,6 +78,13 @@ class DocumentoVenta(Base):
     tiene_entregas_pendientes: Mapped[bool] = mapped_column(Boolean, default=False)
     valor_entregado: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 
+    # Factura global: para tickets de mostrador agrupados en 1 CFDI al publico general
+    factura_global_id: Mapped[int | None] = mapped_column(
+        ForeignKey("documentos_venta.id"), nullable=True, index=True
+    )
+    es_factura_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    periodo_global: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     forma_pago_sat: Mapped[str] = mapped_column(String(2), default=FormaPagoSAT.EFECTIVO.value)
     metodo_pago_sat: Mapped[str] = mapped_column(String(3), default=MetodoPagoSAT.PUE.value)
     moneda: Mapped[str] = mapped_column(String(3), default="MXN")

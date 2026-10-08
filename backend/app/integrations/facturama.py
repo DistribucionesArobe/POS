@@ -169,6 +169,77 @@ class FacturamaClient:
         """Emite un CFDI tipo P (Pago) a Facturama."""
         return self._post("/3/cfdis", payload)
 
+    def emitir_factura_global(self, tickets: list, periodicidad: str,
+                              mes: str, anio: int) -> dict:
+        """Emite UN CFDI tipo I al publico en general que ampara varios tickets.
+
+        tickets: lista de DocumentoVenta de tipo TICKET a facturar.
+        periodicidad: 01 Diario, 02 Semanal, 03 Quincenal, 04 Mensual, 05 Bimestral.
+        mes: '01' a '12' (o codigos 13 ene/feb bimestre, etc)
+        anio: ej 2026
+        """
+        if not tickets:
+            raise ValueError("No hay tickets para facturar")
+
+        items = []
+        for t in tickets:
+            importe = float(t.subtotal or 0)
+            iva = float(t.iva or 0)
+            tasa = round(iva / importe, 6) if importe > 0 else 0.16
+            iva_calc = round(importe * tasa, 2)
+            items.append({
+                "ProductCode": "01010101",   # comodin SAT
+                "IdentificationNumber": str(t.id),
+                "Description": f"Venta mostrador folio {t.folio} del {t.fecha.strftime('%d/%m/%Y')}",
+                "Unit": "Pieza",
+                "UnitCode": "ACT",             # ACT = Actividad
+                "UnitPrice": importe,
+                "Quantity": 1,
+                "Subtotal": importe,
+                "TaxObject": "02",
+                "Taxes": [{
+                    "Total": iva_calc, "Name": "IVA",
+                    "Base": importe, "Rate": tasa, "IsRetention": False,
+                }],
+                "Total": importe + iva_calc,
+            })
+
+        payload = {
+            "NameId": "1",
+            "CfdiType": "I",
+            "PaymentForm": "01",      # efectivo
+            "PaymentMethod": "PUE",   # pago en una exhibicion
+            "Currency": "MXN",
+            "ExpeditionPlace": self.lugar_expedicion,
+            "Issuer": {
+                "FiscalRegime": self.regimen,
+                "Rfc": self.rfc_emisor,
+                "Name": (self.razon_social_emisor or "EMISOR").upper(),
+            },
+            "Receiver": {
+                "Rfc": "XAXX010101000",
+                "Name": "PUBLICO EN GENERAL",
+                "FiscalRegime": "616",
+                "TaxZipCode": self.lugar_expedicion,
+                "CfdiUse": "S01",      # Sin efectos fiscales
+            },
+            # Nodo InformacionGlobal (requerido para factura global CFDI 4.0)
+            "GlobalInformation": {
+                "Periodicity": periodicidad,
+                "Months": mes,
+                "Year": int(anio),
+            },
+            "Items": items,
+        }
+
+        try:
+            return self._post("/3/cfdis", payload)
+        except FacturamaError as e:
+            import json as _json
+            logger.error("FACTURAMA RECHAZO FG. Payload: %s", _json.dumps(payload, default=str))
+            logger.error("FACTURAMA ERROR FG: %s", str(e))
+            raise
+
     def cancelar(self, cfdi_id: str, motivo: str, uuid_sustituye: str | None = None) -> dict:
         params = {"motive": motivo}
         if uuid_sustituye:

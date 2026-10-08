@@ -40,6 +40,7 @@ const items = [
   { to: "/gmail-sync", label: "Gmail Sync CxP", icon: Icon.chat, roles: ["admin"] },
   { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
   { to: "/conteo-inventario", label: "Conteo inventario", icon: Icon.list, roles: ["admin", "cajero"] },
+  { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin"] },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }

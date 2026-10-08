@@ -63,6 +63,7 @@ import Academia from "./pages/Academia";
 import GmailSync from "./pages/GmailSync";
 import EntregasPendientes from "./pages/EntregasPendientes";
 import ConteoInventario from "./pages/ConteoInventario";
+import FacturaGlobal from "./pages/FacturaGlobal";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -107,6 +108,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/gmail-sync" element={<GmailSync />} />
           <Route path="/entregas-pendientes" element={<EntregasPendientes />} />
           <Route path="/conteo-inventario" element={<ConteoInventario />} />
+          <Route path="/factura-global" element={<FacturaGlobal />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}
