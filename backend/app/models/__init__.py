@@ -29,3 +29,4 @@ from app.models.importacion import (  # noqa
 from app.models.academia import AcademiaPago  # noqa
 from app.models.gmail_sync import GmailConexion, GmailImportacionLog  # noqa
 from app.models.salidas_mercancia import SalidaMercancia, SalidaMercanciaItem  # noqa
+from app.models.conteo_inventario import ConteoInventario, ConteoInventarioItem  # noqa

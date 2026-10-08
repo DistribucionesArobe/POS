@@ -39,6 +39,7 @@ const items = [
   { to: "/academia", label: "Academia", icon: Icon.users, roles: ["cajero", "admin"] },
   { to: "/gmail-sync", label: "Gmail Sync CxP", icon: Icon.chat, roles: ["admin"] },
   { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
+  { to: "/conteo-inventario", label: "Conteo inventario", icon: Icon.list, roles: ["admin", "cajero"] },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }

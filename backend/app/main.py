@@ -27,6 +27,7 @@ from app.routers import (
     academia,
     gmail_sync,
     salidas_mercancia,
+    conteo_inventario,
 )
 
 settings = get_settings()
@@ -91,3 +92,4 @@ app.include_router(importaciones.router, prefix="/api")
 app.include_router(academia.router, prefix="/api")
 app.include_router(gmail_sync.router, prefix="/api")
 app.include_router(salidas_mercancia.router, prefix="/api")
+app.include_router(conteo_inventario.router, prefix="/api")
