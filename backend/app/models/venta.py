@@ -8,7 +8,7 @@ Un solo modelo para los 4 tipos:
 """
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, DateTime, Numeric, ForeignKey, Text, Index
+from sqlalchemy import String, DateTime, Numeric, ForeignKey, Text, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -72,6 +72,11 @@ class DocumentoVenta(Base):
     # como retenciones por concepto y el total final se reduce por esta cantidad.
     iva_retenido: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     isr_retenido: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+
+    # Entregas pendientes: si true, la factura se timbra sin descontar inventario
+    # y las salidas se registran despues contra esta factura
+    tiene_entregas_pendientes: Mapped[bool] = mapped_column(Boolean, default=False)
+    valor_entregado: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
 
     forma_pago_sat: Mapped[str] = mapped_column(String(2), default=FormaPagoSAT.EFECTIVO.value)
     metodo_pago_sat: Mapped[str] = mapped_column(String(3), default=MetodoPagoSAT.PUE.value)

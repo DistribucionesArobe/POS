@@ -61,6 +61,7 @@ import Importaciones from "./pages/Importaciones";
 import ImportacionEditar from "./pages/ImportacionEditar";
 import Academia from "./pages/Academia";
 import GmailSync from "./pages/GmailSync";
+import EntregasPendientes from "./pages/EntregasPendientes";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -103,6 +104,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/importaciones/:id" element={<ImportacionEditar />} />
           <Route path="/academia" element={<Academia />} />
           <Route path="/gmail-sync" element={<GmailSync />} />
+          <Route path="/entregas-pendientes" element={<EntregasPendientes />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}
