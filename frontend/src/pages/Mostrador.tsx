@@ -572,19 +572,77 @@ function CerrarCajaModal({ onClose }: { onClose: () => void }) {
               Cuenta el efectivo de la caja y escribe cuánto tienes.
             </p>
 
-            {/* Resumen del dia */}
-            <div style={{ background: "#f8fafc", padding: 14, borderRadius: 8, marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 15 }}>
-                <span style={{ color: "#64748b" }}>Ventas del día:</span>
-                <strong>{preview.n_ventas} tickets · {fmt(preview.total_vendido)}</strong>
-              </div>
-              {Object.entries(preview.desglose_pagos || {}).map(([k, v]: [string, any]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
-                  <span style={{ color: "#64748b" }}>{v.label}:</span>
-                  <span>{fmt(v.monto)} ({v.n})</span>
+            {/* Resumen por tipo de documento */}
+            {preview.por_tipo_documento && (
+              <div style={{ background: "#f8fafc", padding: 14, borderRadius: 8, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  Documentos del día
                 </div>
-              ))}
-            </div>
+                {([
+                  ["tickets",           "🎫 Tickets",            "#334155"],
+                  ["facturas_contado",  "🧾 Facturas contado",   "#059669"],
+                  ["facturas_credito",  "💳 Facturas crédito",   "#f59e0b"],
+                  ["complementos_pago", "✅ Complementos pago",  "#1e40af"],
+                ] as const).map(([k, label, color]) => {
+                  const d = preview.por_tipo_documento[k];
+                  if (!d || !d.n) return null;
+                  return (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ color }}>{label}:</span>
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        <strong>{d.n}</strong> · {fmt(d.total)}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 8, paddingTop: 8,
+                  display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                  <strong>Total venta del día:</strong>
+                  <strong>{fmt(preview.total_vendido)}</strong>
+                </div>
+              </div>
+            )}
+
+            {/* Desglose cobros CONTADO por forma de pago */}
+            {Object.keys(preview.cobros_contado_por_forma || preview.desglose_pagos || {}).length > 0 && (
+              <div style={{ background: "#f0fdf4", padding: 14, borderRadius: 8, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  💵 Cobros de contado (hoy)
+                </div>
+                {Object.entries(preview.cobros_contado_por_forma || preview.desglose_pagos || {}).map(([k, v]: [string, any]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
+                    <span style={{ color: "#065f46" }}>{v.label}:</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(v.monto)} ({v.n})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Desglose cobros CREDITO (complementos) por forma de pago */}
+            {preview.cobros_credito_por_forma && Object.keys(preview.cobros_credito_por_forma).length > 0 && (
+              <div style={{ background: "#dbeafe", padding: 14, borderRadius: 8, marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#1e40af", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  ✅ Cobros de crédito (complementos de pago)
+                </div>
+                {Object.entries(preview.cobros_credito_por_forma).map(([k, v]: [string, any]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
+                    <span style={{ color: "#1e40af" }}>{v.label}:</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(v.monto)} ({v.n})</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Total entrada de dinero */}
+            {preview.total_entrada_dinero !== undefined && (
+              <div style={{ background: "#fef3c7", padding: 12, borderRadius: 8, marginBottom: 12,
+                display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong style={{ fontSize: 14, color: "#78350f" }}>💰 Total dinero entrado hoy:</strong>
+                <strong style={{ fontSize: 18, color: "#78350f", fontVariantNumeric: "tabular-nums" }}>
+                  {fmt(preview.total_entrada_dinero)}
+                </strong>
+              </div>
+            )}
 
             {/* Efectivo esperado */}
             <div style={{

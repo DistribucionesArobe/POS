@@ -244,22 +244,49 @@ def corte_caja(
 
 
 def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> dict:
-    """Calcula desglose de pagos del periodo dado, sin guardar."""
-    # Ventas no canceladas en el rango
-    ventas = (
+    """Calcula desglose completo del dia: facturas contado/credito,
+    complementos de pago, por forma de pago y por tipo de documento."""
+    # Todos los documentos no cancelados del rango (incluye tickets, facturas, complementos)
+    docs = (
         db.query(DocumentoVenta)
         .filter(DocumentoVenta.empresa_id == empresa_id)
         .filter(DocumentoVenta.fecha >= ini, DocumentoVenta.fecha < fin)
         .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
-        .filter(DocumentoVenta.tipo.in_([
-            TipoDocumento.TICKET.value, TipoDocumento.FACTURA.value,
-        ]))
         .all()
     )
+    ventas = [d for d in docs if d.tipo in (
+        TipoDocumento.TICKET.value, TipoDocumento.FACTURA.value,
+    )]
     n_ventas = len(ventas)
     total_vendido = sum(float(v.total) for v in ventas)
 
-    # Pagos: cuando se mando split, esta el detalle; si no, asumir 1 fila = total con la forma del doc
+    # Clasificar facturas: contado (PUE) vs credito (PPD)
+    fact_contado = [v for v in ventas
+                    if v.tipo == TipoDocumento.FACTURA.value and (v.metodo_pago_sat or "PUE") == "PUE"]
+    fact_credito = [v for v in ventas
+                    if v.tipo == TipoDocumento.FACTURA.value and v.metodo_pago_sat == "PPD"]
+    tickets = [v for v in ventas if v.tipo == TipoDocumento.TICKET.value]
+
+    # Complementos de pago aplicados en el dia (CFDI tipo P)
+    # Filtramos por fecha_pago del complemento, no fecha de timbrado.
+    from app.models import ComplementoPago
+    complementos = (
+        db.query(ComplementoPago)
+        .filter(ComplementoPago.fecha_pago >= ini, ComplementoPago.fecha_pago < fin)
+        .all()
+    )
+    # Filtrar los que corresponden a esta empresa (via join a Cfdi -> DocumentoVenta)
+    from app.models import Cfdi
+    complementos_empresa = []
+    for cp in complementos:
+        cf = db.get(Cfdi, cp.cfdi_origen_id)
+        if cf:
+            dv = db.get(DocumentoVenta, cf.documento_venta_id)
+            if dv and dv.empresa_id == empresa_id:
+                complementos_empresa.append(cp)
+    complementos = complementos_empresa
+
+    # Desglose por forma de pago - usar pagos split cuando existan
     desglose: dict[str, dict] = {}
     venta_ids = [v.id for v in ventas]
     pagos_rows = []
@@ -270,7 +297,11 @@ def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> d
     for p in pagos_rows:
         pagos_por_venta.setdefault(p.documento_venta_id, []).append(p)
 
+    # Credito NO suma a cobros del dia (porque no entro dinero)
     for v in ventas:
+        es_credito = v.tipo == TipoDocumento.FACTURA.value and v.metodo_pago_sat == "PPD"
+        if es_credito:
+            continue  # el dinero entra via complementos de pago, no aqui
         rows = pagos_por_venta.get(v.id) or []
         if rows:
             for p in rows:
@@ -279,18 +310,43 @@ def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> d
                 d["monto"] += float(p.monto)
                 d["n"] += 1
         else:
-            # No hay split, contar el total con la forma del documento
             k = v.forma_pago_sat or "01"
             d = desglose.setdefault(k, {"label": FORMA_LABEL.get(k, k), "monto": 0.0, "n": 0})
             d["monto"] += float(v.total)
             d["n"] += 1
 
-    efectivo_esperado = desglose.get("01", {}).get("monto", 0.0)
+    # Cobros via complementos de pago (dinero que entro por facturas de credito previas)
+    cobros_credito: dict[str, dict] = {}
+    total_cobros_credito = 0.0
+    for cp in complementos:
+        k = cp.forma_pago_sat or "01"
+        monto = float(cp.monto_pagado or 0)
+        d = cobros_credito.setdefault(k, {"label": FORMA_LABEL.get(k, k), "monto": 0.0, "n": 0})
+        d["monto"] += monto
+        d["n"] += 1
+        total_cobros_credito += monto
+
+    efectivo_esperado = desglose.get("01", {}).get("monto", 0.0) + \
+                        cobros_credito.get("01", {}).get("monto", 0.0)
+
     return {
         "n_ventas": n_ventas,
         "total_vendido": round(total_vendido, 2),
         "desglose_pagos": desglose,
         "efectivo_esperado": round(efectivo_esperado, 2),
+        # Nuevo detalle
+        "por_tipo_documento": {
+            "tickets":           {"n": len(tickets),       "total": round(sum(float(v.total) for v in tickets), 2)},
+            "facturas_contado":  {"n": len(fact_contado),  "total": round(sum(float(v.total) for v in fact_contado), 2)},
+            "facturas_credito":  {"n": len(fact_credito),  "total": round(sum(float(v.total) for v in fact_credito), 2)},
+            "complementos_pago": {"n": len(complementos),  "total": round(total_cobros_credito, 2)},
+        },
+        "cobros_contado_por_forma": desglose,
+        "cobros_credito_por_forma": cobros_credito,
+        "total_cobros_credito": round(total_cobros_credito, 2),
+        "total_entrada_dinero": round(
+            sum(d["monto"] for d in desglose.values()) + total_cobros_credito, 2
+        ),
     }
 
 
