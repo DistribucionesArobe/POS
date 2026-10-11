@@ -208,7 +208,9 @@ REGLAS:
                         "  descripcion: string (nombre + specs: 'ITEM_NO ACTUAL_SIZE' ej 'SXCWB-170 170x24x2900mm')\n"
                         "  kg_pieza: number (peso por pieza, columna KG/PC o KG/CTN dividido entre PCS/CTN)\n"
                         "  precio_unit_usd: number (precio unitario FOB en USD)\n"
-                        "  moq: string|null (minimo de orden, ej '30 CTNS' o '100 PCS')\n"
+                        "  moq: string|null (minimo de orden tal cual aparece, ej '30 CTNS' o '100 PCS')\n"
+                        "  moq_piezas: number (MOQ convertido a PIEZAS totales: si dice '30 CTNS' y PCS/CTN=60, devuelve 1800. Si dice '100 PCS' devuelve 100. Si no hay MOQ, estima: para paneles/pisos pon 500, para accesorios/herrajes 1000, para LEDs 300.)\n"
+                        "  pcs_ctn: number|null (piezas por caja/CTN si aparece)\n"
                         "  unidad: string (PZA|SQM|KG|CTN segun contexto)\n"
                         "REGLAS:\n"
                         "1. Un objeto por fila de producto (no agrupes secciones, no sumes).\n"
@@ -216,7 +218,8 @@ REGLAS:
                         "3. Si el precio es USD/SQM o USD/CTN en vez de USD/PC, usa ese valor igual (user ajusta).\n"
                         "4. Ignora encabezados, titulos de seccion, filas totales. Solo productos reales.\n"
                         "5. Numeros sin $ ni comas. Devuelve 'null' solo si no es legible.\n"
-                        "6. Si hay varias paginas, procesa TODAS las filas de todas las paginas."
+                        "6. Si hay varias paginas, procesa TODAS las filas de todas las paginas.\n"
+                        "7. moq_piezas SIEMPRE debe ser un numero entero positivo (nunca null)."
                     )},
                 ],
             }],

@@ -344,7 +344,7 @@ export default function ImportacionEditar() {
                     arancel_pct: p.arancel_pct || 0.15,
                   }));
                   setRenglones([...renglones, ...nuevos]);
-                  setMsg(`${nuevos.length} productos agregados desde el PDF. Llena las piezas que vas a comprar.`);
+                  setMsg(`${nuevos.length} productos agregados. Piezas se pre-llenaron desde MOQ - ajusta si vas a comprar diferente.`);
                   setTimeout(() => setMsg(null), 5000);
                 }} />
                 <button onClick={addRenglon} className="btn-icon">+ Agregar renglon</button>

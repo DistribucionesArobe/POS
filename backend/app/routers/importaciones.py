@@ -609,13 +609,39 @@ async def parsear_cotizacion_pdf(
     for p in productos:
         if not isinstance(p, dict):
             continue
+        # Piezas sugeridas: prefiere moq_piezas (ya en piezas totales); si falta, parsea moq string
+        piezas_sug = 0
+        try:
+            piezas_sug = int(float(p.get("moq_piezas") or 0))
+        except (TypeError, ValueError):
+            piezas_sug = 0
+        if piezas_sug <= 0:
+            # fallback: intentar extraer numero del string MOQ
+            import re as _re
+            moq_str = str(p.get("moq") or "")
+            m = _re.search(r"(\d+)", moq_str)
+            if m:
+                n = int(m.group(1))
+                pcs_ctn = p.get("pcs_ctn")
+                try:
+                    pcs_ctn = int(float(pcs_ctn)) if pcs_ctn else 0
+                except (TypeError, ValueError):
+                    pcs_ctn = 0
+                if "CTN" in moq_str.upper() and pcs_ctn > 0:
+                    piezas_sug = n * pcs_ctn
+                else:
+                    piezas_sug = n
+        if piezas_sug <= 0:
+            piezas_sug = 500  # ultimo fallback razonable
+
         renglones_sugeridos.append({
             "descripcion": (p.get("descripcion") or "")[:300],
             "kg_pieza": float(p.get("kg_pieza") or 0),
             "precio_unit_mercancia": float(p.get("precio_unit_usd") or 0),
             "unidad_sugerida": p.get("unidad") or "PZA",
             "moq": p.get("moq"),
-            "piezas": 0,  # user llena cuantas va a comprar
+            "pcs_ctn": p.get("pcs_ctn"),
+            "piezas": piezas_sug,  # pre-llenado desde MOQ, user ajusta
             "arancel_pct": 0.15,
             "margen_sugerido_pct": 2.5,
         })
