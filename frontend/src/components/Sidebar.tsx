@@ -18,29 +18,35 @@ const Icon = {
 
 // Items del sidebar. Cada uno tiene 'roles' (que roles lo ven) o si es undefined lo ven todos.
 // Roles: 'cajero' | 'admin' | 'super_admin'. super_admin ve TODO siempre.
+// Items visibles para TODOS los usuarios de la empresa (admin + cajero).
+// super_admin tambien los ve todos. Siguen el orden en que aparecen aqui.
 const items = [
-  { to: "/", label: "Dashboard", icon: Icon.dashboard, roles: ["admin"] },
-  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true, roles: ["cajero", "admin"] },
-  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["cajero", "admin"] },
-  { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["cajero", "admin"] },
-  { to: "/venta", label: "Nueva venta", icon: Icon.cart, roles: ["admin"] },
-  { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin"] },
-  { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["cajero", "admin"] },
-  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["cajero", "admin"] },
-  { to: "/clientes", label: "Clientes", icon: Icon.users, roles: ["admin"] },
-  { to: "/proveedores", label: "Proveedores", icon: Icon.users, roles: ["admin"] },
-  { to: "/compras", label: "Compras y CxP", icon: Icon.package, roles: ["admin"] },
-  { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar, roles: ["admin"] },
-  { to: "/cartera", label: "Cartera", icon: Icon.dollar, roles: ["admin"] },
-  { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin"] },
-  { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["cajero", "admin"] },
-  { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin"] },
-  { to: "/importaciones", label: "Importaciones", icon: Icon.package, roles: ["admin"] },
-  { to: "/academia", label: "Academia", icon: Icon.users, roles: ["cajero", "admin"] },
-  { to: "/gmail-sync", label: "Gmail Sync CxP", icon: Icon.chat, roles: ["admin"] },
+  { to: "/", label: "Dashboard", icon: Icon.dashboard, roles: ["admin", "cajero"] },
+  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true, roles: ["admin", "cajero"] },
+  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["admin", "cajero"] },
+  { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["admin", "cajero"] },
+  { to: "/venta", label: "Nueva venta", icon: Icon.cart, roles: ["admin", "cajero"] },
+  { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
+  { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["admin", "cajero"] },
+  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin", "cajero"] },
+  { to: "/clientes", label: "Clientes", icon: Icon.users, roles: ["admin", "cajero"] },
+  { to: "/proveedores", label: "Proveedores", icon: Icon.users, roles: ["admin", "cajero"] },
+  { to: "/compras", label: "Compras y CxP", icon: Icon.package, roles: ["admin", "cajero"] },
+  { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/cartera", label: "Cartera", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
   { to: "/conteo-inventario", label: "Conteo inventario", icon: Icon.list, roles: ["admin", "cajero"] },
-  { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin"] },
+  { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin", "cajero"] },
+
+  // Secciones SOLO super_admin — van al final para separacion visual
+  { to: "/importaciones", label: "Importaciones", icon: Icon.package, superAdminOnly: true },
+  { to: "/academia", label: "Academia", icon: Icon.users, superAdminOnly: true },
+  { to: "/gmail-sync", label: "Gmail Sync CxP", icon: Icon.chat, superAdminOnly: true },
+  { to: "/activos", label: "Activos", icon: Icon.package, superAdminOnly: true },
+  { to: "/tarjetas", label: "Tarjetas crédito", icon: Icon.dollar, superAdminOnly: true },
 ];
 
 interface Empresa { id: number; nombre: string; rfc: string; }
@@ -155,48 +161,49 @@ export default function Sidebar() {
 
       <nav className="sidebar-nav">
         {items.filter((it) => {
-          // Super admin ve todo
+          const i = it as any;
+          // Items marcados superAdminOnly solo los ve super_admin
+          if (i.superAdminOnly) return superAdmin;
+          // Super admin ve todo lo demas
           if (superAdmin) return true;
-          // Si el item no tiene 'roles', lo ven todos
-          if (!(it as any).roles) return true;
-          // Si el rol del usuario esta en la lista, lo ve
-          return (it as any).roles.includes(rol);
-        }).map((it) => (
-          <Link
-            key={it.to}
-            to={it.to}
-            className={`sidebar-link ${loc.pathname === it.to ? "active" : ""}`}
-          >
-            {it.icon}
-            <span style={{ flex: 1 }}>{it.label}</span>
-            {(it as any).showBadge && noLeidos > 0 && (
-              <span style={{
-                background: "#dc2626", color: "white",
-                fontSize: 10, fontWeight: 700,
-                padding: "1px 7px", borderRadius: 10,
-                minWidth: 16, textAlign: "center",
-              }}>{noLeidos > 99 ? "99+" : noLeidos}</span>
-            )}
-          </Link>
-        ))}
-        {(rol === "admin" || superAdmin) && (
-          <Link
-            to="/activos"
-            className={`sidebar-link ${loc.pathname === "/activos" ? "active" : ""}`}
-          >
-            {Icon.package}
-            <span>Activos</span>
-          </Link>
-        )}
-        {(rol === "admin" || superAdmin) && (
-          <Link
-            to="/tarjetas"
-            className={`sidebar-link ${loc.pathname === "/tarjetas" ? "active" : ""}`}
-          >
-            {Icon.dollar}
-            <span>Tarjetas crédito</span>
-          </Link>
-        )}
+          // Si no tiene roles, lo ven todos
+          if (!i.roles) return true;
+          // Checa rol
+          return i.roles.includes(rol);
+        }).map((it) => {
+          const i = it as any;
+          // Separador visual antes de la primera seccion super_admin
+          const esPrimerSuperAdmin = i.superAdminOnly && superAdmin;
+          return (
+            <div key={it.to}>
+              {esPrimerSuperAdmin && items.findIndex((x: any) => x.superAdminOnly) === items.indexOf(it) && (
+                <div style={{
+                  fontSize: 10, color: "#64748b", textTransform: "uppercase",
+                  letterSpacing: 1, fontWeight: 700,
+                  padding: "12px 12px 4px", marginTop: 8,
+                  borderTop: "1px solid #334155",
+                }}>
+                  🔒 SUPER ADMIN
+                </div>
+              )}
+              <Link
+                to={it.to}
+                className={`sidebar-link ${loc.pathname === it.to ? "active" : ""}`}
+              >
+                {it.icon}
+                <span style={{ flex: 1 }}>{it.label}</span>
+                {i.showBadge && noLeidos > 0 && (
+                  <span style={{
+                    background: "#dc2626", color: "white",
+                    fontSize: 10, fontWeight: 700,
+                    padding: "1px 7px", borderRadius: 10,
+                    minWidth: 16, textAlign: "center",
+                  }}>{noLeidos > 99 ? "99+" : noLeidos}</span>
+                )}
+              </Link>
+            </div>
+          );
+        })}
         {superAdmin && (
           <Link
             to="/empresas"
