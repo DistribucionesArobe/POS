@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -572,6 +572,55 @@ def aplicar_al_catalogo(
         imp.estatus = "recibida"
     db.commit()
     return {"aplicados": aplicados, "saltados": saltados}
+
+
+@router.post("/parsear-cotizacion-pdf")
+async def parsear_cotizacion_pdf(
+    file: UploadFile = File(...),
+    _empresa_id: int = Depends(get_active_empresa_id),
+):
+    """Parsea un PDF/imagen de cotizacion de proveedor y devuelve renglones
+    listos para precargar en una importacion (descripcion, kg_pieza, precio USD)."""
+    filename = (file.filename or "").lower()
+    content_type = (file.content_type or "").lower()
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Archivo vacio")
+
+    if filename.endswith(".pdf") or content_type == "application/pdf":
+        mime = "application/pdf"
+    elif content_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        mime = content_type if content_type.startswith("image/") else (
+            "image/png" if filename.endswith(".png") else
+            "image/webp" if filename.endswith(".webp") else "image/jpeg"
+        )
+    else:
+        raise HTTPException(400, f"Tipo no soportado: {filename}")
+
+    from app.integrations.anthropic_client import ClaudeClient
+    try:
+        client = ClaudeClient()
+        productos = client.parsear_cotizacion_importacion(file_bytes, mime_type=mime)
+    except Exception as e:
+        raise HTTPException(500, f"No pude leer la cotizacion: {e}")
+
+    # Normalizar al formato del renglon
+    renglones_sugeridos = []
+    for p in productos:
+        if not isinstance(p, dict):
+            continue
+        renglones_sugeridos.append({
+            "descripcion": (p.get("descripcion") or "")[:300],
+            "kg_pieza": float(p.get("kg_pieza") or 0),
+            "precio_unit_mercancia": float(p.get("precio_unit_usd") or 0),
+            "unidad_sugerida": p.get("unidad") or "PZA",
+            "moq": p.get("moq"),
+            "piezas": 0,  # user llena cuantas va a comprar
+            "arancel_pct": 0.15,
+            "margen_sugerido_pct": 2.5,
+        })
+
+    return {"n_productos": len(renglones_sugeridos), "renglones": renglones_sugeridos}
 
 
 @router.get("/{imp_id}/calcular")

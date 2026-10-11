@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
@@ -328,9 +328,27 @@ export default function ImportacionEditar() {
 
           {/* Mercancia */}
           <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>Mercancia ({renglones.length})</h3>
-              <button onClick={addRenglon} className="btn-icon">+ Agregar renglon</button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <ParsearPdfButton onProductos={(prods) => {
+                  const siguienteOrden = renglones.length * 10;
+                  const nuevos = prods.map((p, i) => ({
+                    orden: siguienteOrden + (i + 1) * 10,
+                    descripcion: p.descripcion,
+                    piezas: p.piezas || 0,
+                    precio_unit_mercancia: p.precio_unit_mercancia || 0,
+                    kg_pieza: p.kg_pieza || 0,
+                    variante_id: null,
+                    margen_sugerido_pct: p.margen_sugerido_pct || 2.5,
+                    arancel_pct: p.arancel_pct || 0.15,
+                  }));
+                  setRenglones([...renglones, ...nuevos]);
+                  setMsg(`${nuevos.length} productos agregados desde el PDF. Llena las piezas que vas a comprar.`);
+                  setTimeout(() => setMsg(null), 5000);
+                }} />
+                <button onClick={addRenglon} className="btn-icon">+ Agregar renglon</button>
+              </div>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
@@ -617,3 +635,126 @@ const cellInput = {
 const cellInputNum = {
   ...cellInput, textAlign: "right", fontVariantNumeric: "tabular-nums",
 } as const;
+
+
+function ParsearPdfButton({ onProductos }: { onProductos: (p: any[]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<any[] | null>(null);
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  async function manejarArchivo(f: File) {
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", f);
+      const r = await api.post("/api/importaciones/parsear-cotizacion-pdf", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 180000,  // Claude Vision puede tardar
+      });
+      const prods = r.data.renglones || [];
+      setPreview(prods);
+      setSeleccionados(new Set(prods.map((_: any, i: number) => i)));  // todos marcados default
+    } catch (e: any) {
+      alert("No pude leer el PDF: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  function confirmar() {
+    if (!preview) return;
+    const elegidos = preview.filter((_, i) => seleccionados.has(i));
+    onProductos(elegidos);
+    setPreview(null); setSeleccionados(new Set());
+  }
+
+  return (
+    <>
+      <input type="file" ref={inputRef} accept=".pdf,image/*" style={{ display: "none" }}
+        onChange={(e) => e.target.files?.[0] && manejarArchivo(e.target.files[0])} />
+      <button onClick={() => inputRef.current?.click()} disabled={busy}
+        style={{ background: busy ? "#94a3b8" : "#1e40af", color: "white", border: 0,
+          padding: "8px 14px", borderRadius: 6, fontSize: 13, fontWeight: 600,
+          cursor: busy ? "wait" : "pointer" }}>
+        {busy ? "🤖 Leyendo PDF..." : "📎 Subir cotización PDF"}
+      </button>
+
+      {preview && (
+        <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0,
+          background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center",
+          justifyContent: "center", zIndex: 2000, padding: 12 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white",
+            borderRadius: 10, padding: 20, width: "100%", maxWidth: 900,
+            maxHeight: "92vh", overflow: "auto", color: "#0f172a" }}>
+            <h2 style={{ margin: "0 0 4px" }}>Productos detectados ({preview.length})</h2>
+            <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 13 }}>
+              Marca los que vas a importar y toca Agregar. Después escribes las piezas y ajustas si es necesario.
+            </p>
+
+            <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+              <button onClick={() => setSeleccionados(new Set(preview.map((_, i) => i)))}
+                style={{ background: "#e2e8f0", border: 0, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                Marcar todos
+              </button>
+              <button onClick={() => setSeleccionados(new Set())}
+                style={{ background: "#e2e8f0", border: 0, padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                Desmarcar todos
+              </button>
+              <span style={{ fontSize: 12, color: "#64748b", alignSelf: "center" }}>
+                {seleccionados.size} de {preview.length} seleccionados
+              </span>
+            </div>
+
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: 6, width: 30 }}></th>
+                  <th style={{ padding: 6 }}>Descripcion</th>
+                  <th style={{ padding: 6, textAlign: "right", width: 70 }}>Kg/pza</th>
+                  <th style={{ padding: 6, textAlign: "right", width: 90 }}>Precio USD</th>
+                  <th style={{ padding: 6, width: 90 }}>MOQ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((p, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9",
+                    background: seleccionados.has(i) ? "#dcfce7" : undefined,
+                    cursor: "pointer" }}
+                    onClick={() => {
+                      const s = new Set(seleccionados);
+                      if (s.has(i)) s.delete(i); else s.add(i);
+                      setSeleccionados(s);
+                    }}>
+                    <td style={{ padding: 6, textAlign: "center" }}>
+                      <input type="checkbox" checked={seleccionados.has(i)} readOnly />
+                    </td>
+                    <td style={{ padding: 6, fontWeight: 600 }}>{p.descripcion}</td>
+                    <td style={{ padding: 6, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p.kg_pieza}</td>
+                    <td style={{ padding: 6, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#059669", fontWeight: 700 }}>
+                      ${p.precio_unit_mercancia}
+                    </td>
+                    <td style={{ padding: 6, fontSize: 11, color: "#64748b" }}>{p.moq || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setPreview(null)}
+                style={{ flex: 1, background: "#e2e8f0", border: 0, padding: 12,
+                  borderRadius: 6, fontSize: 14, cursor: "pointer" }}>Cancelar</button>
+              <button onClick={confirmar} disabled={seleccionados.size === 0}
+                style={{ flex: 2, background: seleccionados.size === 0 ? "#94a3b8" : "#059669",
+                  color: "white", border: 0, padding: 12, borderRadius: 6, fontSize: 14, fontWeight: 700,
+                  cursor: seleccionados.size === 0 ? "not-allowed" : "pointer" }}>
+                ✓ Agregar {seleccionados.size} renglones
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

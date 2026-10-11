@@ -180,6 +180,53 @@ REGLAS:
             text = text.strip("`").lstrip("json").strip()
         return json.loads(text)
 
+    def parsear_cotizacion_importacion(self, file_bytes: bytes, mime_type: str = "application/pdf") -> list[dict]:
+        """Vision: extrae lineas de cotizacion de proveedor internacional (importacion).
+        Formato tipico: ITEM NO / ACTUAL SIZE / KG/PC / PCS/CTN / MOQ / FOB USD/PC.
+        Devuelve lista con: descripcion, kg_pieza, precio_unit_usd, moq, pcs_ctn."""
+        import json as _json
+        b64 = base64.b64encode(file_bytes).decode()
+        if mime_type == "application/pdf":
+            source_block = {"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": b64,
+            }}
+        else:
+            source_block = {"type": "image", "source": {
+                "type": "base64", "media_type": mime_type, "data": b64,
+            }}
+
+        msg = self.client.messages.create(
+            model=self.model,
+            max_tokens=8000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    source_block,
+                    {"type": "text", "text": (
+                        "Esto es una cotizacion de proveedor internacional (China, EU, etc) para importar mercancia a Mexico. "
+                        "Extrae CADA linea de producto en formato JSON array (sin markdown), un objeto por producto con estas llaves EXACTAS: "
+                        "  descripcion: string (nombre + specs: 'ITEM_NO ACTUAL_SIZE' ej 'SXCWB-170 170x24x2900mm')\n"
+                        "  kg_pieza: number (peso por pieza, columna KG/PC o KG/CTN dividido entre PCS/CTN)\n"
+                        "  precio_unit_usd: number (precio unitario FOB en USD)\n"
+                        "  moq: string|null (minimo de orden, ej '30 CTNS' o '100 PCS')\n"
+                        "  unidad: string (PZA|SQM|KG|CTN segun contexto)\n"
+                        "REGLAS:\n"
+                        "1. Un objeto por fila de producto (no agrupes secciones, no sumes).\n"
+                        "2. Si una fila tiene '/' en kg_pieza o precio porque es accesorio dependiente, usa 0 o null.\n"
+                        "3. Si el precio es USD/SQM o USD/CTN en vez de USD/PC, usa ese valor igual (user ajusta).\n"
+                        "4. Ignora encabezados, titulos de seccion, filas totales. Solo productos reales.\n"
+                        "5. Numeros sin $ ni comas. Devuelve 'null' solo si no es legible.\n"
+                        "6. Si hay varias paginas, procesa TODAS las filas de todas las paginas."
+                    )},
+                ],
+            }],
+        )
+        text = msg.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").lstrip("json").strip()
+        return _json.loads(text)
+
+
     def parsear_csf(self, file_bytes: bytes, mime_type: str = "application/pdf") -> dict:
         """Vision: extrae datos fiscales de una Constancia de Situacion Fiscal del SAT."""
         b64 = base64.b64encode(file_bytes).decode()
