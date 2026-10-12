@@ -28,8 +28,49 @@ export default function VentaNueva() {
   const metodoPagoSat = esCredito ? "PPD" : "PUE";
 
   const [clienteId, setClienteId] = useState<number>(1);
-  const [clienteNombre, setClienteNombre] = useState<string>("Cliente de mostrador");
+  const [clienteNombre, setClienteNombre] = useState<string>("PUBLICO EN GENERAL");
+  const [clienteRfc, setClienteRfc] = useState<string>("");
   const [vendedor] = useState<string>(() => (localStorage.getItem("nombre") || "SYS").toUpperCase().slice(0, 6));
+
+  // ===== Buscador de cliente =====
+  const [clienteBusq, setClienteBusq] = useState("");
+  const [clienteSug, setClienteSug] = useState<any[]>([]);
+  const [mostrarClienteSug, setMostrarClienteSug] = useState(false);
+  const [idxCliSug, setIdxCliSug] = useState(0);
+  const [cambiandoCliente, setCambiandoCliente] = useState(false);
+  const clienteDebounceRef = useRef<number | null>(null);
+  const clienteInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (clienteDebounceRef.current) window.clearTimeout(clienteDebounceRef.current);
+    const q = clienteBusq.trim();
+    if (q.length < 2) { setClienteSug([]); return; }
+    clienteDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const r = await api.get("/api/clientes", { params: { q, activo: true } });
+        setClienteSug((r.data || []).slice(0, 10));
+        setMostrarClienteSug(true);
+        setIdxCliSug(0);
+      } catch { /* silent */ }
+    }, 220);
+  }, [clienteBusq]);
+
+  function elegirCliente(c: any) {
+    setClienteId(c.id);
+    setClienteNombre((c.nombre || "").toUpperCase());
+    setClienteRfc(c.rfc || "");
+    setClienteBusq("");
+    setClienteSug([]);
+    setMostrarClienteSug(false);
+    setCambiandoCliente(false);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
+  async function usarPublicoGeneral() {
+    try {
+      const r = await api.get("/api/clientes/publico-general");
+      elegirCliente(r.data);
+    } catch { /* silent */ }
+  }
 
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
@@ -41,8 +82,10 @@ export default function VentaNueva() {
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [mostrarPago, setMostrarPago] = useState(false);
 
+  // Default: precios YA incluyen IVA (NETO). Es como estan subidos en la BD.
   const [preciosConIva, setPreciosConIva] = useState<boolean>(() => {
-    return localStorage.getItem("venta_precios_con_iva") === "1";
+    const v = localStorage.getItem("venta_precios_con_iva");
+    return v === null ? true : v === "1";
   });
   useEffect(() => {
     localStorage.setItem("venta_precios_con_iva", preciosConIva ? "1" : "0");
@@ -71,21 +114,25 @@ export default function VentaNueva() {
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
   }, [busqueda]);
 
-  // Cargar cliente por ID (para mostrar el nombre arriba)
+  // Al montar: cargar publico general si clienteId es 1 por default
   useEffect(() => {
-    let cancel = false;
     (async () => {
       try {
-        const r = await api.get(`/api/clientes/${clienteId}`);
-        if (!cancel && r.data) setClienteNombre((r.data.nombre || "SYS").toUpperCase().slice(0, 30));
-      } catch { if (!cancel) setClienteNombre("Cliente de mostrador"); }
+        const r = await api.get("/api/clientes/publico-general");
+        if (r.data) {
+          setClienteId(r.data.id);
+          setClienteNombre((r.data.nombre || "PUBLICO EN GENERAL").toUpperCase());
+          setClienteRfc(r.data.rfc || "");
+        }
+      } catch { /* silent */ }
     })();
-    return () => { cancel = true; };
-  }, [clienteId]);
+  }, []);
 
   function agregar(s: any) {
     const tasa = s.tasa_iva !== undefined ? +s.tasa_iva : 0.16;
-    // Si ya existe, aumenta cantidad
+    // Si el toggle esta en NETO, el precio del catalogo YA incluye IVA,
+    // asi que lo convertimos a base para el storage interno.
+    const precioBase = preciosConIva ? +(+s.precio / (1 + tasa)).toFixed(6) : +s.precio;
     const existente = items.findIndex(i => i.variante_id === s.id);
     if (existente >= 0) {
       const c = [...items];
@@ -94,7 +141,7 @@ export default function VentaNueva() {
     } else {
       setItems([{
         variante_id: s.id, sku: s.sku, nombre: s.nombre,
-        cantidad: 1, precio: +s.precio, tasa_iva: tasa,
+        cantidad: 1, precio: precioBase, tasa_iva: tasa,
       }, ...items]);
     }
     setSugerencias([]); setBusqueda(""); setMostrarSug(false);
@@ -225,27 +272,110 @@ export default function VentaNueva() {
         {/* Columna Cliente/Vendedor */}
         <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", border: "1px solid #cbd5e1" }}>
           <div style={headerCellLabel}>Cliente</div>
-          <div style={{ ...headerCellValue, display: "flex", gap: 4, padding: 4 }}>
-            <input type="number" value={clienteId}
-              onChange={(e) => setClienteId(+e.target.value || 1)}
-              style={{ width: 50, border: "1px solid #cbd5e1", padding: "4px 6px",
-                fontWeight: 700, fontSize: 13 }} />
-            <input value={clienteId.toString().padStart(3, "0")} readOnly
-              style={{ width: 60, border: "1px solid #cbd5e1", padding: "4px 6px",
-                background: "#f1f5f9", fontSize: 12, color: "#64748b" }} />
+          <div style={{ ...headerCellValue, padding: "6px 10px", fontSize: 13 }}>
+            #{clienteId}
           </div>
           <div style={headerCellLabel}>Vendedor</div>
           <div style={{ ...headerCellValue, padding: "6px 10px" }}>{vendedor}</div>
         </div>
 
-        {/* Nombre del cliente a la derecha */}
+        {/* Panel del cliente — click para cambiar */}
         <div style={{
           background: "white", border: "1px solid #cbd5e1",
-          padding: "10px 14px", display: "flex", flexDirection: "column", justifyContent: "center",
-          fontSize: 13, color: "#334155",
-        }}>
-          <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>CLIENTE</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{clienteNombre}</div>
+          padding: "8px 14px", display: "flex", flexDirection: "column", justifyContent: "center",
+          position: "relative", cursor: cambiandoCliente ? "default" : "pointer",
+        }}
+          onClick={() => {
+            if (!cambiandoCliente) {
+              setCambiandoCliente(true);
+              setTimeout(() => clienteInputRef.current?.focus(), 50);
+            }
+          }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>CLIENTE</div>
+            {!cambiandoCliente ? (
+              <span style={{ fontSize: 11, color: "#1e3a8a", fontWeight: 700 }}>
+                ✎ click para cambiar
+              </span>
+            ) : (
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={(e) => { e.stopPropagation(); usarPublicoGeneral(); }}
+                  style={{
+                    background: "#059669", color: "white", border: 0,
+                    padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  }}>
+                  🏷 Publico general
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setCambiandoCliente(false); setClienteBusq(""); }}
+                  style={{
+                    background: "#e2e8f0", border: 0, padding: "3px 8px",
+                    fontSize: 10, cursor: "pointer",
+                  }}>×</button>
+              </div>
+            )}
+          </div>
+          {!cambiandoCliente ? (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {clienteNombre}
+              </div>
+              {clienteRfc && (
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace" }}>
+                  RFC: {clienteRfc}
+                </div>
+              )}
+            </>
+          ) : (
+            <input ref={clienteInputRef} autoFocus
+              placeholder="🔍 Nombre o RFC del cliente..."
+              value={clienteBusq}
+              onChange={(e) => setClienteBusq(e.target.value)}
+              onKeyDown={(e) => {
+                if (!clienteSug.length) return;
+                if (e.key === "ArrowDown") { e.preventDefault(); setIdxCliSug(i => Math.min(clienteSug.length - 1, i + 1)); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setIdxCliSug(i => Math.max(0, i - 1)); }
+                else if (e.key === "Enter") { e.preventDefault(); elegirCliente(clienteSug[idxCliSug]); }
+                else if (e.key === "Escape") { setCambiandoCliente(false); setClienteBusq(""); }
+              }}
+              onBlur={() => setTimeout(() => setMostrarClienteSug(false), 180)}
+              style={{
+                width: "100%", padding: "6px 8px", fontSize: 14, fontWeight: 700,
+                border: "2px solid #1e3a8a", color: "#0f172a",
+              }} />
+          )}
+
+          {cambiandoCliente && mostrarClienteSug && clienteSug.length > 0 && (
+            <div style={{
+              position: "absolute", left: 8, right: 8, top: 72, zIndex: 30,
+              background: "white", border: "2px solid #1e3a8a",
+              maxHeight: 260, overflowY: "auto",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
+            }}>
+              {clienteSug.map((c, i) => (
+                <div key={c.id}
+                  onMouseDown={(e) => { e.preventDefault(); elegirCliente(c); }}
+                  onMouseEnter={() => setIdxCliSug(i)}
+                  style={{
+                    padding: "8px 10px", cursor: "pointer",
+                    borderBottom: "1px solid #e2e8f0",
+                    background: i === idxCliSug ? "#dbeafe" : "white",
+                  }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                    {(c.nombre || "").toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace" }}>
+                    #{c.id} {c.rfc && `· RFC ${c.rfc}`} {c.whatsapp && `· 📱 ${c.whatsapp}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {cambiandoCliente && clienteBusq.length >= 2 && clienteSug.length === 0 && (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+              Sin resultados. Crea el cliente en el módulo de Clientes primero.
+            </div>
+          )}
         </div>
 
         {/* Tipo de documento */}
@@ -318,7 +448,9 @@ export default function VentaNueva() {
                   </div>
                   <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                     <span style={{ background: "#059669", color: "white", padding: "3px 8px", fontSize: 12, fontWeight: 700 }}>
-                      {fmtMoney(preciosConIva ? s.precio * (1 + (s.tasa_iva ?? 0.16)) : s.precio)}
+                      {/* El precio del catalogo YA es NETO (c/IVA).
+                          En modo NETO se muestra tal cual; en modo SIN IVA se baja /(1+tasa). */}
+                      {fmtMoney(preciosConIva ? +s.precio : +s.precio / (1 + (s.tasa_iva ?? 0.16)))}
                     </span>
                     <span style={{ background: "#e2e8f0", padding: "3px 8px", fontSize: 11, color: "#334155" }}>
                       stock {s.stock}
@@ -331,14 +463,14 @@ export default function VentaNueva() {
         </div>
         <label style={{
           display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-          padding: "0 14px", background: preciosConIva ? "#059669" : "#e2e8f0",
-          color: preciosConIva ? "white" : "#334155",
+          padding: "0 14px", background: preciosConIva ? "#059669" : "#f59e0b",
+          color: "white",
           border: 0, fontWeight: 700, fontSize: 12, userSelect: "none", whiteSpace: "nowrap",
-        }}>
+        }} title="Marca si tus precios YA incluyen IVA (NETO). Desmarca si son precios base s/IVA que debe sumarse al cobrar.">
           <input type="checkbox" checked={preciosConIva}
             onChange={(e) => setPreciosConIva(e.target.checked)}
             style={{ width: 16, height: 16, cursor: "pointer" }} />
-          IVA {preciosConIva ? "INCLUIDO" : "APARTE"}
+          {preciosConIva ? "✓ PRECIOS NETO (c/IVA incluido)" : "⚠ PRECIOS SIN IVA (se suma al cobrar)"}
         </label>
       </div>
 
