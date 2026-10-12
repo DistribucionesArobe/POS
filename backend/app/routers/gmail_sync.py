@@ -134,10 +134,13 @@ def _get_valid_access_token(conn: GmailConexion, db: Session) -> str:
 @router.post("/sync")
 def sync_manual(
     dias_atras: int = 60,
+    max_mensajes: int = 25,
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    """Corre sync manual: busca correos con XML, parsea y guarda como pendientes."""
+    """Corre sync manual: busca correos con XML, parsea y guarda como pendientes.
+    Procesa hasta max_mensajes nuevos (por default 25) para no exceder timeout del proxy.
+    Si quedan mas, hazle click a Sincronizar otra vez."""
     conn = db.query(GmailConexion).filter(GmailConexion.empresa_id == empresa_id).first()
     if not conn or not conn.activo:
         raise HTTPException(400, "No hay conexion Gmail activa. Conecta primero.")
@@ -150,12 +153,24 @@ def sync_manual(
     stats = {
         "buscados": 0, "sin_xml": 0, "ya_procesados": 0,
         "descartados": 0, "guardados_pendientes": 0, "errores": 0,
+        "pendientes_restantes": 0,
     }
 
     mensajes = svc.buscar_mensajes_con_xml(access_token, dias_atras=dias_atras)
     stats["buscados"] = len(mensajes)
 
+    procesados_en_esta_corrida = 0
     for m in mensajes:
+        # Cap: solo procesar hasta max_mensajes nuevos en esta llamada
+        if procesados_en_esta_corrida >= max_mensajes:
+            stats["pendientes_restantes"] = sum(
+                1 for mm in mensajes
+                if not db.query(GmailImportacionLog).filter(
+                    GmailImportacionLog.empresa_id == empresa_id,
+                    GmailImportacionLog.mensaje_gmail_id == mm["id"],
+                ).first()
+            )
+            break
         msg_id = m["id"]
         # Ya procesado?
         exists = db.query(GmailImportacionLog).filter(
@@ -219,6 +234,8 @@ def sync_manual(
                 stats["descartados"] += 1
             else:
                 stats["guardados_pendientes"] += 1
+
+            procesados_en_esta_corrida += 1
 
         except Exception as e:
             logger.error("Sync msg %s fallo: %s", msg_id, e)

@@ -113,13 +113,28 @@ export default function GmailSync() {
   async function sincronizar() {
     setBusy(true); setError(null); setMsg(null);
     try {
-      const r = await api.post("/api/gmail/sync", null, { params: { dias_atras: dias } });
+      const r = await api.post("/api/gmail/sync", null, {
+        params: { dias_atras: dias, max_mensajes: 25 },
+        timeout: 180000,  // 3 minutos
+      });
       const s = r.data.stats;
-      setMsg(`Sync completa: ${s.buscados} correos, ${s.guardados_pendientes} pendientes, ${s.descartados} descartados, ${s.ya_procesados} ya procesados`);
+      let m = `✅ Sync lote: ${s.buscados} correos encontrados · ${s.guardados_pendientes} nuevos pendientes · ${s.descartados} descartados · ${s.ya_procesados} ya procesados`;
+      if (s.pendientes_restantes > 0) {
+        m += `\n⚠ Aun quedan ${s.pendientes_restantes} correos por procesar. Haz click en Sincronizar de nuevo para seguir.`;
+      }
+      setMsg(m);
       await cargarStatus();
       await cargarLista();
     } catch (e: any) {
-      setError(e.response?.data?.detail || e.message);
+      // "Network Error" sin response = timeout o proxy corto
+      const detalle = e.response?.data?.detail;
+      if (detalle) {
+        setError(detalle);
+      } else if (e.code === "ECONNABORTED") {
+        setError("La sincronizacion tardo mas de 3 minutos. Reduce 'dias atras' o vuelve a intentar; los correos ya procesados no se repiten.");
+      } else {
+        setError(`${e.message}. Puede ser timeout del servidor; vuelve a intentar — los ya procesados no se duplican.`);
+      }
     } finally {
       setBusy(false);
     }
