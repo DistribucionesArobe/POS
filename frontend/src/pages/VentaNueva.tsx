@@ -216,7 +216,7 @@ export default function VentaNueva() {
   };
 
   return (
-    <Layout title="Nueva venta" subtitle="MyBusiness POS style">
+    <Layout title="Caja rápida" subtitle="Punto de venta — teclea SKU o nombre y Enter">
       {/* ============ HEADER: Cliente / Vendedor / Tipo ============ */}
       <div style={{
         display: "grid", gridTemplateColumns: "260px 260px 1fr auto",

@@ -25,7 +25,6 @@ const items = [
   { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true, roles: ["admin", "cajero"] },
   { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["admin", "cajero"] },
   { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["admin", "cajero"] },
-  { to: "/venta", label: "Nueva venta", icon: Icon.cart, roles: ["admin", "cajero"] },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin", "cajero"] },

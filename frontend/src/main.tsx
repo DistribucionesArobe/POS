@@ -81,8 +81,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/login" element={<Login />} />
           <Route path="/facturar" element={<AutoFactura />} />
           <Route path="/" element={<Dashboard />} />
-          <Route path="/caja" element={<Caja />} />
+          <Route path="/caja" element={<VentaNueva />} />
           <Route path="/venta" element={<VentaNueva />} />
+          <Route path="/caja-tablet" element={<Caja />} />
           <Route path="/ventas" element={<Ventas />} />
           <Route path="/cotizaciones" element={<Cotizaciones />} />
           <Route path="/cot/:folio" element={<CotizacionPublica />} />
