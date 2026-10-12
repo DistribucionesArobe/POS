@@ -178,11 +178,12 @@ export default function Sidebar() {
           if (i.section) {
             return (
               <div key={"sec-" + idx} style={{
-                fontSize: 11, color: "#ffffff", textTransform: "uppercase",
-                letterSpacing: 1, fontWeight: 800, opacity: 0.95,
-                padding: "14px 12px 4px",
-                borderTop: idx > 0 ? "1px solid rgba(255,255,255,0.25)" : 0,
-                marginTop: idx > 0 ? 6 : 0,
+                fontSize: 12, color: "#ffffff", textTransform: "uppercase",
+                letterSpacing: 1.2, fontWeight: 900, opacity: 1,
+                padding: "14px 12px 6px",
+                borderTop: idx > 0 ? "1px solid rgba(255,255,255,0.4)" : 0,
+                marginTop: idx > 0 ? 8 : 0,
+                textShadow: "0 1px 2px rgba(0,0,0,0.3)",
               }}>
                 {i.section}
               </div>
@@ -193,10 +194,11 @@ export default function Sidebar() {
             <div key={it.to}>
               {esPrimerSuperAdmin && items.findIndex((x: any) => x.superAdminOnly) === items.indexOf(it) && (
                 <div style={{
-                  fontSize: 11, color: "#ffffff", textTransform: "uppercase",
-                  letterSpacing: 1, fontWeight: 800,
-                  padding: "14px 12px 4px", marginTop: 8,
-                  borderTop: "1px solid rgba(255,255,255,0.25)",
+                  fontSize: 12, color: "#ffffff", textTransform: "uppercase",
+                  letterSpacing: 1.2, fontWeight: 900, opacity: 1,
+                  padding: "14px 12px 6px", marginTop: 8,
+                  borderTop: "1px solid rgba(255,255,255,0.4)",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.3)",
                 }}>
                   🔒 SUPER ADMIN
                 </div>
