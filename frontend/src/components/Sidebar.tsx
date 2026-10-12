@@ -22,9 +22,10 @@ const Icon = {
 // super_admin tambien los ve todos. Siguen el orden en que aparecen aqui.
 const items = [
   { to: "/", label: "Dashboard", icon: Icon.dashboard, roles: ["admin", "cajero"] },
-  { to: "/inbox", label: "Mensajes Ventas", icon: Icon.chat, showBadge: true, roles: ["admin", "cajero"] },
   { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["admin", "cajero"] },
   { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["admin", "cajero"] },
+  { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin", "cajero"] },
@@ -34,11 +35,9 @@ const items = [
   { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/cartera", label: "Cartera", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin", "cajero"] },
-  { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
   { to: "/conteo-inventario", label: "Conteo inventario", icon: Icon.list, roles: ["admin", "cajero"] },
-  { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin", "cajero"] },
 
   // Secciones SOLO super_admin — van al final para separacion visual
   { to: "/importaciones", label: "Importaciones", icon: Icon.package, superAdminOnly: true },
@@ -177,10 +176,10 @@ export default function Sidebar() {
             <div key={it.to}>
               {esPrimerSuperAdmin && items.findIndex((x: any) => x.superAdminOnly) === items.indexOf(it) && (
                 <div style={{
-                  fontSize: 10, color: "#64748b", textTransform: "uppercase",
+                  fontSize: 10, color: "#bfdbfe", textTransform: "uppercase",
                   letterSpacing: 1, fontWeight: 700,
                   padding: "12px 12px 4px", marginTop: 8,
-                  borderTop: "1px solid #334155",
+                  borderTop: "1px solid rgba(255,255,255,0.2)",
                 }}>
                   🔒 SUPER ADMIN
                 </div>

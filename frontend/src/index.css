@@ -1,9 +1,9 @@
 :root {
   --color-primary: #2563eb;
   --color-primary-dark: #1d4ed8;
-  --color-sidebar-bg: #0f172a;
-  --color-sidebar-fg: #cbd5e1;
-  --color-sidebar-active: #1e293b;
+  --color-sidebar-bg: #1e3a8a;
+  --color-sidebar-fg: #e0e7ff;
+  --color-sidebar-active: #1e40af;
   --color-bg: #f1f5f9;
   --color-card-bg: #ffffff;
   --color-text-primary: #0f172a;
