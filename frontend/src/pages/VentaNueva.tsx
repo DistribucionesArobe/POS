@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
@@ -9,7 +9,8 @@ type Item = {
 };
 type PagoRow = { forma_pago_sat: string; monto: number };
 
-const fmt = (n: number) => "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (n: number) => n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMoney = (n: number) => "$" + fmt(n);
 
 const FORMAS_PAGO_SAT = [
   { v: "01", t: "Efectivo" },
@@ -25,15 +26,21 @@ export default function VentaNueva() {
     tipoSel === "REMISION" ? "REMISION" : "FACTURA";
   const esCredito = tipoSel === "REMISION" || tipoSel === "FACTURA_PPD";
   const metodoPagoSat = esCredito ? "PPD" : "PUE";
+
   const [clienteId, setClienteId] = useState<number>(1);
+  const [clienteNombre, setClienteNombre] = useState<string>("Cliente de mostrador");
+  const [vendedor] = useState<string>(() => (localStorage.getItem("nombre") || "SYS").toUpperCase().slice(0, 6));
+
   const [busqueda, setBusqueda] = useState("");
   const [sugerencias, setSugerencias] = useState<any[]>([]);
   const [mostrarSug, setMostrarSug] = useState(false);
   const [idxSug, setIdxSug] = useState(0);
   const [buscando, setBuscando] = useState(false);
+
   const [items, setItems] = useState<Item[]>([]);
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
-  // Toggle: cuando esta ON, el precio desplegado y editable YA INCLUYE IVA.
+  const [mostrarPago, setMostrarPago] = useState(false);
+
   const [preciosConIva, setPreciosConIva] = useState<boolean>(() => {
     return localStorage.getItem("venta_precios_con_iva") === "1";
   });
@@ -41,7 +48,7 @@ export default function VentaNueva() {
     localStorage.setItem("venta_precios_con_iva", preciosConIva ? "1" : "0");
   }, [preciosConIva]);
 
-  // ===== AUTOCOMPLETE DEBOUNCED =====
+  const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<number | null>(null);
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -60,17 +67,38 @@ export default function VentaNueva() {
         setIdxSug(0);
       } catch { /* silent */ }
       finally { setBuscando(false); }
-    }, 280);
+    }, 250);
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
   }, [busqueda]);
 
+  // Cargar cliente por ID (para mostrar el nombre arriba)
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const r = await api.get(`/api/clientes/${clienteId}`);
+        if (!cancel && r.data) setClienteNombre((r.data.nombre || "SYS").toUpperCase().slice(0, 30));
+      } catch { if (!cancel) setClienteNombre("Cliente de mostrador"); }
+    })();
+    return () => { cancel = true; };
+  }, [clienteId]);
+
   function agregar(s: any) {
     const tasa = s.tasa_iva !== undefined ? +s.tasa_iva : 0.16;
-    setItems([...items, {
-      variante_id: s.id, sku: s.sku, nombre: s.nombre,
-      cantidad: 1, precio: +s.precio, tasa_iva: tasa,
-    }]);
+    // Si ya existe, aumenta cantidad
+    const existente = items.findIndex(i => i.variante_id === s.id);
+    if (existente >= 0) {
+      const c = [...items];
+      c[existente].cantidad += 1;
+      setItems(c);
+    } else {
+      setItems([{
+        variante_id: s.id, sku: s.sku, nombre: s.nombre,
+        cantidad: 1, precio: +s.precio, tasa_iva: tasa,
+      }, ...items]);
+    }
     setSugerencias([]); setBusqueda(""); setMostrarSug(false);
+    setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   function onKeyBusqueda(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -84,32 +112,27 @@ export default function VentaNueva() {
   function quitar(idx: number) {
     setItems(items.filter((_, i) => i !== idx));
   }
-
   function actualizarCantidad(idx: number, cantidad: number) {
     const c = [...items];
     c[idx].cantidad = cantidad;
     setItems(c);
   }
-
-  // Precio mostrado: si el toggle esta ON, muestra precio * (1 + tasa). Siempre guardamos base.
   function precioMostrado(it: Item): number {
     return preciosConIva ? it.precio * (1 + it.tasa_iva) : it.precio;
   }
-
   function actualizarPrecio(idx: number, valorInputado: number) {
     const c = [...items];
     const tasa = c[idx].tasa_iva;
-    // Si el toggle esta ON, el usuario capturo precio-con-IVA; convertirlo a base.
     c[idx].precio = preciosConIva ? +(valorInputado / (1 + tasa)).toFixed(6) : +valorInputado.toFixed(6);
     setItems(c);
   }
 
-  // Totales: siempre calculados desde precio BASE con tasa de cada item
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
   const iva = items.reduce((a, i) => a + i.cantidad * i.precio * i.tasa_iva, 0);
   const total = +(subtotal + iva).toFixed(2);
   const sumaPagos = +pagos.reduce((a, p) => a + (p.monto || 0), 0).toFixed(2);
   const usaSplit = pagos.length > 1;
+  const n_piezas = useMemo(() => items.reduce((a, i) => a + i.cantidad, 0), [items]);
 
   function setPago(idx: number, patch: Partial<PagoRow>) {
     setPagos(pagos.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
@@ -130,7 +153,7 @@ export default function VentaNueva() {
   async function guardar() {
     if (!esCredito) {
       if (sumaPagos < total - 0.01) {
-        alert(`Faltan ${fmt(total - sumaPagos)} por cubrir`);
+        alert(`Faltan ${fmtMoney(total - sumaPagos)} por cubrir`);
         return;
       }
     }
@@ -149,227 +172,427 @@ export default function VentaNueva() {
       const r = await api.post("/api/ventas", payload);
       const base = api.defaults.baseURL || "";
       const pdfUrl = `${base}/api/ventas/${r.data.id}/pdf`;
-      if (confirm(`Documento creado: ${r.data.folio}\n\nTotal: ${fmt(r.data.total)}\n\n¿Abrir PDF?`)) {
+      if (confirm(`Documento creado: ${r.data.folio}\n\nTotal: ${fmtMoney(r.data.total)}\n\n¿Abrir PDF?`)) {
         window.open(pdfUrl, "_blank");
       }
       setItems([]);
       setPagos([{ forma_pago_sat: "01", monto: 0 }]);
+      setMostrarPago(false);
     } catch (err: any) {
       alert("Error: " + (err.response?.data?.detail || err.message));
     }
   }
 
+  // Hora en el footer tipo "SUP ESTACION01 Hora: 08-11-2018 12:04:27"
+  const [ahora, setAhora] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const horaStr = (() => {
+    const dd = String(ahora.getDate()).padStart(2, "0");
+    const mm = String(ahora.getMonth() + 1).padStart(2, "0");
+    const yy = ahora.getFullYear();
+    const hh = String(ahora.getHours()).padStart(2, "0");
+    const mi = String(ahora.getMinutes()).padStart(2, "0");
+    const ss = String(ahora.getSeconds()).padStart(2, "0");
+    return `${dd}-${mm}-${yy}  ${hh}:${mi}:${ss}`;
+  })();
+  const estacion = (localStorage.getItem("usuario_id") || "01").padStart(2, "0");
+
+  // ====== ESTILOS ======
+  const headerCellLabel: React.CSSProperties = {
+    background: "#1e3a8a", color: "white", fontWeight: 800,
+    padding: "6px 10px", fontSize: 13, border: "1px solid #1e3a8a",
+  };
+  const headerCellValue: React.CSSProperties = {
+    background: "white", padding: "6px 10px", border: "1px solid #cbd5e1",
+    fontWeight: 700, color: "#000", fontSize: 14,
+  };
+  const colHeader: React.CSSProperties = {
+    background: "#1e3a8a", color: "white", padding: "8px 10px",
+    fontWeight: 800, fontSize: 13, textAlign: "left",
+    border: "1px solid #1e3a8a", textTransform: "none",
+  };
+
   return (
-    <Layout title="Nueva venta" subtitle="Captura ticket, remision o factura">
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-          <div>
-            <label>Tipo de documento</label>
-            <select className="input" value={tipoSel} onChange={(e) => setTipoSel(e.target.value as any)}>
-              <option value="TICKET">Ticket (al contado)</option>
-              <option value="REMISION">Remisión (a crédito, sin CFDI)</option>
-              <option value="FACTURA_PUE">Factura CFDI - PUE (al contado)</option>
-              <option value="FACTURA_PPD">Factura CFDI - PPD (a crédito)</option>
-            </select>
+    <Layout title="Nueva venta" subtitle="MyBusiness POS style">
+      {/* ============ HEADER: Cliente / Vendedor / Tipo ============ */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "260px 260px 1fr auto",
+        gap: 8, alignItems: "stretch", marginBottom: 8,
+      }}>
+        {/* Columna Cliente/Vendedor */}
+        <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", border: "1px solid #cbd5e1" }}>
+          <div style={headerCellLabel}>Cliente</div>
+          <div style={{ ...headerCellValue, display: "flex", gap: 4, padding: 4 }}>
+            <input type="number" value={clienteId}
+              onChange={(e) => setClienteId(+e.target.value || 1)}
+              style={{ width: 50, border: "1px solid #cbd5e1", padding: "4px 6px",
+                fontWeight: 700, fontSize: 13 }} />
+            <input value={clienteId.toString().padStart(3, "0")} readOnly
+              style={{ width: 60, border: "1px solid #cbd5e1", padding: "4px 6px",
+                background: "#f1f5f9", fontSize: 12, color: "#64748b" }} />
           </div>
-          <div>
-            <label>Cliente ID</label>
-            <input className="input" type="number" value={clienteId} onChange={(e) => setClienteId(+e.target.value)} />
-          </div>
-          <div style={{ gridColumn: "span 2", display: "flex", alignItems: "flex-end", justifyContent: "flex-end" }}>
-            <label style={{
-              display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-              padding: "10px 14px", background: preciosConIva ? "#dcfce7" : "#f1f5f9",
-              border: `2px solid ${preciosConIva ? "#10b981" : "#cbd5e1"}`, borderRadius: 8,
-              fontWeight: 700, fontSize: 13, userSelect: "none",
+          <div style={headerCellLabel}>Vendedor</div>
+          <div style={{ ...headerCellValue, padding: "6px 10px" }}>{vendedor}</div>
+        </div>
+
+        {/* Nombre del cliente a la derecha */}
+        <div style={{
+          background: "white", border: "1px solid #cbd5e1",
+          padding: "10px 14px", display: "flex", flexDirection: "column", justifyContent: "center",
+          fontSize: 13, color: "#334155",
+        }}>
+          <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>CLIENTE</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{clienteNombre}</div>
+        </div>
+
+        {/* Tipo de documento */}
+        <div style={{
+          background: "white", border: "1px solid #cbd5e1",
+          padding: 6, display: "flex", flexDirection: "column", gap: 4, minWidth: 220,
+        }}>
+          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>TIPO DE DOCUMENTO</div>
+          <select value={tipoSel} onChange={(e) => setTipoSel(e.target.value as any)}
+            style={{ padding: "6px 8px", fontSize: 13, border: "1px solid #cbd5e1", fontWeight: 700 }}>
+            <option value="TICKET">Ticket (contado)</option>
+            <option value="REMISION">Remisión (crédito)</option>
+            <option value="FACTURA_PUE">Factura PUE</option>
+            <option value="FACTURA_PPD">Factura PPD</option>
+          </select>
+        </div>
+
+        {/* Botón salir rojo (decorativo) */}
+        <button onClick={() => { if (confirm("¿Descartar venta?")) { setItems([]); setBusqueda(""); } }}
+          style={{
+            background: "#dc2626", color: "white", border: 0, padding: "0 16px",
+            fontSize: 24, fontWeight: 900, cursor: "pointer",
+          }}>×</button>
+      </div>
+
+      {/* ============ BARRA DE BÚSQUEDA + Toggle IVA ============ */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, position: "relative" }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <input ref={inputRef} autoFocus
+            placeholder="🔍 Escribe SKU o nombre del producto... (↑↓ navegar, Enter agregar)"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            onKeyDown={onKeyBusqueda}
+            onFocus={() => sugerencias.length > 0 && setMostrarSug(true)}
+            onBlur={() => setTimeout(() => setMostrarSug(false), 180)}
+            style={{
+              width: "100%", padding: "12px 16px", fontSize: 16,
+              border: "2px solid #1e3a8a", borderRadius: 0, fontWeight: 600,
+            }} />
+          {buscando && (
+            <div style={{ position: "absolute", right: 12, top: 14, fontSize: 11, color: "#64748b" }}>
+              buscando...
+            </div>
+          )}
+          {mostrarSug && sugerencias.length > 0 && (
+            <div style={{
+              position: "absolute", left: 0, right: 0, top: 48, zIndex: 20,
+              background: "white", border: "2px solid #1e3a8a",
+              maxHeight: 320, overflowY: "auto",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
             }}>
-              <input type="checkbox" checked={preciosConIva}
-                onChange={(e) => setPreciosConIva(e.target.checked)}
-                style={{ width: 18, height: 18, cursor: "pointer" }} />
-              {preciosConIva ? "✓ Precios YA incluyen IVA" : "Precios SIN IVA (se suma al total)"}
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16, position: "relative" }}>
-        <div style={{ marginBottom: 4, fontSize: 12, color: "var(--color-text-secondary)" }}>
-          Escribe para buscar — autocompleta por SKU o nombre. ↑↓ para elegir, Enter para agregar.
-        </div>
-        <input className="input" autoFocus
-          placeholder="Buscar producto por SKU o nombre..." value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          onKeyDown={onKeyBusqueda}
-          onFocus={() => sugerencias.length > 0 && setMostrarSug(true)}
-          onBlur={() => setTimeout(() => setMostrarSug(false), 180)}
-          style={{ width: "100%" }} />
-        {buscando && (
-          <div style={{ position: "absolute", right: 24, top: 42, fontSize: 11, color: "#64748b" }}>
-            buscando...
-          </div>
-        )}
-        {mostrarSug && sugerencias.length > 0 && (
-          <div style={{
-            position: "absolute", left: 16, right: 16, top: 72, zIndex: 20,
-            background: "white", border: "1px solid var(--color-border)",
-            borderRadius: 6, overflow: "hidden", maxHeight: 320, overflowY: "auto",
-            boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
-          }}>
-            {sugerencias.map((s, i) => (
-              <div key={s.id}
-                onMouseDown={(e) => { e.preventDefault(); agregar(s); }}
-                onMouseEnter={() => setIdxSug(i)}
-                style={{
-                  padding: "10px 12px", cursor: "pointer",
-                  borderBottom: "1px solid #f1f5f9",
-                  display: "flex", justifyContent: "space-between",
-                  alignItems: "center", gap: 10,
-                  background: i === idxSug ? "#eff6ff" : "white",
-                }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{s.sku}</strong> · {s.nombre}
-                  </div>
-                  {s.presentacion && (
-                    <div style={{ fontSize: 11, color: "#64748b" }}>{s.presentacion}</div>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                  <span className="badge badge-info">
-                    {fmt(preciosConIva ? s.precio * (1 + (s.tasa_iva ?? 0.16)) : s.precio)}
-                    {preciosConIva && <span style={{ fontSize: 9, marginLeft: 2 }}>c/IVA</span>}
-                  </span>
-                  <span className="badge">stock {s.stock}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {busqueda.length >= 2 && !buscando && sugerencias.length === 0 && (
-          <div style={{ marginTop: 8, padding: 10, fontSize: 13, color: "#94a3b8" }}>
-            Sin resultados para "{busqueda}"
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 className="card-header">Items</h3>
-        {items.length === 0 ? (
-          <p style={{ color: "var(--color-text-muted)", textAlign: "center", padding: 24, margin: 0 }}>
-            Sin productos. Busca arriba y haz click para agregar.
-          </p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>SKU</th><th>Producto</th><th>Cantidad</th>
-                <th style={{ textAlign: "right" }}>
-                  Precio {preciosConIva ? "(c/IVA)" : "(s/IVA)"}
-                </th>
-                <th style={{ textAlign: "right" }}>Importe</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((i, idx) => (
-                <tr key={idx}>
-                  <td><code>{i.sku}</code></td>
-                  <td>{i.nombre}</td>
-                  <td>
-                    <input className="input" type="number" min="0.01" step="0.01" value={i.cantidad}
-                      style={{ width: 90 }}
-                      onChange={(e) => actualizarCantidad(idx, +e.target.value)} />
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <input className="input" type="number" min="0" step="0.01"
-                      value={+precioMostrado(i).toFixed(2)}
-                      onChange={(e) => actualizarPrecio(idx, +e.target.value)}
-                      style={{ width: 110, textAlign: "right" }} />
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>
-                    {fmt(i.cantidad * precioMostrado(i))}
-                  </td>
-                  <td><button className="btn-icon" onClick={() => quitar(idx)}>X</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {items.length > 0 && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-            <div style={{ minWidth: 360, display: "grid", gap: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--color-text-secondary)" }}>Subtotal (s/IVA)</span>
-                <span>{fmt(subtotal)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--color-text-secondary)" }}>IVA</span>
-                <span>{fmt(iva)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--color-border)", paddingTop: 8, marginTop: 4 }}>
-                <strong>Total</strong>
-                <strong style={{ fontSize: 18 }}>{fmt(total)}</strong>
-              </div>
-
-              {!esCredito && (
-                <div style={{ marginTop: 12, padding: 12, background: "var(--color-bg)", borderRadius: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <strong style={{ fontSize: 13 }}>Forma(s) de pago</strong>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={autoPago} type="button"
-                        style={{ fontSize: 11, padding: "3px 8px", border: "1px solid var(--color-border)",
-                          background: "white", borderRadius: 4, cursor: "pointer" }}>
-                        Auto
-                      </button>
-                      {pagos.length < 2 && (
-                        <button onClick={agregarPago} type="button"
-                          style={{ fontSize: 11, padding: "3px 8px", border: "1px dashed var(--color-border)",
-                            background: "white", borderRadius: 4, cursor: "pointer" }}>
-                          + 2do método
-                        </button>
-                      )}
+              {sugerencias.map((s, i) => (
+                <div key={s.id}
+                  onMouseDown={(e) => { e.preventDefault(); agregar(s); }}
+                  onMouseEnter={() => setIdxSug(i)}
+                  style={{
+                    padding: "8px 12px", cursor: "pointer",
+                    borderBottom: "1px solid #e2e8f0",
+                    display: "flex", justifyContent: "space-between",
+                    alignItems: "center", gap: 10,
+                    background: i === idxSug ? "#dbeafe" : "white",
+                  }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                      <code style={{ background: "#1e3a8a", color: "white", padding: "1px 6px", marginRight: 6, fontSize: 11 }}>
+                        {s.sku}
+                      </code>
+                      {s.nombre}
                     </div>
                   </div>
-                  {pagos.map((p, idx) => (
-                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 110px auto", gap: 6, marginBottom: 4 }}>
-                      <select className="input" value={p.forma_pago_sat}
-                        onChange={(e) => setPago(idx, { forma_pago_sat: e.target.value })}
-                        style={{ fontSize: 13 }}>
-                        {FORMAS_PAGO_SAT.map((f) => <option key={f.v} value={f.v}>{f.t}</option>)}
-                      </select>
-                      <input className="input" type="number" step="0.01" value={p.monto}
-                        onChange={(e) => setPago(idx, { monto: +e.target.value })}
-                        style={{ fontSize: 13, textAlign: "right" }} />
-                      {pagos.length > 1 && (
-                        <button onClick={() => quitarPago(idx)} type="button"
-                          style={{ background: "transparent", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0 8px" }}>×</button>
-                      )}
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 6 }}>
-                    <span style={{ color: "var(--color-text-secondary)" }}>Suma pagos</span>
-                    <span style={{ color: sumaPagos < total - 0.01 ? "var(--color-danger)" : "var(--color-success)", fontWeight: 600 }}>
-                      {fmt(sumaPagos)}
-                      {sumaPagos < total - 0.01 && ` (falta ${fmt(total - sumaPagos)})`}
-                      {sumaPagos > total + 0.01 && ` (cambio ${fmt(sumaPagos - total)})`}
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <span style={{ background: "#059669", color: "white", padding: "3px 8px", fontSize: 12, fontWeight: 700 }}>
+                      {fmtMoney(preciosConIva ? s.precio * (1 + (s.tasa_iva ?? 0.16)) : s.precio)}
+                    </span>
+                    <span style={{ background: "#e2e8f0", padding: "3px 8px", fontSize: 11, color: "#334155" }}>
+                      stock {s.stock}
                     </span>
                   </div>
-                  {usaSplit && (
-                    <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: "6px 0 0" }}>
-                      Pago combinado: CFDI usará Forma "99 — Por definir"
-                    </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <label style={{
+          display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+          padding: "0 14px", background: preciosConIva ? "#059669" : "#e2e8f0",
+          color: preciosConIva ? "white" : "#334155",
+          border: 0, fontWeight: 700, fontSize: 12, userSelect: "none", whiteSpace: "nowrap",
+        }}>
+          <input type="checkbox" checked={preciosConIva}
+            onChange={(e) => setPreciosConIva(e.target.checked)}
+            style={{ width: 16, height: 16, cursor: "pointer" }} />
+          IVA {preciosConIva ? "INCLUIDO" : "APARTE"}
+        </label>
+      </div>
+
+      {/* ============ TABLA DE ITEMS tipo MyBusiness ============ */}
+      <div style={{
+        border: "1px solid #1e3a8a",
+        maxHeight: "calc(100vh - 420px)", overflowY: "auto",
+        background: "white", marginBottom: 8,
+      }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: 70 }} />
+            <col />
+            <col style={{ width: 70 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 44 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={{ ...colHeader, textAlign: "center" }}>QTY</th>
+              <th style={colHeader}>Descripción</th>
+              <th style={{ ...colHeader, textAlign: "center" }}>Lista</th>
+              <th style={{ ...colHeader, textAlign: "right" }}>Precio</th>
+              <th style={{ ...colHeader, textAlign: "right" }}>Importe</th>
+              <th style={colHeader}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{
+                  padding: 60, textAlign: "center", color: "#94a3b8",
+                  fontSize: 15, background: "#f8fafc",
+                }}>
+                  Captura un producto arriba para iniciar la venta
+                </td>
+              </tr>
+            ) : (
+              items.map((i, idx) => {
+                const bg = idx % 2 === 0 ? "#e8eef9" : "white";
+                return (
+                  <tr key={idx} style={{ background: bg }}>
+                    <td style={{ padding: "8px 6px", textAlign: "center",
+                      fontWeight: 800, fontSize: 15, color: "#0f172a",
+                      border: "1px solid #cbd5e1" }}>
+                      <input type="number" min="0.01" step="0.01" value={i.cantidad}
+                        onChange={(e) => actualizarCantidad(idx, +e.target.value)}
+                        style={{
+                          width: "100%", border: 0, background: "transparent",
+                          textAlign: "center", fontSize: 15, fontWeight: 800, color: "#0f172a",
+                          padding: 0,
+                        }} />
+                    </td>
+                    <td style={{
+                      padding: "8px 10px", fontWeight: 700, fontSize: 14, color: "#0f172a",
+                      border: "1px solid #cbd5e1",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {i.nombre.toUpperCase()}
+                      <span style={{ marginLeft: 8, fontSize: 10, color: "#64748b", fontWeight: 600 }}>
+                        [{i.sku}]
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px 6px", textAlign: "center",
+                      fontSize: 13, color: "#334155", border: "1px solid #cbd5e1" }}>
+                      1
+                    </td>
+                    <td style={{ padding: 0, border: "1px solid #cbd5e1" }}>
+                      <input type="number" min="0" step="0.01"
+                        value={+precioMostrado(i).toFixed(2)}
+                        onChange={(e) => actualizarPrecio(idx, +e.target.value)}
+                        style={{
+                          width: "100%", border: 0, background: "white",
+                          textAlign: "right", fontSize: 14, fontWeight: 700,
+                          padding: "8px 10px", color: "#0f172a",
+                        }} />
+                    </td>
+                    <td style={{
+                      padding: "8px 10px", textAlign: "right", fontWeight: 800,
+                      fontSize: 14, color: "#0f172a", border: "1px solid #cbd5e1",
+                    }}>
+                      {fmt(i.cantidad * precioMostrado(i))}
+                    </td>
+                    <td style={{ padding: 0, border: "1px solid #cbd5e1", textAlign: "center" }}>
+                      <button onClick={() => quitar(idx)}
+                        style={{
+                          background: "transparent", border: 0, color: "#dc2626",
+                          fontSize: 18, fontWeight: 900, cursor: "pointer",
+                          padding: "8px 6px", width: "100%",
+                        }}>×</button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+            {/* Filas vacias para rellenar visualmente (como MyBusiness) */}
+            {items.length > 0 && items.length < 8 && Array.from({ length: 8 - items.length }).map((_, i) => (
+              <tr key={"empty-" + i} style={{ background: (items.length + i) % 2 === 0 ? "#e8eef9" : "white" }}>
+                <td style={{ padding: "8px 6px", border: "1px solid #e2e8f0", height: 36 }}></td>
+                <td style={{ padding: "8px 10px", border: "1px solid #e2e8f0" }}></td>
+                <td style={{ padding: "8px 6px", border: "1px solid #e2e8f0" }}></td>
+                <td style={{ padding: "8px 10px", border: "1px solid #e2e8f0" }}></td>
+                <td style={{ padding: "8px 10px", border: "1px solid #e2e8f0" }}></td>
+                <td style={{ padding: "8px 6px", border: "1px solid #e2e8f0" }}></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ============ PIE: Info izquierda + Total MXN gigante ============ */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr 480px",
+        gap: 8, alignItems: "stretch",
+      }}>
+        <div style={{
+          background: "white", border: "1px solid #cbd5e1",
+          padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6,
+          fontSize: 12, color: "#334155",
+        }}>
+          <div style={{ fontSize: 11, color: "#64748b" }}>
+            SUP ESTACION{estacion} Hora: {horaStr}
+          </div>
+          <div style={{ display: "flex", gap: 14 }}>
+            <span>Piezas: <strong style={{ color: "#0f172a" }}>{n_piezas}</strong></span>
+            <span>Items: <strong style={{ color: "#0f172a" }}>{items.length}</strong></span>
+            <span>Subtotal s/IVA: <strong style={{ color: "#0f172a" }}>{fmtMoney(subtotal)}</strong></span>
+            <span>IVA: <strong style={{ color: "#0f172a" }}>{fmtMoney(iva)}</strong></span>
+          </div>
+          {items.length > 0 && (
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <button onClick={() => setMostrarPago(true)}
+                style={{
+                  flex: 1, background: "#059669", color: "white", border: 0,
+                  padding: "12px 16px", fontSize: 15, fontWeight: 800, cursor: "pointer",
+                }}>
+                💵 COBRAR (F12)
+              </button>
+              <button onClick={() => { if (confirm("¿Limpiar venta?")) setItems([]); }}
+                style={{
+                  background: "#dc2626", color: "white", border: 0,
+                  padding: "12px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                }}>
+                🗑 Limpiar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* TOTAL MXN gigante */}
+        <div style={{
+          background: "white", border: "1px solid #cbd5e1",
+          display: "grid", gridTemplateColumns: "1fr 2fr", alignItems: "stretch",
+        }}>
+          <div style={{
+            background: "white", color: "#0f172a",
+            padding: "20px 14px", display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 32, fontWeight: 900,
+            letterSpacing: 0.5,
+          }}>
+            Total MXN
+          </div>
+          <div style={{
+            background: "#000", color: "#22ff5a",
+            padding: "20px 24px", display: "flex", alignItems: "center",
+            justifyContent: "flex-end", fontSize: 54, fontWeight: 900,
+            fontVariantNumeric: "tabular-nums", letterSpacing: 1,
+            fontFamily: "'Courier New', monospace",
+          }}>
+            {fmt(total)}
+          </div>
+        </div>
+      </div>
+
+      {/* ============ MODAL DE COBRO ============ */}
+      {mostrarPago && (
+        <div onClick={() => setMostrarPago(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: "white", padding: 24, borderRadius: 8, minWidth: 480, maxWidth: 560,
+          }}>
+            <h2 style={{ margin: "0 0 16px", fontSize: 22, fontWeight: 800 }}>
+              Cobrar {fmtMoney(total)}
+            </h2>
+
+            {esCredito ? (
+              <div style={{ padding: 16, background: "#fef3c7", borderRadius: 6, marginBottom: 16 }}>
+                <strong>Venta a crédito</strong> — no se registra pago ahora.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                  <button onClick={autoPago}
+                    style={{ padding: "6px 12px", border: "1px solid #cbd5e1", background: "white", cursor: "pointer", fontSize: 12 }}>
+                    Auto 1 pago
+                  </button>
+                  {pagos.length < 2 && (
+                    <button onClick={agregarPago}
+                      style={{ padding: "6px 12px", border: "1px dashed #cbd5e1", background: "white", cursor: "pointer", fontSize: 12 }}>
+                      + 2do método
+                    </button>
                   )}
                 </div>
-              )}
+                {pagos.map((p, idx) => (
+                  <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 140px auto", gap: 6, marginBottom: 6 }}>
+                    <select value={p.forma_pago_sat}
+                      onChange={(e) => setPago(idx, { forma_pago_sat: e.target.value })}
+                      style={{ padding: 8, border: "1px solid #cbd5e1" }}>
+                      {FORMAS_PAGO_SAT.map((f) => <option key={f.v} value={f.v}>{f.t}</option>)}
+                    </select>
+                    <input type="number" step="0.01" value={p.monto}
+                      onChange={(e) => setPago(idx, { monto: +e.target.value })}
+                      style={{ padding: 8, textAlign: "right", border: "1px solid #cbd5e1", fontSize: 15, fontWeight: 700 }} />
+                    {pagos.length > 1 && (
+                      <button onClick={() => quitarPago(idx)}
+                        style={{ background: "transparent", border: "1px solid #cbd5e1", cursor: "pointer", padding: "0 10px" }}>×</button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ marginTop: 8, padding: 10, background: "#f1f5f9", display: "flex", justifyContent: "space-between" }}>
+                  <span>Suma pagos:</span>
+                  <strong style={{ color: sumaPagos < total - 0.01 ? "#dc2626" : "#059669" }}>
+                    {fmtMoney(sumaPagos)}
+                    {sumaPagos < total - 0.01 && ` (faltan ${fmtMoney(total - sumaPagos)})`}
+                    {sumaPagos > total + 0.01 && ` (cambio ${fmtMoney(sumaPagos - total)})`}
+                  </strong>
+                </div>
+                {usaSplit && (
+                  <p style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
+                    Pago combinado → CFDI usará forma "99 — Por definir"
+                  </p>
+                )}
+              </>
+            )}
 
-              <button className="btn" onClick={guardar} style={{ marginTop: 12, justifyContent: "center" }}>
-                Guardar {tipo}
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button onClick={() => setMostrarPago(false)}
+                style={{ padding: "12px 20px", background: "#e2e8f0", border: 0, cursor: "pointer", fontWeight: 700 }}>
+                Cancelar
+              </button>
+              <button onClick={guardar}
+                style={{
+                  flex: 1, padding: "12px 20px", background: "#059669", color: "white",
+                  border: 0, cursor: "pointer", fontWeight: 800, fontSize: 16,
+                }}>
+                ✓ Confirmar y guardar {tipo}
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </Layout>
   );
 }
