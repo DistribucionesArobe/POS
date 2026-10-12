@@ -28,16 +28,24 @@ const items = [
   { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["admin", "cajero"] },
-  { to: "/productos", label: "Productos", icon: Icon.package, roles: ["admin", "cajero"] },
+
+  // Seccion INVENTARIO
+  { section: "📦 INVENTARIO" },
+  { to: "/productos", label: "Catálogo productos", icon: Icon.package, roles: ["admin", "cajero"] },
+  { to: "/conteo-inventario", label: "Conteo físico", icon: Icon.list, roles: ["admin", "cajero"] },
+  { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
+
+  // Seccion CONTACTOS
+  { section: "👥 CONTACTOS" },
   { to: "/clientes", label: "Clientes", icon: Icon.users, roles: ["admin", "cajero"] },
-  { to: "/proveedores", label: "Proveedores", icon: Icon.users, roles: ["admin", "cajero"] },
+
+  // Seccion FINANZAS
+  { section: "💰 FINANZAS" },
   { to: "/compras", label: "Compras y CxP", icon: Icon.package, roles: ["admin", "cajero"] },
   { to: "/cxp-tablero", label: "Tablero CxP", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/cartera", label: "Cartera", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin", "cajero"] },
-  { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
-  { to: "/conteo-inventario", label: "Conteo inventario", icon: Icon.list, roles: ["admin", "cajero"] },
 
   // Secciones SOLO super_admin — van al final para separacion visual
   { to: "/importaciones", label: "Importaciones", icon: Icon.package, superAdminOnly: true },
@@ -160,17 +168,26 @@ export default function Sidebar() {
       <nav className="sidebar-nav">
         {items.filter((it) => {
           const i = it as any;
-          // Items marcados superAdminOnly solo los ve super_admin
+          if (i.section) return true;  // headers de seccion siempre
           if (i.superAdminOnly) return superAdmin;
-          // Super admin ve todo lo demas
           if (superAdmin) return true;
-          // Si no tiene roles, lo ven todos
           if (!i.roles) return true;
-          // Checa rol
           return i.roles.includes(rol);
-        }).map((it) => {
+        }).map((it, idx) => {
           const i = it as any;
-          // Separador visual antes de la primera seccion super_admin
+          if (i.section) {
+            return (
+              <div key={"sec-" + idx} style={{
+                fontSize: 10, color: "#bfdbfe", textTransform: "uppercase",
+                letterSpacing: 1, fontWeight: 700,
+                padding: "14px 12px 4px",
+                borderTop: idx > 0 ? "1px solid rgba(255,255,255,0.15)" : 0,
+                marginTop: idx > 0 ? 6 : 0,
+              }}>
+                {i.section}
+              </div>
+            );
+          }
           const esPrimerSuperAdmin = i.superAdminOnly && superAdmin;
           return (
             <div key={it.to}>
@@ -185,7 +202,7 @@ export default function Sidebar() {
                 </div>
               )}
               <Link
-                to={it.to}
+                to={it.to || "#"}
                 className={`sidebar-link ${loc.pathname === it.to ? "active" : ""}`}
               >
                 {it.icon}
