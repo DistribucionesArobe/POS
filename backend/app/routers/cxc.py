@@ -37,6 +37,9 @@ def cartera(
             doc.tipo == "FACTURA"
             and db.query(Cfdi).filter(Cfdi.documento_venta_id == doc.id, Cfdi.cancelado == False).first() is not None
         )
+        n_abonos = db.query(func.count(AbonoCxC.id)).filter(AbonoCxC.cxc_id == cxc.id).scalar() or 0
+        monto_original = float(cxc.monto_original or cxc.saldo)
+        abonado = round(monto_original - float(cxc.saldo), 2)
         out.append({
             "cxc_id": cxc.id, "cliente_id": cli.id, "cliente": cli.nombre,
             "whatsapp": cli.whatsapp, "documento_id": cxc.documento_id,
@@ -45,6 +48,10 @@ def cartera(
             "es_ppd": doc.tipo == "FACTURA" and doc.metodo_pago_sat == "PPD" and timbrada,
             "saldo": float(cxc.saldo), "dias_antiguedad": dias,
             "fecha_emision": cxc.fecha_emision.isoformat(),
+            "monto_original": monto_original,
+            "abonado": abonado,
+            "n_abonos": int(n_abonos),
+            "en_parcialidades": int(n_abonos) > 0 and float(cxc.saldo) > 0,
         })
     return out
 

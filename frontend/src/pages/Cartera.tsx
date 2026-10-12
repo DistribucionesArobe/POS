@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
@@ -11,19 +11,50 @@ type CxCRow = {
   es_ppd: boolean;
   saldo: number; dias_antiguedad: number;
   fecha_emision: string;
+  monto_original?: number;
+  abonado?: number;
+  n_abonos?: number;
+  en_parcialidades?: boolean;
 };
+
+type Vista = "TODAS" | "PARCIALIDADES";
 
 export default function Cartera() {
   const [rows, setRows] = useState<CxCRow[]>([]);
   const [abonando, setAbonando] = useState<CxCRow | null>(null);
   const [verAbonos, setVerAbonos] = useState<CxCRow | null>(null);
+  const [q, setQ] = useState("");
+  const [vista, setVista] = useState<Vista>("TODAS");
 
   function cargar() {
     api.get("/api/cxc/cartera").then((r) => setRows(r.data)).catch(() => {});
   }
   useEffect(() => { cargar(); }, []);
 
-  const total = rows.reduce((a, r) => a + r.saldo, 0);
+  const filtradas = useMemo(() => {
+    let lista = rows;
+    if (vista === "PARCIALIDADES") lista = lista.filter(r => r.en_parcialidades);
+    const query = q.trim().toLowerCase();
+    if (query) {
+      const comoNumero = parseFloat(query.replace(/[$,]/g, ""));
+      const esNumero = !isNaN(comoNumero);
+      lista = lista.filter(r => {
+        const matchTexto = r.cliente.toLowerCase().includes(query)
+          || r.documento_folio.toLowerCase().includes(query);
+        const matchImporte = esNumero && (
+          Math.abs(r.saldo - comoNumero) < 0.01
+          || (r.monto_original !== undefined && Math.abs(r.monto_original - comoNumero) < 0.01)
+          || r.saldo.toFixed(2).includes(query)
+          || (r.monto_original || 0).toFixed(2).includes(query)
+        );
+        return matchTexto || matchImporte;
+      });
+    }
+    return lista;
+  }, [rows, q, vista]);
+
+  const total = filtradas.reduce((a, r) => a + r.saldo, 0);
+  const n_parciales = rows.filter(r => r.en_parcialidades).length;
 
   async function exportar() {
     const r = await api.get("/api/reportes/cartera-xlsx", { responseType: "blob" });
@@ -35,33 +66,85 @@ export default function Cartera() {
   }
 
   return (
-    <Layout title="Cartera por cobrar" subtitle={`${rows.length} documentos pendientes - Total ${fmt(total)}`}
+    <Layout title="Cartera por cobrar" subtitle={`${filtradas.length} de ${rows.length} documentos — Saldo mostrado ${fmt(total)}`}
       actions={<button className="btn-icon" onClick={exportar}>Exportar XLSX</button>}>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input className="input"
+            placeholder="🔍 Buscar por cliente, folio o importe..."
+            value={q} onChange={(e) => setQ(e.target.value)}
+            style={{ flex: 1, minWidth: 240, fontSize: 15 }} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => setVista("TODAS")}
+              style={{
+                padding: "10px 16px", border: 0, borderRadius: 6,
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                background: vista === "TODAS" ? "#0f172a" : "#e2e8f0",
+                color: vista === "TODAS" ? "white" : "#334155",
+              }}>
+              Todas ({rows.length})
+            </button>
+            <button
+              onClick={() => setVista("PARCIALIDADES")}
+              style={{
+                padding: "10px 16px", border: 0, borderRadius: 6,
+                fontSize: 13, fontWeight: 700, cursor: "pointer",
+                background: vista === "PARCIALIDADES" ? "#f59e0b" : "#e2e8f0",
+                color: vista === "PARCIALIDADES" ? "white" : "#334155",
+              }}>
+              📊 En parcialidades ({n_parciales})
+            </button>
+          </div>
+        </div>
+        {q && (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+            Filtrando por "{q}" — también busca por importe exacto (ej: 1500.00)
+          </div>
+        )}
+      </div>
+
       <div className="card">
-        {rows.length === 0 ? (
+        {filtradas.length === 0 ? (
           <p style={{ color: "var(--color-text-muted)", textAlign: "center", padding: 24, margin: 0 }}>
-            Sin cuentas por cobrar pendientes.
+            {q || vista !== "TODAS" ? "Sin resultados con los filtros actuales." : "Sin cuentas por cobrar pendientes."}
           </p>
         ) : (
           <table>
             <thead>
               <tr>
                 <th>Cliente</th><th>Documento</th>
+                <th style={{ textAlign: "right" }}>Original</th>
+                <th style={{ textAlign: "right" }}>Abonado</th>
                 <th style={{ textAlign: "right" }}>Saldo</th>
                 <th>Antigüedad</th><th>Tipo</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {filtradas.map((r) => {
                 const cls = r.dias_antiguedad > 90 ? "badge-danger" :
                             r.dias_antiguedad > 60 ? "badge-warning" :
                             r.dias_antiguedad > 30 ? "badge-info" : "badge-success";
+                const original = r.monto_original ?? r.saldo;
+                const abonado = r.abonado ?? 0;
+                const pctAbonado = original > 0 ? (abonado / original) * 100 : 0;
                 return (
-                  <tr key={r.cxc_id}>
+                  <tr key={r.cxc_id} style={r.en_parcialidades ? { background: "#fffbeb" } : undefined}>
                     <td>{r.cliente}</td>
-                    <td><code>{r.documento_folio}</code></td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(r.saldo)}</td>
+                    <td>
+                      <code>{r.documento_folio}</code>
+                      {r.en_parcialidades && (
+                        <div style={{ fontSize: 10, color: "#92400e", fontWeight: 700, marginTop: 2 }}>
+                          📊 {r.n_abonos} abono(s) · {pctAbonado.toFixed(0)}% pagado
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right", fontSize: 12, color: "#64748b" }}>{fmt(original)}</td>
+                    <td style={{ textAlign: "right", fontSize: 12, color: "#059669" }}>
+                      {abonado > 0 ? fmt(abonado) : "—"}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(r.saldo)}</td>
                     <td><span className={`badge ${cls}`}>{r.dias_antiguedad} días</span></td>
                     <td>
                       <span className={`badge ${r.tipo === "FACTURA" ? "badge-success" : "badge-info"}`}>
@@ -70,7 +153,9 @@ export default function Cartera() {
                       {r.es_ppd && <span className="badge badge-warning" style={{ marginLeft: 4 }}>PPD</span>}
                     </td>
                     <td style={{ display: "flex", gap: 4 }}>
-                      <button className="btn btn-sm" onClick={() => setAbonando(r)}>Abonar</button>
+                      <button className="btn btn-sm" onClick={() => setAbonando(r)}>
+                        {r.en_parcialidades ? "Abonar/Liquidar" : "Abonar"}
+                      </button>
                       <button className="btn-icon" onClick={() => setVerAbonos(r)}>Historial</button>
                     </td>
                   </tr>
