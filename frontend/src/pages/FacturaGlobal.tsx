@@ -32,6 +32,7 @@ export default function FacturaGlobal() {
   const [periodicidad, setPeriodicidad] = useState("01");  // diario
   const [pendientes, setPendientes] = useState<Pendientes | null>(null);
   const [historial, setHistorial] = useState<Historial[]>([]);
+  const [estadoCortes, setEstadoCortes] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [generando, setGenerando] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -47,13 +48,21 @@ export default function FacturaGlobal() {
     } catch (e: any) { setError(e.response?.data?.detail || e.message); }
     finally { setLoading(false); }
   }
+  async function cargarEstadoCortes() {
+    try {
+      const r = await api.get("/api/factura-global/estado-cortes", {
+        params: { fecha_inicio: fechaInicio, fecha_fin: fechaFin },
+      });
+      setEstadoCortes(r.data);
+    } catch { setEstadoCortes(null); }
+  }
   async function cargarHistorial() {
     try {
       const r = await api.get("/api/factura-global/historial");
       setHistorial(r.data);
     } catch { /* silent */ }
   }
-  useEffect(() => { cargarPendientes(); cargarHistorial(); }, [fechaInicio, fechaFin]);
+  useEffect(() => { cargarPendientes(); cargarEstadoCortes(); cargarHistorial(); }, [fechaInicio, fechaFin]);
 
   async function generar() {
     if (!pendientes || pendientes.n_tickets === 0) {
@@ -63,6 +72,20 @@ export default function FacturaGlobal() {
     const d = new Date(fechaFin + "T12:00:00");
     const mes = String(d.getMonth() + 1).padStart(2, "0");
     const anio = d.getFullYear();
+
+    // Advertencia dura si hay turnos sin cerrar
+    if (estadoCortes && estadoCortes.n_abiertos > 0) {
+      const lista = estadoCortes.turnos_abiertos
+        .map((t: any) => `  • ${t.nombre}: ${t.n_tickets} tickets · ${fmt(t.total)}`)
+        .join("\n");
+      if (!confirm(
+        `⚠ ATENCION — Hay ${estadoCortes.n_abiertos} turno(s) SIN CERRAR aun:\n\n` +
+        lista + `\n\n` +
+        `Si generas la Factura Global ahora, esos tickets se incluiran pero el cajero\n` +
+        `todavia no ha contado su efectivo ni emitido su Corte Z.\n\n` +
+        `¿Realmente quieres seguir?`
+      )) return;
+    }
 
     if (!confirm(
       `Vas a generar FACTURA GLOBAL que ampara ${pendientes.n_tickets} tickets:\n\n` +
@@ -114,6 +137,58 @@ export default function FacturaGlobal() {
     <Layout title="Factura Global" subtitle="Agrupa tickets de mostrador en 1 CFDI al público en general">
       {msg && <div style={{ background: "#dcfce7", color: "#065f46", padding: 12, borderRadius: 6, marginBottom: 12 }}>{msg}</div>}
       {error && <div style={{ background: "#fee2e2", color: "#991b1b", padding: 12, borderRadius: 6, marginBottom: 12 }}>{error}</div>}
+
+      {/* Banner de estado de turnos */}
+      {estadoCortes && estadoCortes.n_abiertos > 0 && (
+        <div style={{
+          background: "#fef3c7", border: "2px solid #f59e0b", borderRadius: 8,
+          padding: 14, marginBottom: 14,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 22 }}>⚠</span>
+            <strong style={{ color: "#78350f", fontSize: 15 }}>
+              Hay {estadoCortes.n_abiertos} turno(s) sin cerrar en este rango
+            </strong>
+          </div>
+          <div style={{ fontSize: 13, color: "#78350f", marginBottom: 8 }}>
+            Los siguientes cajeros vendieron tickets pero <strong>todavía no han hecho su Corte Z</strong>.
+            Si generas la Factura Global ahora, incluirás sus ventas antes de que cuadren el efectivo.
+          </div>
+          <table style={{ width: "100%", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #d97706", color: "#92400e" }}>
+                <th style={{ textAlign: "left", padding: "4px 0" }}>Cajero</th>
+                <th style={{ textAlign: "left" }}>Día</th>
+                <th style={{ textAlign: "right" }}>Tickets</th>
+                <th style={{ textAlign: "right" }}>Total</th>
+                <th style={{ textAlign: "left" }}>Última venta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estadoCortes.turnos_abiertos.map((t: any) => (
+                <tr key={t.usuario_id + t.dia}>
+                  <td style={{ padding: "4px 0", fontWeight: 700 }}>{t.nombre}</td>
+                  <td>{t.dia}</td>
+                  <td style={{ textAlign: "right" }}>{t.n_tickets}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(t.total)}</td>
+                  <td style={{ fontSize: 11, color: "#92400e" }}>
+                    {t.ultima_venta ? new Date(t.ultima_venta).toLocaleTimeString("es-MX") : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {estadoCortes && estadoCortes.n_abiertos === 0 && estadoCortes.n_cerrados > 0 && (
+        <div style={{
+          background: "#dcfce7", border: "1px solid #10b981", borderRadius: 8,
+          padding: 10, marginBottom: 14, fontSize: 13, color: "#065f46",
+        }}>
+          ✅ Todos los turnos del rango ya cerraron su Corte Z ({estadoCortes.n_cerrados} cajero[s]).
+          Puedes generar la Factura Global con seguridad.
+        </div>
+      )}
 
       <div className="card" style={{ padding: 14, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>

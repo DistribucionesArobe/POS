@@ -5,11 +5,79 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import DocumentoVenta, Empresa, Usuario, Cfdi
+from app.models import DocumentoVenta, Empresa, Usuario, Cfdi, CorteCaja
 from app.services.security import get_active_empresa_id, get_current_user
 from app.integrations.facturama import FacturamaClient
+from sqlalchemy import func, and_
 
 router = APIRouter(prefix="/factura-global", tags=["factura-global"])
+
+
+@router.get("/estado-cortes")
+def estado_cortes(
+    fecha_inicio: date,
+    fecha_fin: date,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Para cada cajero que vendio tickets en el rango, dice si ya cerro su Corte Z
+    del dia o si todavia tiene su turno abierto."""
+    ini = datetime.combine(fecha_inicio, datetime.min.time())
+    fin = datetime.combine(fecha_fin, datetime.min.time()) + timedelta(days=1)
+    # Agrupar tickets por vendedor+fecha
+    rows = (
+        db.query(
+            DocumentoVenta.vendedor_id,
+            func.date(DocumentoVenta.fecha).label("dia"),
+            func.count(DocumentoVenta.id).label("n_tickets"),
+            func.sum(DocumentoVenta.total).label("total"),
+            func.max(DocumentoVenta.fecha).label("ultima_venta"),
+        )
+        .filter(DocumentoVenta.empresa_id == empresa_id)
+        .filter(DocumentoVenta.tipo == "TICKET")
+        .filter(DocumentoVenta.fecha >= ini, DocumentoVenta.fecha < fin)
+        .filter(DocumentoVenta.estatus != "CANCELADO")
+        .filter(DocumentoVenta.factura_global_id.is_(None))
+        .group_by(DocumentoVenta.vendedor_id, func.date(DocumentoVenta.fecha))
+        .all()
+    )
+    turnos_abiertos = []
+    turnos_cerrados = []
+    for r in rows:
+        if r.vendedor_id is None:
+            # ticket sin vendedor asignado (p.ej. automatizado); se considera cerrado
+            continue
+        user = db.get(Usuario, r.vendedor_id)
+        # Buscar un corte de ese usuario cuyo fecha_hasta >= ultima_venta de ese dia
+        corte = (
+            db.query(CorteCaja)
+            .filter(CorteCaja.empresa_id == empresa_id)
+            .filter(CorteCaja.usuario_id == r.vendedor_id)
+            .filter(CorteCaja.fecha_hasta >= r.ultima_venta)
+            .order_by(CorteCaja.fecha_corte.desc())
+            .first()
+        )
+        info = {
+            "usuario_id": r.vendedor_id,
+            "nombre": user.nombre if user else f"User #{r.vendedor_id}",
+            "dia": r.dia.isoformat() if hasattr(r.dia, "isoformat") else str(r.dia),
+            "n_tickets": int(r.n_tickets),
+            "total": float(r.total or 0),
+            "ultima_venta": r.ultima_venta.isoformat() if r.ultima_venta else None,
+        }
+        if corte:
+            info["corte_z_numero"] = corte.numero_z
+            info["corte_id"] = corte.id
+            turnos_cerrados.append(info)
+        else:
+            turnos_abiertos.append(info)
+    return {
+        "turnos_abiertos": turnos_abiertos,
+        "turnos_cerrados": turnos_cerrados,
+        "n_abiertos": len(turnos_abiertos),
+        "n_cerrados": len(turnos_cerrados),
+        "seguro_facturar": len(turnos_abiertos) == 0,
+    }
 
 
 PERIODICIDAD_LABEL = {
