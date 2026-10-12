@@ -125,18 +125,25 @@ def _gmail_get(access_token: str, path: str, params: dict | None = None) -> dict
     return r.json()
 
 
-def buscar_mensajes_con_xml(access_token: str, dias_atras: int = 60) -> list[dict]:
-    """Busca correos con adjunto XML de los ultimos N dias."""
+def buscar_mensajes_con_xml(
+    access_token: str,
+    dias_atras: int = 60,
+    max_mensajes: int = 100,
+) -> list[dict]:
+    """Busca correos con adjunto XML de los ultimos N dias.
+    Cap de resultados para no exceder timeout del proxy."""
     q = f"has:attachment filename:xml newer_than:{dias_atras}d -in:sent"
-    resultado = []
+    resultado: list[dict] = []
     page_token = None
-    for _ in range(20):  # max 20 paginas = 10000 msgs (mas que suficiente)
-        params: dict[str, Any] = {"q": q, "maxResults": 500}
+    while len(resultado) < max_mensajes:
+        params: dict[str, Any] = {"q": q, "maxResults": min(100, max_mensajes - len(resultado))}
         if page_token:
             params["pageToken"] = page_token
         r = _gmail_get(access_token, "messages", params)
         for m in r.get("messages", []):
             resultado.append(m)
+            if len(resultado) >= max_mensajes:
+                break
         page_token = r.get("nextPageToken")
         if not page_token:
             break

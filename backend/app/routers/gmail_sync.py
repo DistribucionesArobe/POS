@@ -133,13 +133,13 @@ def _get_valid_access_token(conn: GmailConexion, db: Session) -> str:
 
 @router.post("/sync")
 def sync_manual(
-    dias_atras: int = 60,
-    max_mensajes: int = 25,
+    dias_atras: int = 30,
+    max_mensajes: int = 10,
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
     """Corre sync manual: busca correos con XML, parsea y guarda como pendientes.
-    Procesa hasta max_mensajes nuevos (por default 25) para no exceder timeout del proxy.
+    Procesa hasta max_mensajes nuevos (default 10) para no exceder timeout del proxy.
     Si quedan mas, hazle click a Sincronizar otra vez."""
     conn = db.query(GmailConexion).filter(GmailConexion.empresa_id == empresa_id).first()
     if not conn or not conn.activo:
@@ -156,28 +156,32 @@ def sync_manual(
         "pendientes_restantes": 0,
     }
 
-    mensajes = svc.buscar_mensajes_con_xml(access_token, dias_atras=dias_atras)
+    # Buscar solo los primeros N candidatos (muy rapido, una sola llamada a Gmail)
+    mensajes = svc.buscar_mensajes_con_xml(
+        access_token, dias_atras=dias_atras, max_mensajes=max(100, max_mensajes * 4),
+    )
     stats["buscados"] = len(mensajes)
+
+    # Pre-fetch de IDs ya procesados EN UNA sola query (evita N queries dentro del loop)
+    ids_buscados = [m["id"] for m in mensajes]
+    ya_procesados_set = set(
+        r[0] for r in db.query(GmailImportacionLog.mensaje_gmail_id)
+        .filter(GmailImportacionLog.empresa_id == empresa_id)
+        .filter(GmailImportacionLog.mensaje_gmail_id.in_(ids_buscados))
+        .all()
+    ) if ids_buscados else set()
 
     procesados_en_esta_corrida = 0
     for m in mensajes:
         # Cap: solo procesar hasta max_mensajes nuevos en esta llamada
         if procesados_en_esta_corrida >= max_mensajes:
-            stats["pendientes_restantes"] = sum(
-                1 for mm in mensajes
-                if not db.query(GmailImportacionLog).filter(
-                    GmailImportacionLog.empresa_id == empresa_id,
-                    GmailImportacionLog.mensaje_gmail_id == mm["id"],
-                ).first()
-            )
+            # Cuenta rapida sin query extra
+            restantes_set = [mm["id"] for mm in mensajes if mm["id"] not in ya_procesados_set]
+            stats["pendientes_restantes"] = max(0, len(restantes_set) - procesados_en_esta_corrida)
             break
         msg_id = m["id"]
-        # Ya procesado?
-        exists = db.query(GmailImportacionLog).filter(
-            GmailImportacionLog.empresa_id == empresa_id,
-            GmailImportacionLog.mensaje_gmail_id == msg_id,
-        ).first()
-        if exists:
+        # Ya procesado? (set pre-cargado, sin query)
+        if msg_id in ya_procesados_set:
             stats["ya_procesados"] += 1
             continue
 

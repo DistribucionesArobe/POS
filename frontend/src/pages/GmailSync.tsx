@@ -114,7 +114,7 @@ export default function GmailSync() {
     setBusy(true); setError(null); setMsg(null);
     try {
       const r = await api.post("/api/gmail/sync", null, {
-        params: { dias_atras: dias, max_mensajes: 25 },
+        params: { dias_atras: dias, max_mensajes: 10 },
         timeout: 180000,  // 3 minutos
       });
       const s = r.data.stats;
