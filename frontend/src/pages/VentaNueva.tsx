@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
+import CerrarCajaModal from "../components/CerrarCajaModal";
 
 type Item = {
   variante_id: number; sku: string; nombre: string;
@@ -81,6 +82,7 @@ export default function VentaNueva() {
   const [items, setItems] = useState<Item[]>([]);
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [mostrarPago, setMostrarPago] = useState(false);
+  const [mostrarCorteZ, setMostrarCorteZ] = useState(false);
 
   // Default: precios YA incluyen IVA (NETO). Es como estan subidos en la BD.
   const [preciosConIva, setPreciosConIva] = useState<boolean>(() => {
@@ -263,7 +265,23 @@ export default function VentaNueva() {
   };
 
   return (
-    <Layout title="Caja rápida" subtitle="Punto de venta — teclea SKU o nombre y Enter">
+    <Layout title="Caja rápida" subtitle="Punto de venta — teclea SKU o nombre y Enter"
+      actions={
+        <button onClick={() => {
+          if (items.length > 0) {
+            if (!confirm("Hay productos en el carrito. ¿Cerrar caja de todos modos?")) return;
+          }
+          setMostrarCorteZ(true);
+        }}
+          style={{
+            background: "#dc2626", color: "white", border: 0,
+            padding: "12px 22px", borderRadius: 8, fontSize: 15, fontWeight: 800,
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+            boxShadow: "0 2px 6px rgba(220,38,38,0.3)",
+          }}>
+          🔒 Cerrar Corte Z
+        </button>
+      }>
       {/* ============ HEADER: Cliente / Vendedor / Tipo ============ */}
       <div style={{
         display: "grid", gridTemplateColumns: "260px 260px 1fr auto",
@@ -724,6 +742,10 @@ export default function VentaNueva() {
             </div>
           </div>
         </div>
+      )}
+
+      {mostrarCorteZ && (
+        <CerrarCajaModal onClose={() => setMostrarCorteZ(false)} />
       )}
     </Layout>
   );
