@@ -988,6 +988,7 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
   const [usoCfdi, setUsoCfdi] = useState<string>("G03");
   const [metodo, setMetodo] = useState<string>("PUE");
   const [formaPago, setFormaPago] = useState<string>("01");
+  const [retenerIva, setRetenerIva] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -1001,6 +1002,7 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
         setUsoCfdi(r.data.uso_cfdi || "G03");
         setMetodo(r.data.metodo_pago_sat || "PUE");
         setFormaPago(r.data.forma_pago_sat || "01");
+        setRetenerIva(((r.data as any).iva_retenido || 0) > 0);
       } catch (err: any) {
         alert("Error cargando detalle: " + (err.response?.data?.detail || err.message));
         onClose();
@@ -1023,7 +1025,12 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
 
   const subtotal = conceptos.reduce((a, c) => a + c.importe, 0);
   const iva = conceptos.reduce((a, c) => a + c.importe * (c.tasa_iva || 0), 0);
-  const total = subtotal + iva;
+  // Retencion aplica si cliente tiene RFC real (no publico general)
+  const rfcCli = (detalle?.cliente?.rfc || "").toUpperCase();
+  const puedeRetener = !!rfcCli && rfcCli !== "XAXX010101000";
+  const retencionActiva = retenerIva && puedeRetener;
+  const ivaRetenido = retencionActiva ? +(subtotal * 0.16).toFixed(2) : 0;
+  const total = +(subtotal + iva - ivaRetenido).toFixed(2);
 
   async function guardarYTimbrar() {
     if (!detalle) return;
@@ -1035,6 +1042,8 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
         uso_cfdi: usoCfdi,
         metodo_pago_sat: metodo,
         forma_pago_sat: metodo === "PPD" ? "99" : formaPago,
+        iva_retenido_pct: retencionActiva ? 0.16 : 0,
+        isr_retenido_pct: 0,
         conceptos: conceptos.map(c => ({
           id: c.id,
           descripcion: c.descripcion,
@@ -1235,6 +1244,23 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                   border: "1px solid #cbd5e1", borderRadius: 4 }} />
             </div>
 
+            {/* Retener IVA (solo si cliente tiene RFC real) */}
+            {puedeRetener && (
+              <div style={{
+                background: "#eff6ff", border: "1px solid #93c5fd",
+                padding: 10, borderRadius: 6, marginBottom: 12,
+              }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", fontSize: 13 }}>
+                  <input type="checkbox" checked={retenerIva}
+                    onChange={(e) => setRetenerIva(e.target.checked)} />
+                  <strong>Retener IVA 16%</strong>
+                  <span style={{ fontSize: 11, color: "#64748b" }}>
+                    (caso CFE / gobierno retiene a persona fisica)
+                  </span>
+                </label>
+              </div>
+            )}
+
             {/* Totales */}
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
               <div style={{ minWidth: 260, padding: 12, background: "#0f172a", color: "white", borderRadius: 6 }}>
@@ -1244,6 +1270,12 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                   <span>IVA</span><span>{fmt(iva)}</span>
                 </div>
+                {retencionActiva && (
+                  <div style={{ display: "flex", justifyContent: "space-between",
+                    fontSize: 12, color: "#fca5a5" }}>
+                    <span>IVA retenido (16%)</span><span>-{fmt(ivaRetenido)}</span>
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 20, fontWeight: 800,
                   marginTop: 6, paddingTop: 6, borderTop: "1px dashed rgba(255,255,255,0.3)" }}>
                   <span>TOTAL</span><span>{fmt(total)}</span>

@@ -43,6 +43,8 @@ class ActualizarPrevisTimbreIn(BaseModel):
     uso_cfdi: str | None = None
     metodo_pago_sat: str | None = None
     forma_pago_sat: str | None = None
+    iva_retenido_pct: float | None = None  # 0.16 para retencion CFE / gob
+    isr_retenido_pct: float | None = None
 
 
 @router.get("/{documento_id}/detalle-completo")
@@ -69,6 +71,8 @@ def detalle_completo_venta(
         "id": doc.id, "folio": doc.folio, "tipo": doc.tipo,
         "fecha": doc.fecha.isoformat(),
         "subtotal": float(doc.subtotal), "iva": float(doc.iva), "total": float(doc.total),
+        "iva_retenido": float(doc.iva_retenido or 0),
+        "isr_retenido": float(doc.isr_retenido or 0),
         "metodo_pago_sat": doc.metodo_pago_sat,
         "forma_pago_sat": doc.forma_pago_sat,
         "uso_cfdi": doc.uso_cfdi,
@@ -130,8 +134,6 @@ def preparar_timbre(
 
     # Actualizar conceptos
     if payload.conceptos:
-        nuevo_subtotal = 0.0
-        nuevo_iva = 0.0
         for cin in payload.conceptos:
             cv = db.get(ConceptoVenta, cin.id)
             if not cv or cv.documento_id != doc.id:
@@ -150,19 +152,31 @@ def preparar_timbre(
                 cv.tasa_iva = cin.tasa_iva
             # Recalcular importe
             cv.importe = round(float(cv.cantidad) * float(cv.precio_unitario), 2)
-        # Recalcular totales del doc con TODOS los conceptos actualizados
-        todos = db.query(ConceptoVenta).filter(ConceptoVenta.documento_id == doc.id).all()
-        for c in todos:
-            nuevo_subtotal += float(c.importe)
-            nuevo_iva += float(c.importe) * float(c.tasa_iva or 0.16)
-        doc.subtotal = round(nuevo_subtotal, 2)
-        doc.iva = round(nuevo_iva, 2)
-        doc.total = round(nuevo_subtotal + nuevo_iva, 2)
+
+    # Siempre recalcular totales (haya o no cambios de conceptos) por si cambiaron
+    # las retenciones; si tampoco se tocaron conceptos los dejamos como estaban.
+    todos = db.query(ConceptoVenta).filter(ConceptoVenta.documento_id == doc.id).all()
+    nuevo_subtotal = sum(float(c.importe) for c in todos)
+    nuevo_iva = sum(float(c.importe) * float(c.tasa_iva or 0.16) for c in todos)
+    # Aplicar retenciones si vinieron en el payload
+    iva_ret_pct = payload.iva_retenido_pct
+    isr_ret_pct = payload.isr_retenido_pct
+    if iva_ret_pct is not None:
+        doc.iva_retenido = round(nuevo_subtotal * float(iva_ret_pct), 2)
+    if isr_ret_pct is not None:
+        doc.isr_retenido = round(nuevo_subtotal * float(isr_ret_pct), 2)
+    iva_retenido = float(doc.iva_retenido or 0)
+    isr_retenido = float(doc.isr_retenido or 0)
+    doc.subtotal = round(nuevo_subtotal, 2)
+    doc.iva = round(nuevo_iva, 2)
+    doc.total = round(nuevo_subtotal + nuevo_iva - iva_retenido - isr_retenido, 2)
     db.commit()
     return {
         "ok": True,
         "subtotal": float(doc.subtotal),
         "iva": float(doc.iva),
+        "iva_retenido": iva_retenido,
+        "isr_retenido": isr_retenido,
         "total": float(doc.total),
     }
 
