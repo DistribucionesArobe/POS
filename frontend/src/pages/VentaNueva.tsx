@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 import CerrarCajaModal from "../components/CerrarCajaModal";
+import ClientePicker from "../components/ClientePicker";
 
 type Item = {
   variante_id: number; sku: string; nombre: string;
@@ -83,6 +84,11 @@ export default function VentaNueva() {
   const [pagos, setPagos] = useState<PagoRow[]>([{ forma_pago_sat: "01", monto: 0 }]);
   const [mostrarPago, setMostrarPago] = useState(false);
   const [mostrarCorteZ, setMostrarCorteZ] = useState(false);
+  const [mostrarPickerCliente, setMostrarPickerCliente] = useState(false);
+  // MODO: venta normal vs cotizacion (igual look&feel, destino distinto)
+  const [modo, setModo] = useState<"VENTA" | "COTIZACION">("VENTA");
+  const [vigenciaDias, setVigenciaDias] = useState<number>(15);
+  const [guardandoCot, setGuardandoCot] = useState(false);
 
   // Default: precios YA incluyen IVA (NETO). Es como estan subidos en la BD.
   const [preciosConIva, setPreciosConIva] = useState<boolean>(() => {
@@ -199,6 +205,32 @@ export default function VentaNueva() {
     setPagos([{ forma_pago_sat: tipoSel === "FACTURA_PUE" ? "03" : "01", monto: total }]);
   }
 
+  async function guardarComoCotizacion() {
+    if (items.length === 0) { alert("Agrega productos primero"); return; }
+    setGuardandoCot(true);
+    try {
+      const r = await api.post("/api/cotizaciones", {
+        cliente_id: clienteId,
+        vigencia_dias: vigenciaDias,
+        conceptos: items.map((i) => ({
+          variante_id: i.variante_id,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio,
+        })),
+      });
+      const base = api.defaults.baseURL || "";
+      const pdfUrl = `${base}/api/cotizaciones/${r.data.id}/pdf`;
+      if (confirm(`📄 Cotización ${r.data.folio} guardada\n\nTotal: ${fmtMoney(r.data.total)}\n\n¿Abrir PDF para enviar al cliente?`)) {
+        window.open(pdfUrl, "_blank");
+      }
+      setItems([]);
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setGuardandoCot(false);
+    }
+  }
+
   async function guardar() {
     if (!esCredito) {
       if (sumaPagos < total - 0.01) {
@@ -265,7 +297,11 @@ export default function VentaNueva() {
   };
 
   return (
-    <Layout title="Caja rápida" subtitle="Punto de venta — teclea SKU o nombre y Enter"
+    <Layout
+      title={modo === "COTIZACION" ? "Cotización" : "Caja rápida"}
+      subtitle={modo === "COTIZACION"
+        ? "Arma la cotización igual que una venta — se guarda y se puede convertir despues"
+        : "Punto de venta — teclea SKU o nombre y Enter"}
       actions={
         <button onClick={() => {
           if (items.length > 0) {
@@ -282,6 +318,40 @@ export default function VentaNueva() {
           🔒 Cerrar Corte Z
         </button>
       }>
+      {/* ============ Switch de modo: Venta vs Cotizacion ============ */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 8,
+        background: "#f1f5f9", padding: 4, borderRadius: 8, width: "fit-content",
+      }}>
+        <button onClick={() => setModo("VENTA")}
+          style={{
+            padding: "10px 20px", border: 0, borderRadius: 6, cursor: "pointer",
+            fontSize: 14, fontWeight: 800, letterSpacing: 0.3,
+            background: modo === "VENTA" ? "#059669" : "transparent",
+            color: modo === "VENTA" ? "white" : "#64748b",
+          }}>
+          💰 VENTA
+        </button>
+        <button onClick={() => setModo("COTIZACION")}
+          style={{
+            padding: "10px 20px", border: 0, borderRadius: 6, cursor: "pointer",
+            fontSize: 14, fontWeight: 800, letterSpacing: 0.3,
+            background: modo === "COTIZACION" ? "#1e40af" : "transparent",
+            color: modo === "COTIZACION" ? "white" : "#64748b",
+          }}>
+          📄 COTIZACION
+        </button>
+        {modo === "COTIZACION" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 10, fontSize: 12, color: "#475569" }}>
+            Vigencia:
+            <input type="number" min={1} max={90} value={vigenciaDias}
+              onChange={(e) => setVigenciaDias(+e.target.value || 15)}
+              style={{ width: 50, padding: "4px 6px", border: "1px solid #cbd5e1", borderRadius: 4, fontSize: 13 }} />
+            dias
+          </label>
+        )}
+      </div>
+
       {/* ============ HEADER: Cliente / Vendedor / Tipo ============ */}
       <div style={{
         display: "grid", gridTemplateColumns: "260px 260px 1fr auto",
@@ -317,12 +387,19 @@ export default function VentaNueva() {
               </span>
             ) : (
               <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={(e) => { e.stopPropagation(); setMostrarPickerCliente(true); }}
+                  style={{
+                    background: "#1e40af", color: "white", border: 0,
+                    padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  }}>
+                  ➕ Nuevo
+                </button>
                 <button onClick={(e) => { e.stopPropagation(); usarPublicoGeneral(); }}
                   style={{
                     background: "#059669", color: "white", border: 0,
                     padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer",
                   }}>
-                  🏷 Publico general
+                  🏷 Publico
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); setCambiandoCliente(false); setClienteBusq(""); }}
                   style={{
@@ -621,14 +698,24 @@ export default function VentaNueva() {
           </div>
           {items.length > 0 && (
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <button onClick={() => setMostrarPago(true)}
-                style={{
-                  flex: 1, background: "#059669", color: "white", border: 0,
-                  padding: "12px 16px", fontSize: 15, fontWeight: 800, cursor: "pointer",
-                }}>
-                💵 COBRAR (F12)
-              </button>
-              <button onClick={() => { if (confirm("¿Limpiar venta?")) setItems([]); }}
+              {modo === "VENTA" ? (
+                <button onClick={() => setMostrarPago(true)}
+                  style={{
+                    flex: 1, background: "#059669", color: "white", border: 0,
+                    padding: "12px 16px", fontSize: 15, fontWeight: 800, cursor: "pointer",
+                  }}>
+                  💵 COBRAR (F12)
+                </button>
+              ) : (
+                <button onClick={guardarComoCotizacion} disabled={guardandoCot}
+                  style={{
+                    flex: 1, background: guardandoCot ? "#94a3b8" : "#1e40af", color: "white", border: 0,
+                    padding: "12px 16px", fontSize: 15, fontWeight: 800, cursor: guardandoCot ? "wait" : "pointer",
+                  }}>
+                  {guardandoCot ? "Guardando..." : "📄 GUARDAR COTIZACION"}
+                </button>
+              )}
+              <button onClick={() => { if (confirm(modo === "VENTA" ? "¿Limpiar venta?" : "¿Limpiar cotizacion?")) setItems([]); }}
                 style={{
                   background: "#dc2626", color: "white", border: 0,
                   padding: "12px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer",
@@ -746,6 +833,21 @@ export default function VentaNueva() {
 
       {mostrarCorteZ && (
         <CerrarCajaModal onClose={() => setMostrarCorteZ(false)} />
+      )}
+
+      {mostrarPickerCliente && (
+        <ClientePicker
+          onClose={() => setMostrarPickerCliente(false)}
+          onSelect={(c) => {
+            setClienteId(c.id);
+            setClienteNombre((c.nombre || "").toUpperCase());
+            setClienteRfc(c.rfc || "");
+            setMostrarPickerCliente(false);
+            setCambiandoCliente(false);
+            setClienteBusq("");
+            setTimeout(() => inputRef.current?.focus(), 50);
+          }}
+        />
       )}
     </Layout>
   );
