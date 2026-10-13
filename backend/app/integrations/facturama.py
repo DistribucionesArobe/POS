@@ -13,6 +13,31 @@ class FacturamaError(Exception):
     pass
 
 
+# Catalogo SAT c_TasaOCuota — valores EXACTOS aceptados para RETENCION.
+# Si la tasa calculada esta cerca de alguno, se "snapea" al valor del catalogo.
+_SAT_TASAS_RETENCION = [
+    0.160000,   # IVA 16% retenido (CFE/gobierno)
+    0.106667,   # IVA 2/3 (10.6667%)
+    0.040000,   # IVA 4%
+    0.080000,   # IVA 8%
+    0.013333,   # ISR servicios
+    0.100000,   # ISR honorarios 10%
+    0.012500,   # ISR arrendamiento
+    0.006000,   # ISR plataformas tecnologicas
+]
+
+
+def _snap_tasa_sat_retencion(tasa_raw: float) -> float:
+    """Ajusta una tasa calculada (division importe/subtotal) al valor exacto
+    del catalogo SAT c_TasaOCuota mas cercano, si esta dentro de 0.001."""
+    if tasa_raw <= 0:
+        return 0
+    for t_sat in _SAT_TASAS_RETENCION:
+        if abs(tasa_raw - t_sat) < 0.001:
+            return t_sat
+    return round(tasa_raw, 6)
+
+
 class FacturamaClient:
     def __init__(self, empresa: Empresa):
         if not empresa.facturama_user or not empresa.facturama_password:
@@ -56,16 +81,17 @@ class FacturamaClient:
         import logging
         logger = logging.getLogger(__name__)
         # Tasas de retencion (CFE retiene 16% IVA cuando compra a PF 612).
-        # Si el documento tiene iva_retenido o isr_retenido > 0, aplicamos
-        # la retencion proporcional en cada concepto.
-        # IMPORTANTE: CFDI 4.0 solo acepta TasaOCuota con hasta 6 decimales.
-        # Por eso redondeamos a 6 decimales aqui (la division total/subtotal
-        # daria un float con 15+ decimales que Facturama rechaza).
+        # IMPORTANTE: CFDI 4.0 solo acepta valores EXACTOS del catalogo
+        # c_TasaOCuota para retenciones. Por eso ajustamos ("snap") a los
+        # valores validos mas cercanos cuando la division da un decimal raro
+        # (ej. iva_retenido=536.66 / subtotal=3354.10 = 0.160001 => se queja).
         subtotal_doc = float(documento.subtotal or 0)
         iva_ret_total = float(getattr(documento, "iva_retenido", 0) or 0)
         isr_ret_total = float(getattr(documento, "isr_retenido", 0) or 0)
-        tasa_iva_ret = round(iva_ret_total / subtotal_doc, 6) if subtotal_doc > 0 and iva_ret_total > 0 else 0
-        tasa_isr_ret = round(isr_ret_total / subtotal_doc, 6) if subtotal_doc > 0 and isr_ret_total > 0 else 0
+        tasa_iva_ret_raw = iva_ret_total / subtotal_doc if subtotal_doc > 0 and iva_ret_total > 0 else 0
+        tasa_isr_ret_raw = isr_ret_total / subtotal_doc if subtotal_doc > 0 and isr_ret_total > 0 else 0
+        tasa_iva_ret = _snap_tasa_sat_retencion(tasa_iva_ret_raw)
+        tasa_isr_ret = _snap_tasa_sat_retencion(tasa_isr_ret_raw)
 
         items = []
         for c in documento.conceptos:
