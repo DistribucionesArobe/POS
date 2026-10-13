@@ -29,6 +29,7 @@ const items = [
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/ventas", label: "Mis ventas", icon: Icon.list, roles: ["admin", "cajero"] },
   { to: "/creditos-remisiones", label: "Créditos y Remisiones", icon: Icon.dollar, roles: ["admin", "cajero"] },
+  { to: "/notas-credito", label: "Notas de crédito", icon: Icon.dollar, roles: ["admin", "cajero"] },
 
   // Seccion INVENTARIO
   { section: "📦 INVENTARIO" },

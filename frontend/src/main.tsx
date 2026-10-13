@@ -38,6 +38,7 @@ import Dashboard from "./pages/Dashboard";
 import Caja from "./pages/Caja";
 import VentaNueva from "./pages/VentaNueva";
 import CreditosRemisiones from "./pages/CreditosRemisiones";
+import NotasCredito from "./pages/NotasCredito";
 import Ventas from "./pages/Ventas";
 import Cartera from "./pages/Cartera";
 import Productos from "./pages/Productos";
@@ -86,6 +87,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/venta" element={<VentaNueva />} />
           <Route path="/caja-tablet" element={<Caja />} />
           <Route path="/creditos-remisiones" element={<CreditosRemisiones />} />
+          <Route path="/notas-credito" element={<NotasCredito />} />
           <Route path="/ventas" element={<Ventas />} />
           <Route path="/cotizaciones" element={<Cotizaciones />} />
           <Route path="/cot/:folio" element={<CotizacionPublica />} />
