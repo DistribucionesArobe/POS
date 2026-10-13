@@ -85,6 +85,12 @@ class DocumentoVenta(Base):
     es_factura_global: Mapped[bool] = mapped_column(Boolean, default=False)
     periodo_global: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # "Modo Alejandro" (super_admin): venta oculta del corte, reportes y Mis Ventas
+    # para el flujo donde el dueno se queda el efectivo como utilidad personal.
+    # SI descuenta inventario (para no desquebrajar stock).
+    # Marcada con fondo distinto en el detalle fiscal del super_admin.
+    oculto_del_corte: Mapped[bool] = mapped_column(Boolean, default=False)
+
     forma_pago_sat: Mapped[str] = mapped_column(String(2), default=FormaPagoSAT.EFECTIVO.value)
     metodo_pago_sat: Mapped[str] = mapped_column(String(3), default=MetodoPagoSAT.PUE.value)
     moneda: Mapped[str] = mapped_column(String(3), default="MXN")

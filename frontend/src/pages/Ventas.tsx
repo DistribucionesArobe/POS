@@ -16,6 +16,7 @@ type VentaT = {
   fecha: string; total: number; saldo?: number; facturada?: boolean;
   metodo_pago_sat?: string;
   observaciones?: string | null;
+  oculto_del_corte?: boolean;
   cfdi?: CfdiInfo | null;
   conceptos?: any[];
 };
@@ -57,6 +58,8 @@ export default function Ventas() {
   const [devConceptos, setDevConceptos] = useState<{ variante_id: number; descripcion: string; max: number; cantidad: number; precio: number }[]>([]);
   const [devMotivo, setDevMotivo] = useState("");
   const [devTimbrar, setDevTimbrar] = useState(false);
+  const esSuperAdmin = localStorage.getItem("super_admin") === "true";
+  const [incluirOcultos, setIncluirOcultos] = useState(false);
 
   async function cargar() {
     const r = await api.get("/api/ventas", {
@@ -64,6 +67,7 @@ export default function Ventas() {
         tipo: filtroTipo || undefined,
         q: busquedaCliente || undefined,
         solo_pendientes: soloPendientes || undefined,
+        incluir_ocultos: esSuperAdmin && incluirOcultos ? true : undefined,
         limit: 200,
       },
     });
@@ -84,7 +88,7 @@ export default function Ventas() {
     setSeleccionadas(new Set());
   }
 
-  useEffect(() => { cargar(); }, [filtroTipo, soloPendientes]);
+  useEffect(() => { cargar(); }, [filtroTipo, soloPendientes, incluirOcultos]);
 
   // Recargar cuando cambia búsqueda (debounce)
   useEffect(() => {
@@ -372,6 +376,19 @@ export default function Ventas() {
               onChange={(e) => setSoloPendientes(e.target.checked)} />
             Solo pendientes de facturar
           </label>
+          {esSuperAdmin && (
+            <label style={{
+              display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer",
+              background: incluirOcultos ? "#ede9fe" : "transparent",
+              padding: "4px 10px", borderRadius: 6,
+              border: `1px solid ${incluirOcultos ? "#a855f7" : "transparent"}`,
+              color: "#5b21b6", fontWeight: 700,
+            }}>
+              <input type="checkbox" checked={incluirOcultos}
+                onChange={(e) => setIncluirOcultos(e.target.checked)} />
+              👑 Incluir Modo Alejandro
+            </label>
+          )}
         </div>
       </div>
 
@@ -454,7 +471,12 @@ export default function Ventas() {
               const timbrada = isFactura && v.cfdi && !v.cfdi.cancelado;
               const isRemision = v.tipo === "REMISION";
               return (
-                <tr key={v.id} style={{ background: v.facturada ? "#f3f4f6" : undefined }}>
+                <tr key={v.id} style={{
+                  background: v.oculto_del_corte ? "#faf5ff"
+                    : v.facturada ? "#f3f4f6" : undefined,
+                  borderLeft: v.oculto_del_corte ? "4px solid #a855f7" : undefined,
+                }}
+                  title={v.oculto_del_corte ? "👑 Modo Alejandro: no cuenta en corte Z ni reportes" : undefined}>
                   {esRemisionFiltro && (
                     <td>
                       {isRemision && !v.facturada && (

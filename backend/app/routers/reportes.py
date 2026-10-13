@@ -252,6 +252,7 @@ def _corte_data(db: Session, empresa_id: int, ini: datetime, fin: datetime) -> d
         .filter(DocumentoVenta.empresa_id == empresa_id)
         .filter(DocumentoVenta.fecha >= ini, DocumentoVenta.fecha < fin)
         .filter(DocumentoVenta.estatus != EstatusDocumento.CANCELADO.value)
+        .filter(DocumentoVenta.oculto_del_corte == False)
         .all()
     )
     ventas = [d for d in docs if d.tipo in (

@@ -87,6 +87,10 @@ export default function VentaNueva() {
   const [mostrarPickerCliente, setMostrarPickerCliente] = useState(false);
   const [mostrarImport, setMostrarImport] = useState(false);
   const [retenerIva, setRetenerIva] = useState(false);
+  // "Modo Alejandro" — solo super_admin lo ve. Venta descuenta inventario pero
+  // NO entra en el corte Z ni Mis Ventas. Para efectivo que se queda el dueño.
+  const esSuperAdmin = localStorage.getItem("super_admin") === "true";
+  const [modoAlejandro, setModoAlejandro] = useState(false);
   // MODO: venta normal vs cotizacion (igual look&feel, destino distinto)
   const [modo, setModo] = useState<"VENTA" | "COTIZACION">("VENTA");
   const [vigenciaDias, setVigenciaDias] = useState<number>(15);
@@ -250,6 +254,7 @@ export default function VentaNueva() {
       forma_pago_sat: esCredito ? "99" : (pagos[0]?.forma_pago_sat || "01"),
       metodo_pago_sat: metodoPagoSat,
       iva_retenido_pct: retencionAplica ? 0.16 : 0,
+      oculto_del_corte: esSuperAdmin && modoAlejandro,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
@@ -358,7 +363,35 @@ export default function VentaNueva() {
             dias
           </label>
         )}
+        {esSuperAdmin && modo === "VENTA" && (
+          <label style={{
+            display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+            marginLeft: 10, padding: "6px 12px",
+            background: modoAlejandro ? "#7c3aed" : "#ede9fe",
+            color: modoAlejandro ? "white" : "#5b21b6",
+            border: `2px solid ${modoAlejandro ? "#7c3aed" : "#c4b5fd"}`,
+            borderRadius: 6, fontSize: 12, fontWeight: 800, userSelect: "none",
+          }}
+            title="Super admin: la venta descuenta inventario pero NO entra al corte Z ni Mis Ventas default. Para efectivo que te quedas tu.">
+            <input type="checkbox" checked={modoAlejandro}
+              onChange={(e) => setModoAlejandro(e.target.checked)}
+              style={{ width: 16, height: 16 }} />
+            {modoAlejandro ? "🔒 MODO ALEJANDRO ACTIVO" : "👑 Modo Alejandro"}
+          </label>
+        )}
       </div>
+
+      {esSuperAdmin && modoAlejandro && modo === "VENTA" && (
+        <div style={{
+          background: "#faf5ff", border: "2px dashed #a855f7",
+          padding: "8px 14px", marginBottom: 8, borderRadius: 6,
+          color: "#6b21a8", fontSize: 12, fontWeight: 600,
+        }}>
+          🔒 <strong>Modo Alejandro activo:</strong> esta venta descontara inventario como cualquier otra,
+          pero NO aparecera en el Corte Z ni en el listado Mis Ventas default.
+          El dinero no entra a caja. Usala para efectivo que te quedas personalmente.
+        </div>
+      )}
 
       {/* ============ HEADER: Cliente / Vendedor / Tipo ============ */}
       <div style={{

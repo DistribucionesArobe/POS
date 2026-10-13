@@ -150,6 +150,7 @@ def crear_documento(db: Session, payload: DocumentoVentaIn, empresa_id: int) -> 
         total=total,
         iva_retenido=iva_retenido,
         isr_retenido=isr_retenido,
+        oculto_del_corte=bool(getattr(payload, "oculto_del_corte", False)),
         forma_pago_sat=forma_pago_resuelta,
         metodo_pago_sat=payload.metodo_pago_sat,
         uso_cfdi=payload.uso_cfdi,
@@ -281,21 +282,24 @@ def crear_devolucion(
     conceptos_devolver: list[dict], motivo: str | None,
     empresa_id: int,
 ) -> DocumentoVenta:
-    """Crea NOTA_CREDITO referenciando la factura original.
+    """Crea NOTA_CREDITO (devolucion) referenciando la venta original.
+
+    Acepta FACTURA, TICKET o REMISION. Para TICKET no se puede timbrar CFDI
+    (no habia CFDI original), pero si se devuelve inventario.
 
     - Devuelve mercancia al inventario (kardex DEVOLUCION_VENTA +)
     - Reduce CxC si existe (factura PPD o remision facturada)
-    - Si no hay CxC, no hace nada con cartera (factura PUE pagada)
+    - Si no hay CxC, no hace nada con cartera (ticket contado / factura PUE pagada)
     """
     factura = db.get(DocumentoVenta, factura_id)
     if not factura:
-        raise ValueError("Factura no existe")
+        raise ValueError("Venta no existe")
     if factura.empresa_id != empresa_id:
-        raise ValueError("Factura pertenece a otra empresa")
-    if factura.tipo != TipoDocumento.FACTURA.value:
-        raise ValueError("Solo se devuelven facturas")
+        raise ValueError("Venta pertenece a otra empresa")
+    if factura.tipo not in (TipoDocumento.FACTURA.value, TipoDocumento.TICKET.value, TipoDocumento.REMISION.value):
+        raise ValueError(f"No se puede devolver un documento tipo {factura.tipo}")
     if factura.estatus == EstatusDocumento.CANCELADO.value:
-        raise ValueError("La factura esta cancelada")
+        raise ValueError("La venta esta cancelada")
 
     # Validar cantidades vs conceptos originales
     devolver_map = {c["variante_id"]: float(c["cantidad"]) for c in conceptos_devolver}

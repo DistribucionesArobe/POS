@@ -49,6 +49,9 @@ class DocumentoVentaIn(BaseModel):
     # y aparece en el PDF (no en el XML fiscal). Util para numeros de contrato,
     # ordenes de compra, referencias del cliente, etc.
     observaciones: str | None = None
+    # Modo super_admin: venta oculta del corte / reportes.
+    # SI descuenta inventario, pero NO suma en Corte Z ni Mis Ventas default.
+    oculto_del_corte: bool = False
 
 
 class ConceptoVentaOut(BaseModel):

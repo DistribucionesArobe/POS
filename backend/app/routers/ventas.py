@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import (
     DocumentoVenta, ConceptoVenta, Cliente, Empresa, Pago,
-    CuentaPorCobrar, VarianteProducto, Producto, Cfdi,
+    CuentaPorCobrar, VarianteProducto, Producto, Cfdi, Usuario,
 )
 from app.models.venta import TipoDocumento, EstatusDocumento, MetodoPagoSAT, FormaPagoSAT
 from app.schemas.venta import DocumentoVentaIn, DocumentoVentaOut, DevolucionIn
 from app.services import venta_service, pdf_service, inventario_service
-from app.services.security import get_active_empresa_id
+from app.services.security import get_active_empresa_id, get_current_user
 from app.utils.folios import siguiente_folio
 
 router = APIRouter()
@@ -340,8 +340,12 @@ def duplicar_venta(
 def crear_venta(
     payload: DocumentoVentaIn,
     empresa_id: int = Depends(get_active_empresa_id),
+    usuario: Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Seguridad: solo super_admin puede crear ventas ocultas del corte
+    if payload.oculto_del_corte and not usuario.super_admin:
+        raise HTTPException(403, "Solo super_admin puede crear ventas ocultas del corte")
     try:
         return venta_service.crear_documento(db, payload, empresa_id)
     except ValueError as e:
@@ -355,8 +359,10 @@ def listar_ventas(
     estatus: str | None = None,
     q: str | None = Query(None, description="Búsqueda por nombre de cliente, RFC o folio"),
     solo_pendientes: bool = False,  # solo remisiones sin facturar
+    incluir_ocultos: bool = False,  # super_admin: incluir ventas 'Modo Alejandro'
     limit: int = 200,
     empresa_id: int = Depends(get_active_empresa_id),
+    usuario: Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = (
@@ -364,6 +370,9 @@ def listar_ventas(
         .join(Cliente, Cliente.id == DocumentoVenta.cliente_id)
         .filter(DocumentoVenta.empresa_id == empresa_id)
     )
+    # Ocultar ventas 'oculto_del_corte' por default; solo super_admin puede verlas
+    if not (incluir_ocultos and usuario.super_admin):
+        query = query.filter(DocumentoVenta.oculto_del_corte == False)
     if tipo:
         query = query.filter(DocumentoVenta.tipo == tipo)
     if cliente_id:
@@ -397,6 +406,7 @@ def listar_ventas(
             "saldo": saldo, "facturada": d.factura_padre_id is not None,
             "metodo_pago_sat": d.metodo_pago_sat,
             "observaciones": d.observaciones,
+            "oculto_del_corte": bool(d.oculto_del_corte),
         })
     return out
 
@@ -738,13 +748,18 @@ def crear_devolucion(
             "factura_relacionada_id": nc.factura_relacionada_id,
         }
         # Opcional: timbrar CFDI Egreso si el usuario lo pidio
-        if payload.timbrar_cfdi_egreso:
+        # Solo timbrar si la venta origen era FACTURA (TICKET/REMISION no tienen CFDI padre)
+        venta_origen = db.get(DocumentoVenta, payload.factura_id)
+        es_factura_origen = venta_origen and venta_origen.tipo == "FACTURA"
+        if payload.timbrar_cfdi_egreso and es_factura_origen:
             try:
                 from app.services import cfdi_service
                 cfdi_result = cfdi_service.emitir_nota_credito_cfdi(db, nc.id, empresa_id)
                 result["cfdi"] = cfdi_result
             except Exception as e:
                 result["cfdi_error"] = str(e)
+        elif payload.timbrar_cfdi_egreso and not es_factura_origen:
+            result["cfdi_info"] = "No se timbra CFDI porque la venta origen no era FACTURA"
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))
