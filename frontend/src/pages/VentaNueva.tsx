@@ -85,6 +85,7 @@ export default function VentaNueva() {
   const [mostrarPago, setMostrarPago] = useState(false);
   const [mostrarCorteZ, setMostrarCorteZ] = useState(false);
   const [mostrarPickerCliente, setMostrarPickerCliente] = useState(false);
+  const [mostrarImport, setMostrarImport] = useState(false);
   // MODO: venta normal vs cotizacion (igual look&feel, destino distinto)
   const [modo, setModo] = useState<"VENTA" | "COTIZACION">("VENTA");
   const [vigenciaDias, setVigenciaDias] = useState<number>(15);
@@ -556,6 +557,14 @@ export default function VentaNueva() {
             </div>
           )}
         </div>
+        <button onClick={() => setMostrarImport(true)}
+          style={{
+            padding: "0 16px", background: "#7c3aed", color: "white",
+            border: 0, fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap",
+          }}
+          title="Sube foto o PDF de una cotización, o pega un listado de Excel">
+          📥 Importar cotizacion
+        </button>
         <label style={{
           display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
           padding: "0 14px", background: preciosConIva ? "#059669" : "#f59e0b",
@@ -835,6 +844,19 @@ export default function VentaNueva() {
         <CerrarCajaModal onClose={() => setMostrarCorteZ(false)} />
       )}
 
+      {mostrarImport && (
+        <ImportarCotModal
+          onClose={() => setMostrarImport(false)}
+          onAgregar={(nuevos) => {
+            // nuevos ya vienen con precio BASE y tasa_iva
+            setItems([...nuevos, ...items]);
+            setMostrarImport(false);
+            setTimeout(() => inputRef.current?.focus(), 50);
+          }}
+          preciosEntradaConIva={preciosConIva}
+        />
+      )}
+
       {mostrarPickerCliente && (
         <ClientePicker
           onClose={() => setMostrarPickerCliente(false)}
@@ -850,5 +872,301 @@ export default function VentaNueva() {
         />
       )}
     </Layout>
+  );
+}
+
+
+// =================== MODAL IMPORTAR COTIZACION ===================
+
+type LineaImportada = {
+  descripcion: string;
+  cantidad: number;
+  precio: number;      // tal como viene del archivo/texto
+  monto: number;
+  match_variante_id?: number | null;
+  sku?: string;
+  nombre?: string;
+  tasa_iva?: number;
+};
+
+function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
+  onClose: () => void;
+  onAgregar: (items: Item[]) => void;
+  preciosEntradaConIva: boolean;
+}) {
+  const [tab, setTab] = useState<"archivo" | "pegar">("archivo");
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [textoPegado, setTextoPegado] = useState("");
+  const [procesando, setProcesando] = useState(false);
+  const [lineas, setLineas] = useState<LineaImportada[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [omitidos, setOmitidos] = useState<Set<number>>(new Set());
+  const [entradaConIva, setEntradaConIva] = useState(preciosEntradaConIva);
+
+  async function procesarArchivo() {
+    if (!archivo) return;
+    setProcesando(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", archivo);
+      const r = await api.post("/api/productos/parsear-cotizacion", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      setLineas(r.data.lineas || []);
+      setOmitidos(new Set());
+    } catch (e: any) {
+      setError(e.response?.data?.detail || e.message);
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  async function procesarTexto() {
+    const texto = textoPegado.trim();
+    if (!texto) return;
+    setProcesando(true); setError(null);
+    try {
+      const limpiar = (s: string) => {
+        const n = parseFloat((s || "").replace(/[$,\s]/g, ""));
+        return isNaN(n) ? 0 : n;
+      };
+      const parsed: LineaImportada[] = [];
+      for (const linea of texto.split(/\r?\n/)) {
+        if (!linea.trim()) continue;
+        const cols = linea.split(/\t|  +|,/);
+        if (cols.length < 2) continue;
+        const desc = (cols[0] || "").trim();
+        if (!desc) continue;
+        const cantidad = limpiar(cols[1] || "");
+        if (cantidad <= 0) continue;
+        let precio = 0, monto = 0;
+        if (cols.length >= 4) { precio = limpiar(cols[2]); monto = limpiar(cols[3]); }
+        else if (cols.length === 3) { precio = limpiar(cols[2]); monto = cantidad * precio; }
+        else { precio = 0; monto = 0; }
+        parsed.push({ descripcion: desc, cantidad, precio, monto });
+      }
+      // Para cada linea buscar en catalogo
+      const enriquecidas: LineaImportada[] = [];
+      for (const l of parsed) {
+        try {
+          const r = await api.get("/api/productos/buscar-variante", { params: { q: l.descripcion } });
+          const match = (r.data || [])[0];
+          if (match) {
+            enriquecidas.push({
+              ...l,
+              match_variante_id: match.id,
+              sku: match.sku,
+              nombre: match.nombre,
+              tasa_iva: match.tasa_iva,
+              precio: l.precio || match.precio,
+            });
+          } else {
+            enriquecidas.push({ ...l, match_variante_id: null });
+          }
+        } catch {
+          enriquecidas.push({ ...l, match_variante_id: null });
+        }
+      }
+      setLineas(enriquecidas);
+      setOmitidos(new Set());
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  function toggleOmitido(i: number) {
+    const s = new Set(omitidos);
+    if (s.has(i)) s.delete(i); else s.add(i);
+    setOmitidos(s);
+  }
+
+  function agregarAlCarrito() {
+    if (!lineas) return;
+    const paraAgregar: Item[] = [];
+    for (let i = 0; i < lineas.length; i++) {
+      if (omitidos.has(i)) continue;
+      const l = lineas[i];
+      if (!l.match_variante_id) continue;
+      const tasa = l.tasa_iva ?? 0.16;
+      // Si el usuario marco "entrada CON IVA", convertir precio a base
+      const precioBase = entradaConIva ? +(l.precio / (1 + tasa)).toFixed(6) : l.precio;
+      paraAgregar.push({
+        variante_id: l.match_variante_id,
+        sku: l.sku || "",
+        nombre: l.nombre || l.descripcion,
+        cantidad: l.cantidad,
+        precio: precioBase,
+        tasa_iva: tasa,
+      });
+    }
+    if (paraAgregar.length === 0) {
+      alert("No hay lineas matcheadas al catalogo para agregar");
+      return;
+    }
+    onAgregar(paraAgregar);
+  }
+
+  const matchedCount = (lineas || []).filter(l => l.match_variante_id).length;
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 12,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 10, padding: 20,
+        width: "100%", maxWidth: 820, maxHeight: "94vh", overflow: "auto",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>📥 Importar cotización</h2>
+          <button onClick={onClose} style={{ background: "transparent", border: 0, fontSize: 22, cursor: "pointer" }}>×</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <button onClick={() => setTab("archivo")}
+            style={{
+              padding: "8px 14px", border: 0, borderRadius: 6, cursor: "pointer",
+              background: tab === "archivo" ? "#7c3aed" : "#e2e8f0",
+              color: tab === "archivo" ? "white" : "#334155",
+              fontSize: 13, fontWeight: 700,
+            }}>
+            📎 Foto / PDF / Excel
+          </button>
+          <button onClick={() => setTab("pegar")}
+            style={{
+              padding: "8px 14px", border: 0, borderRadius: 6, cursor: "pointer",
+              background: tab === "pegar" ? "#7c3aed" : "#e2e8f0",
+              color: tab === "pegar" ? "white" : "#334155",
+              fontSize: 13, fontWeight: 700,
+            }}>
+            📋 Pegar de Excel
+          </button>
+        </div>
+
+        {!lineas ? (
+          <>
+            {tab === "archivo" ? (
+              <div>
+                <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px" }}>
+                  Sube una <strong>foto / screenshot / PDF</strong> de la cotización, o un archivo <strong>.xlsx</strong>.
+                  La IA extrae descripción, cantidad y precio, y matchea contra tu catálogo.
+                </p>
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xlsm,image/*,application/pdf"
+                  onChange={(e) => setArchivo(e.target.files?.[0] || null)}
+                  style={{ marginBottom: 10, display: "block" }} />
+                {archivo && (
+                  <div style={{ fontSize: 12, color: "#475569" }}>
+                    Seleccionado: <strong>{archivo.name}</strong> ({Math.round(archivo.size / 1024)} KB)
+                  </div>
+                )}
+                <button onClick={procesarArchivo} disabled={!archivo || procesando}
+                  style={{
+                    marginTop: 12, background: procesando ? "#94a3b8" : "#7c3aed",
+                    color: "white", border: 0, padding: "10px 20px", borderRadius: 6,
+                    fontSize: 14, fontWeight: 700, cursor: procesando ? "wait" : "pointer",
+                  }}>
+                  {procesando ? "Procesando con IA (10-40s)..." : "🚀 Procesar"}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px" }}>
+                  Pega las filas de Excel (columnas: <code>descripcion | cantidad | precio | monto</code>). Tab o coma separa columnas.
+                </p>
+                <textarea value={textoPegado} onChange={(e) => setTextoPegado(e.target.value)}
+                  placeholder={"Varilla 3/8\t10\t95.00\t950.00\nCemento 50kg\t5\t280.00\t1400.00"}
+                  rows={10}
+                  style={{
+                    width: "100%", padding: 10, fontFamily: "monospace", fontSize: 13,
+                    border: "1px solid #cbd5e1", borderRadius: 6,
+                  }} />
+                <button onClick={procesarTexto} disabled={!textoPegado.trim() || procesando}
+                  style={{
+                    marginTop: 12, background: procesando ? "#94a3b8" : "#7c3aed",
+                    color: "white", border: 0, padding: "10px 20px", borderRadius: 6,
+                    fontSize: 14, fontWeight: 700, cursor: procesando ? "wait" : "pointer",
+                  }}>
+                  {procesando ? "Buscando en catálogo..." : "🚀 Procesar"}
+                </button>
+              </div>
+            )}
+            {error && (
+              <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10,
+                borderRadius: 6, fontSize: 13, marginTop: 12 }}>{error}</div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, fontSize: 13 }}>
+              <strong style={{ color: "#059669" }}>{matchedCount}</strong> matcheadas de <strong>{lineas.length}</strong> lineas.
+              <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={entradaConIva}
+                  onChange={(e) => setEntradaConIva(e.target.checked)} />
+                Los precios del archivo YA incluyen IVA
+              </label>
+            </div>
+            <table style={{ width: "100%", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: "#f1f5f9" }}>
+                  <th style={{ padding: 6, textAlign: "left" }}>✓</th>
+                  <th style={{ padding: 6, textAlign: "left" }}>Descripción</th>
+                  <th style={{ padding: 6, textAlign: "left" }}>Match</th>
+                  <th style={{ padding: 6, textAlign: "right" }}>Cant.</th>
+                  <th style={{ padding: 6, textAlign: "right" }}>Precio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lineas.map((l, i) => {
+                  const match = !!l.match_variante_id;
+                  const omit = omitidos.has(i);
+                  return (
+                    <tr key={i} style={{
+                      background: !match ? "#fef3c7" : omit ? "#f1f5f9" : "white",
+                      borderBottom: "1px solid #e2e8f0", opacity: omit ? 0.5 : 1,
+                    }}>
+                      <td style={{ padding: 6 }}>
+                        <input type="checkbox" disabled={!match}
+                          checked={match && !omit}
+                          onChange={() => toggleOmitido(i)} />
+                      </td>
+                      <td style={{ padding: 6 }}>{l.descripcion}</td>
+                      <td style={{ padding: 6, fontSize: 11 }}>
+                        {match ? (
+                          <span style={{ color: "#059669", fontWeight: 700 }}>
+                            ✓ {l.sku} · {l.nombre?.slice(0, 40)}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#b45309" }}>⚠ Sin match (se omite)</span>
+                        )}
+                      </td>
+                      <td style={{ padding: 6, textAlign: "right" }}>{l.cantidad}</td>
+                      <td style={{ padding: 6, textAlign: "right" }}>${l.precio.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => { setLineas(null); setArchivo(null); setTextoPegado(""); }}
+                style={{
+                  background: "transparent", border: "1px solid #cbd5e1",
+                  padding: "10px 14px", borderRadius: 6, cursor: "pointer", fontSize: 13,
+                }}>← Volver</button>
+              <button onClick={agregarAlCarrito}
+                style={{
+                  flex: 1, background: "#059669", color: "white", border: 0,
+                  padding: "10px 16px", borderRadius: 6, fontSize: 14, fontWeight: 800, cursor: "pointer",
+                }}>
+                ✓ Agregar al carrito ({matchedCount - omitidos.size})
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
