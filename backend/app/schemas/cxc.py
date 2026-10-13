@@ -1,4 +1,5 @@
 """Schemas para CxC."""
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -10,3 +11,4 @@ class AbonoCxCIn(BaseModel):
     origen: str = "MANUAL"  # MANUAL | WHATSAPP_FOTO
     notas: str | None = None
     emitir_complemento_pago: bool = False  # auto si la factura es PPD
+    fecha: datetime | None = None  # si viene, se usa; si no, utcnow()

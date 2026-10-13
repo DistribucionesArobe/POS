@@ -23,7 +23,11 @@ export default function Cartera() {
   const [rows, setRows] = useState<CxCRow[]>([]);
   const [abonando, setAbonando] = useState<CxCRow | null>(null);
   const [verAbonos, setVerAbonos] = useState<CxCRow | null>(null);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => {
+    // Prefill desde ?folio=... (viene de Creditos y Remisiones)
+    const params = new URLSearchParams(window.location.search);
+    return params.get("folio") || "";
+  });
   const [vista, setVista] = useState<Vista>("TODAS");
 
   function cargar() {
@@ -188,17 +192,22 @@ function AbonoModal({ row, onClose, onSaved }: {
   const [formaPago, setFormaPago] = useState("EFECTIVO");
   const [referencia, setReferencia] = useState("");
   const [notas, setNotas] = useState("");
+  const [fechaAbono, setFechaAbono] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [emitirComplemento, setEmitirComplemento] = useState(row.es_ppd);
   const [busy, setBusy] = useState(false);
 
   async function guardar() {
     if (monto <= 0) return alert("Monto debe ser mayor a 0");
     if (monto > row.saldo + 0.01) return alert(`Monto excede saldo (${fmt(row.saldo)})`);
+    if (!fechaAbono) return alert("Captura la fecha del abono");
     setBusy(true);
     try {
+      // Enviar la fecha a las 12:00 PM local para evitar off-by-one por timezone
+      const fechaIso = new Date(fechaAbono + "T12:00:00").toISOString();
       const r = await api.post("/api/cxc/abono", {
         cxc_id: row.cxc_id, monto, forma_pago: formaPago,
         referencia: referencia || null, notas: notas || null,
+        fecha: fechaIso,
         emitir_complemento_pago: emitirComplemento && row.es_ppd,
       });
       let msg = `Abono de ${fmt(monto)} registrado.`;
@@ -225,12 +234,19 @@ function AbonoModal({ row, onClose, onSaved }: {
           <strong>{row.cliente}</strong> · {row.documento_folio} · Saldo {fmt(row.saldo)}
         </p>
 
-        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <div>
             <label>Monto</label>
             <input className="input" type="number" step="0.01" value={monto}
               style={{ fontSize: 18, padding: 10, fontWeight: 600 }}
               onChange={(e) => setMonto(+e.target.value)} />
+          </div>
+          <div>
+            <label>Fecha del abono *</label>
+            <input className="input" type="date" value={fechaAbono}
+              onChange={(e) => setFechaAbono(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)}
+              style={{ fontSize: 15, padding: 10 }} />
           </div>
           <div>
             <label>Forma de pago</label>
@@ -242,12 +258,12 @@ function AbonoModal({ row, onClose, onSaved }: {
               <option value="CHEQUE">Cheque (02)</option>
             </select>
           </div>
-          <div className="form-grid-full">
+          <div className="form-grid-full" style={{ gridColumn: "1 / -1" }}>
             <label>Referencia (opcional)</label>
             <input className="input" value={referencia} onChange={(e) => setReferencia(e.target.value)}
               placeholder="Folio de transferencia, últimos 4 de tarjeta, etc." />
           </div>
-          <div className="form-grid-full">
+          <div className="form-grid-full" style={{ gridColumn: "1 / -1" }}>
             <label>Notas</label>
             <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} />
           </div>

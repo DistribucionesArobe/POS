@@ -330,6 +330,11 @@ export default function CreditosRemisiones() {
                       </button>
                     ) : (
                       <>
+                        <button className="btn btn-sm" onClick={() => irACarteraParaCobrar(r)}
+                          style={{ background: "#059669", color: "white" }}
+                          title="La remision no afecta inventario (ya se entrego), pero el abono entra como ingreso a caja">
+                          💵 Abonar
+                        </button>
                         <button className="btn btn-sm" onClick={() => {
                           setSeleccion(new Set([r.id]));
                           setTimeout(() => convertirRemisiones("TICKET"), 50);

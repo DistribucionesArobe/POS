@@ -16,7 +16,7 @@ def aplicar_abono_cxc(db: Session, payload: AbonoCxCIn, empresa_id: int) -> Abon
     if payload.monto > float(cxc.saldo) + 0.01:
         raise ValueError(f"Monto excede saldo ({cxc.saldo})")
 
-    abono = AbonoCxC(
+    abono_kwargs = dict(
         cxc_id=cxc.id,
         monto=payload.monto,
         forma_pago=payload.forma_pago,
@@ -24,6 +24,9 @@ def aplicar_abono_cxc(db: Session, payload: AbonoCxCIn, empresa_id: int) -> Abon
         origen=payload.origen,
         notas=payload.notas,
     )
+    if payload.fecha:
+        abono_kwargs["fecha"] = payload.fecha
+    abono = AbonoCxC(**abono_kwargs)
     cxc.saldo = float(cxc.saldo) - payload.monto
     if cxc.saldo <= 0.01:
         cxc.pagado = True
