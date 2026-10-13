@@ -178,6 +178,37 @@ def recalcular_vencimientos_futbol(
     }
 
 
+class SetearPagoFutbolIn(BaseModel):
+    fecha_pago: date  # ej. 2026-09-15
+
+
+@router.post("/setear-ultimo-pago-futbol")
+def setear_ultimo_pago_futbol(
+    payload: SetearPagoFutbolIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Marca TODOS los alumnos de futbol de la empresa activa como si hubieran
+    pagado en la fecha indicada. Util cuando todos pagaron el mismo dia (ej 15 sept)
+    y los vencimientos no estaban cargados. Recalcula proximo_pago al dia 15."""
+    rows = (
+        db.query(AcademiaPago)
+        .filter(AcademiaPago.empresa_id == empresa_id)
+        .filter(AcademiaPago.deporte == "futbol")
+        .all()
+    )
+    prox = _siguiente_dia_15(payload.fecha_pago)
+    for p in rows:
+        p.fecha_pago = payload.fecha_pago
+        p.fecha_proximo_pago = prox
+    db.commit()
+    return {
+        "actualizados": len(rows),
+        "fecha_pago_fijada": payload.fecha_pago.isoformat(),
+        "fecha_proximo_pago": prox.isoformat(),
+    }
+
+
 @router.delete("/{pago_id}")
 def borrar(
     pago_id: int,

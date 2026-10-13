@@ -73,6 +73,28 @@ export default function Academia() {
       actions={
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={async () => {
+            const fecha = prompt(
+              "Fecha en que TODOS los alumnos de FUTBOL pagaron (YYYY-MM-DD):\n\n" +
+              "Esto marcara su ultimo pago en esa fecha y el proximo pago al dia 15 correspondiente.\n" +
+              "Util para que la lista refleje quienes estan por vencer.",
+              "2026-09-15"
+            );
+            if (!fecha) return;
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { alert("Formato invalido. Usa YYYY-MM-DD"); return; }
+            if (!confirm(`¿Marcar a TODOS los alumnos de futbol como pagados el ${fecha}?`)) return;
+            try {
+              const r = await api.post("/api/academia/setear-ultimo-pago-futbol", { fecha_pago: fecha });
+              alert(`✅ ${r.data.actualizados} alumnos actualizados.\nUltimo pago: ${r.data.fecha_pago_fijada}\nProximo pago: ${r.data.fecha_proximo_pago}`);
+              cargar();
+            } catch (e: any) {
+              alert("Error: " + (e.response?.data?.detail || e.message));
+            }
+          }}
+            style={{ background: "#dc2626", color: "white", border: 0,
+              padding: "10px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            📅 Setear pago futbol
+          </button>
+          <button onClick={async () => {
             if (!confirm("Recalcular TODOS los pagos de FUTBOL para que venzan el dia 15?\n\nSe aplica la regla:\n- Pagos del dia 1-15 => vencen el 15 del mismo mes\n- Pagos despues del 15 => vencen el 15 del siguiente mes")) return;
             try {
               const r = await api.post("/api/academia/recalcular-vencimientos-futbol");
@@ -84,7 +106,7 @@ export default function Academia() {
           }}
             style={{ background: "#f59e0b", color: "white", border: 0,
               padding: "10px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-            🔄 Snap futbol al día 15
+            🔄 Snap al 15
           </button>
           <button onClick={() => setMostrarNuevo(true)}
             style={{ background: "#059669", color: "white", border: 0,
