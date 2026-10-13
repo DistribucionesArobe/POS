@@ -71,11 +71,27 @@ export default function Academia() {
   return (
     <Layout title="Academia" subtitle="Registro de pagos de alumnos"
       actions={
-        <button onClick={() => setMostrarNuevo(true)}
-          style={{ background: "#059669", color: "white", border: 0,
-            padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-          + Nuevo pago
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={async () => {
+            if (!confirm("Recalcular TODOS los pagos de FUTBOL para que venzan el dia 15?\n\nSe aplica la regla:\n- Pagos del dia 1-15 => vencen el 15 del mismo mes\n- Pagos despues del 15 => vencen el 15 del siguiente mes")) return;
+            try {
+              const r = await api.post("/api/academia/recalcular-vencimientos-futbol");
+              alert(`✅ ${r.data.actualizados} de ${r.data.total_futbol} pagos actualizados.\n(${r.data.sin_cambio} ya estaban en el 15)`);
+              cargar();
+            } catch (e: any) {
+              alert("Error: " + (e.response?.data?.detail || e.message));
+            }
+          }}
+            style={{ background: "#f59e0b", color: "white", border: 0,
+              padding: "10px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            🔄 Snap futbol al día 15
+          </button>
+          <button onClick={() => setMostrarNuevo(true)}
+            style={{ background: "#059669", color: "white", border: 0,
+              padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            + Nuevo pago
+          </button>
+        </div>
       }>
 
       {error && (

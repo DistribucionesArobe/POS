@@ -140,6 +140,44 @@ def actualizar(
     return _serialize(p)
 
 
+@router.post("/recalcular-vencimientos-futbol")
+def recalcular_vencimientos_futbol(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Snapea TODOS los pagos de futbol a dia 15 segun la regla.
+    - Si fecha_pago.day <= 15 -> proximo pago = 15 del mismo mes
+    - Si fecha_pago.day >  15 -> proximo pago = 15 del siguiente mes
+    Devuelve conteo de actualizados."""
+    rows = (
+        db.query(AcademiaPago)
+        .filter(AcademiaPago.empresa_id == empresa_id)
+        .filter(AcademiaPago.deporte == "futbol")
+        .all()
+    )
+    actualizados = 0
+    cambios = []
+    for p in rows:
+        if not p.fecha_pago:
+            continue
+        nuevo = _siguiente_dia_15(p.fecha_pago)
+        if p.fecha_proximo_pago != nuevo:
+            cambios.append({
+                "id": p.id, "alumno": p.alumno_nombre,
+                "anterior": p.fecha_proximo_pago.isoformat() if p.fecha_proximo_pago else None,
+                "nuevo": nuevo.isoformat(),
+            })
+            p.fecha_proximo_pago = nuevo
+            actualizados += 1
+    db.commit()
+    return {
+        "total_futbol": len(rows),
+        "actualizados": actualizados,
+        "sin_cambio": len(rows) - actualizados,
+        "cambios": cambios[:50],  # muestra primeros 50 para auditoria
+    }
+
+
 @router.delete("/{pago_id}")
 def borrar(
     pago_id: int,
