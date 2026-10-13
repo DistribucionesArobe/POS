@@ -14,6 +14,7 @@ class ClienteIn(BaseModel):
     metodo_pago_default: str | None = None  # PUE | PPD
     condiciones_pago: str | None = None
     correo: str | None = None
+    correos_adicionales: str | None = None  # comma-separated CC emails
     telefono: str | None = None
     whatsapp: str | None = None
     direccion: str | None = None
@@ -33,6 +34,7 @@ class ClienteUpdate(BaseModel):
     metodo_pago_default: str | None = None
     condiciones_pago: str | None = None
     correo: str | None = None
+    correos_adicionales: str | None = None
     telefono: str | None = None
     whatsapp: str | None = None
     direccion: str | None = None

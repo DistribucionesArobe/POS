@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { api } from "../api/client";
 
-type Modo = "CREDITOS" | "REMISIONES";
+type Modo = "CREDITOS" | "REMISIONES" | "CANCELADAS";
 type OrdenCampo = "fecha" | "monto" | "cliente";
 
 type DocRow = {
@@ -14,6 +14,8 @@ type DocRow = {
   saldo: number; facturada: boolean;
   metodo_pago_sat: string;
   observaciones: string | null;
+  timbrada?: boolean;
+  cfdi_cancelado?: boolean;
 };
 
 const fmt = (n: number) => "$" + (n || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -37,18 +39,28 @@ export default function CreditosRemisiones() {
     setLoading(true);
     try {
       if (modo === "CREDITOS") {
-        // Facturas a credito pendientes (metodo_pago_sat = PPD y saldo > 0)
+        // Facturas PPD TIMBRADAS con saldo > 0 (excluye borradores y canceladas)
         const r = await api.get("/api/ventas", {
           params: { tipo: "FACTURA", limit: 500 },
         });
         setRows((r.data || []).filter((d: DocRow) =>
-          d.metodo_pago_sat === "PPD" && d.saldo > 0 && d.estatus !== "CANCELADO"
+          d.metodo_pago_sat === "PPD"
+          && d.saldo > 0
+          && d.estatus !== "CANCELADO"
+          && d.timbrada === true   // excluir facturas no timbradas
+          && d.cfdi_cancelado !== true
         ));
-      } else {
+      } else if (modo === "REMISIONES") {
         const r = await api.get("/api/ventas", {
           params: { tipo: "REMISION", solo_pendientes: true, limit: 500 },
         });
-        setRows(r.data || []);
+        setRows((r.data || []).filter((d: DocRow) => d.estatus !== "CANCELADO"));
+      } else {
+        // CANCELADAS: todas las ventas canceladas (factura cancelada, remision cancelada, cfdi cancelado)
+        const r = await api.get("/api/ventas", { params: { limit: 500 } });
+        setRows((r.data || []).filter((d: DocRow) =>
+          d.estatus === "CANCELADO" || d.cfdi_cancelado === true
+        ));
       }
     } catch { setRows([]); }
     finally { setLoading(false); }
@@ -149,8 +161,10 @@ export default function CreditosRemisiones() {
   return (
     <Layout title="Créditos y Remisiones"
       subtitle={modo === "CREDITOS"
-        ? "Facturas a crédito (PPD) pendientes de cobro / complemento de pago"
-        : "Remisiones no facturadas — convierte a Ticket o Factura"}>
+        ? "Facturas PPD timbradas pendientes de cobro / complemento de pago"
+        : modo === "REMISIONES"
+        ? "Remisiones no facturadas — convierte a Ticket o Factura"
+        : "Historial de facturas/remisiones canceladas o CFDI cancelados"}>
 
       {/* SWITCH */}
       <div style={{
@@ -174,6 +188,15 @@ export default function CreditosRemisiones() {
             color: modo === "REMISIONES" ? "white" : "#64748b",
           }}>
           📋 REMISIONES
+        </button>
+        <button onClick={() => setModo("CANCELADAS")}
+          style={{
+            padding: "10px 20px", border: 0, borderRadius: 6, cursor: "pointer",
+            fontSize: 14, fontWeight: 800,
+            background: modo === "CANCELADAS" ? "#dc2626" : "transparent",
+            color: modo === "CANCELADAS" ? "white" : "#64748b",
+          }}>
+          🚫 CANCELADAS
         </button>
       </div>
 
@@ -324,7 +347,9 @@ export default function CreditosRemisiones() {
                     <button className="btn-icon" onClick={() => abrirPdf(r)} title="Ver PDF">
                       📄
                     </button>
-                    {modo === "CREDITOS" ? (
+                    {modo === "CANCELADAS" ? (
+                      <span style={{ fontSize: 11, color: "#64748b" }}>Solo lectura</span>
+                    ) : modo === "CREDITOS" ? (
                       <button className="btn btn-sm" onClick={() => irACarteraParaCobrar(r)}>
                         💵 Abonar / Complemento
                       </button>

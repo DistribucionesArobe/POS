@@ -398,6 +398,14 @@ def listar_ventas(
         # Saldo si tiene CxC
         cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.documento_id == d.id).first()
         saldo = float(cxc.saldo) if cxc and not cxc.pagado else 0.0
+        # Flags de CFDI (solo facturas)
+        timbrada = False
+        cfdi_cancelado = False
+        if d.tipo == "FACTURA":
+            cfdi = db.query(Cfdi).filter(Cfdi.documento_venta_id == d.id).first()
+            if cfdi:
+                timbrada = not cfdi.cancelado
+                cfdi_cancelado = bool(cfdi.cancelado)
         out.append({
             "id": d.id, "folio": d.folio, "tipo": d.tipo, "estatus": d.estatus,
             "cliente_id": d.cliente_id, "cliente_nombre": cli.nombre, "cliente_rfc": cli.rfc,
@@ -407,6 +415,8 @@ def listar_ventas(
             "metodo_pago_sat": d.metodo_pago_sat,
             "observaciones": d.observaciones,
             "oculto_del_corte": bool(d.oculto_del_corte),
+            "timbrada": timbrada,
+            "cfdi_cancelado": cfdi_cancelado,
         })
     return out
 

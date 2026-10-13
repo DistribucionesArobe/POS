@@ -5,6 +5,7 @@ export type ClienteSel = {
   id: number; nombre: string; rfc?: string | null;
   razon_social?: string | null; regimen_fiscal?: string | null;
   codigo_postal?: string | null; correo?: string | null;
+  correos_adicionales?: string | null;
   whatsapp?: string | null; telefono?: string | null;
   uso_cfdi_default?: string | null;
   forma_pago_default?: string | null;
@@ -28,6 +29,7 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
     forma_pago_default: "03", metodo_pago_default: "PUE",
     condiciones_pago: "",
   });
+  const [correosExtra, setCorreosExtra] = useState<string[]>([""]);  // CC adicionales
   const [creando, setCreando] = useState(false);
   const [parseandoCsf, setParseandoCsf] = useState(false);
   const [csfError, setCsfError] = useState<string | null>(null);
@@ -82,6 +84,8 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
       const payload: any = { ...nuevo };
       payload.rfc = nuevo.rfc ? nuevo.rfc.toUpperCase().trim() : null;
       payload.nombre = nuevo.nombre || nuevo.razon_social;
+      const adic = correosExtra.map(e => e.trim()).filter(Boolean);
+      payload.correos_adicionales = adic.length > 0 ? adic.join(",") : null;
       const r = await api.post("/api/clientes", payload);
       const det = await api.get(`/api/clientes/${r.data.id}`);
       onSelect(det.data);
@@ -194,9 +198,44 @@ export default function ClientePicker({ onClose, onSelect, requiereRfc = false }
                   onChange={(e) => setNuevo({ ...nuevo, whatsapp: e.target.value })} placeholder="8341234567" />
               </div>
               <div>
-                <label>Correo</label>
+                <label>Correo principal</label>
                 <input className="input" type="email" value={nuevo.correo}
-                  onChange={(e) => setNuevo({ ...nuevo, correo: e.target.value })} />
+                  onChange={(e) => setNuevo({ ...nuevo, correo: e.target.value })}
+                  placeholder="facturacion@cliente.com" />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Correos adicionales (CC)</span>
+                  {correosExtra.length < 5 && (
+                    <button type="button" onClick={() => setCorreosExtra([...correosExtra, ""])}
+                      style={{
+                        background: "transparent", border: "1px dashed #94a3b8",
+                        padding: "2px 8px", borderRadius: 4, fontSize: 11,
+                        color: "#475569", cursor: "pointer",
+                      }}>+ Agregar correo</button>
+                  )}
+                </label>
+                {correosExtra.map((email, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                    <input className="input" type="email" value={email}
+                      onChange={(e) => {
+                        const c = [...correosExtra]; c[i] = e.target.value; setCorreosExtra(c);
+                      }}
+                      placeholder={`correo adicional ${i + 1}`} style={{ flex: 1 }} />
+                    {correosExtra.length > 1 && (
+                      <button type="button" onClick={() =>
+                        setCorreosExtra(correosExtra.filter((_, k) => k !== i))
+                      }
+                        style={{
+                          background: "transparent", border: "1px solid #cbd5e1",
+                          padding: "0 10px", borderRadius: 4, cursor: "pointer", color: "#dc2626",
+                        }}>×</button>
+                    )}
+                  </div>
+                ))}
+                <div style={{ fontSize: 10, color: "#64748b", marginTop: 3 }}>
+                  Al enviar CFDI por correo se enviara copia a estos correos tambien.
+                </div>
               </div>
               {/* Regimen fiscal: SIEMPRE visible (no solo cuando requiere RFC) */}
               <>

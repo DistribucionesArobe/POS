@@ -43,8 +43,10 @@ def enviar_cfdi(
     razon_social_emisor: str,
     xml_bytes: bytes | None,
     pdf_bytes: bytes | None,
+    cc: list[str] | None = None,
 ) -> tuple[bool, str | None]:
-    """Envia XML + PDF como adjuntos. Devuelve (ok, mensaje_error)."""
+    """Envia XML + PDF como adjuntos. Devuelve (ok, mensaje_error).
+    cc = lista de correos en copia (correos_adicionales del cliente)."""
     cfg = _config()
     if not cfg:
         return False, "SMTP no configurado (faltan SMTP_HOST/SMTP_USER/SMTP_PASSWORD)"
@@ -55,6 +57,9 @@ def enviar_cfdi(
     msg = EmailMessage()
     msg["From"] = f'"{from_name}" <{cfg["user"]}>'
     msg["To"] = destinatario
+    cc_limpio = [c.strip() for c in (cc or []) if c and c.strip() and c.strip() != destinatario]
+    if cc_limpio:
+        msg["Cc"] = ", ".join(cc_limpio)
     msg["Subject"] = f"Tu factura electrónica - {razon_social_emisor} - Folio {folio_full}"
     msg.set_content(
         f"""Hola {nombre_destinatario or ''},

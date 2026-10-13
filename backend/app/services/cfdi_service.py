@@ -17,6 +17,16 @@ SAT_CLAVE_PROD_PAGO = "84111506"  # Servicios de facturación
 SAT_CLAVE_UNIDAD_PAGO = "ACT"      # Actividad
 
 
+def _parsear_correos_adicionales(correos_str: str | None) -> list[str]:
+    """Convierte 'a@x.com,b@y.com, c@z.com' -> ['a@x.com', 'b@y.com', 'c@z.com'].
+    Permite separador coma, punto y coma, espacio o salto de linea."""
+    if not correos_str:
+        return []
+    import re
+    partes = re.split(r"[,;\s]+", correos_str)
+    return [p.strip() for p in partes if p and "@" in p]
+
+
 def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
     doc = db.get(DocumentoVenta, documento_id)
     if not doc:
@@ -78,6 +88,7 @@ def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
             except Exception:
                 # Fallback al PDF de Facturama si nuestro motor falla
                 pdf_bytes = client.descargar_pdf(facturama_id)
+            cc_list = _parsear_correos_adicionales(getattr(cliente, "correos_adicionales", None))
             ok, err = email_service.enviar_cfdi(
                 destinatario=cliente.correo,
                 nombre_destinatario=cliente.razon_social or cliente.nombre,
@@ -88,6 +99,7 @@ def timbrar(db: Session, documento_id: int, empresa_id: int) -> dict:
                 razon_social_emisor=empresa.razon_social or empresa.nombre,
                 xml_bytes=xml_bytes,
                 pdf_bytes=pdf_bytes,
+                cc=cc_list,
             )
             if ok:
                 cfdi.correo_enviado_a = cliente.correo
@@ -250,6 +262,7 @@ def emitir_nota_credito_cfdi(db: Session, nc_id: int, empresa_id: int) -> dict:
                 rfc_emisor=empresa.rfc,
                 razon_social_emisor=empresa.razon_social or empresa.nombre,
                 xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+                cc=_parsear_correos_adicionales(getattr(cliente, "correos_adicionales", None)),
             )
             if ok:
                 cfdi_nc.correo_enviado_a = cliente.correo
@@ -295,6 +308,7 @@ def reenviar_correo(db: Session, cfdi_id: int, email: str | None, empresa_id: in
     except Exception as e:
         raise ValueError(f"No se pudo bajar XML/PDF de Facturama: {e}")
 
+    cc_list = _parsear_correos_adicionales(getattr(cliente, "correos_adicionales", None)) if cliente else []
     ok, err = email_service.enviar_cfdi(
         destinatario=destino,
         nombre_destinatario=(cliente.razon_social if cliente else "") or (cliente.nombre if cliente else ""),
@@ -302,6 +316,7 @@ def reenviar_correo(db: Session, cfdi_id: int, email: str | None, empresa_id: in
         rfc_emisor=empresa.rfc,
         razon_social_emisor=empresa.razon_social or empresa.nombre,
         xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+        cc=cc_list,
     )
     if not ok:
         raise ValueError(f"SMTP rechazo el envio: {err}")
@@ -521,6 +536,7 @@ def emitir_complemento_pago(db: Session, abono_id: int, empresa_id: int) -> dict
                 rfc_emisor=empresa.rfc,
                 razon_social_emisor=empresa.razon_social or empresa.nombre,
                 xml_bytes=xml_bytes, pdf_bytes=pdf_bytes,
+                cc=_parsear_correos_adicionales(getattr(cliente, "correos_adicionales", None)),
             )
         except Exception:
             pass

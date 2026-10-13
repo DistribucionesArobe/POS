@@ -25,6 +25,8 @@ class Cliente(Base):
     metodo_pago_default: Mapped[str | None] = mapped_column(String(3), nullable=True)  # PUE | PPD
     condiciones_pago: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Correos adicionales (CC) para envio de CFDI, separados por coma
+    correos_adicionales: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     telefono: Mapped[str | None] = mapped_column(String(32), nullable=True)
     whatsapp: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
