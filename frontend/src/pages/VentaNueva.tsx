@@ -86,6 +86,7 @@ export default function VentaNueva() {
   const [mostrarCorteZ, setMostrarCorteZ] = useState(false);
   const [mostrarPickerCliente, setMostrarPickerCliente] = useState(false);
   const [mostrarImport, setMostrarImport] = useState(false);
+  const [retenerIva, setRetenerIva] = useState(false);
   // MODO: venta normal vs cotizacion (igual look&feel, destino distinto)
   const [modo, setModo] = useState<"VENTA" | "COTIZACION">("VENTA");
   const [vigenciaDias, setVigenciaDias] = useState<number>(15);
@@ -185,7 +186,12 @@ export default function VentaNueva() {
 
   const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
   const iva = items.reduce((a, i) => a + i.cantidad * i.precio * i.tasa_iva, 0);
-  const total = +(subtotal + iva).toFixed(2);
+  // Retencion IVA (16%) solo aplica cuando es FACTURA + cliente con RFC real
+  const esFactura = tipoSel === "FACTURA_PUE" || tipoSel === "FACTURA_PPD";
+  const puedeRetener = esFactura && !!clienteRfc && clienteRfc !== "XAXX010101000";
+  const retencionAplica = retenerIva && puedeRetener;
+  const ivaRetenido = retencionAplica ? +(subtotal * 0.16).toFixed(2) : 0;
+  const total = +(subtotal + iva - ivaRetenido).toFixed(2);
   const sumaPagos = +pagos.reduce((a, p) => a + (p.monto || 0), 0).toFixed(2);
   const usaSplit = pagos.length > 1;
   const n_piezas = useMemo(() => items.reduce((a, i) => a + i.cantidad, 0), [items]);
@@ -243,6 +249,7 @@ export default function VentaNueva() {
       tipo, cliente_id: clienteId,
       forma_pago_sat: esCredito ? "99" : (pagos[0]?.forma_pago_sat || "01"),
       metodo_pago_sat: metodoPagoSat,
+      iva_retenido_pct: retencionAplica ? 0.16 : 0,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
       })),
@@ -699,12 +706,30 @@ export default function VentaNueva() {
           <div style={{ fontSize: 11, color: "#64748b" }}>
             SUP ESTACION{estacion} Hora: {horaStr}
           </div>
-          <div style={{ display: "flex", gap: 14 }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <span>Piezas: <strong style={{ color: "#0f172a" }}>{n_piezas}</strong></span>
             <span>Items: <strong style={{ color: "#0f172a" }}>{items.length}</strong></span>
             <span>Subtotal s/IVA: <strong style={{ color: "#0f172a" }}>{fmtMoney(subtotal)}</strong></span>
             <span>IVA: <strong style={{ color: "#0f172a" }}>{fmtMoney(iva)}</strong></span>
+            {retencionAplica && (
+              <span style={{ color: "#dc2626" }}>
+                IVA retenido: <strong>-{fmtMoney(ivaRetenido)}</strong>
+              </span>
+            )}
           </div>
+          {puedeRetener && (
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+              padding: "6px 10px", background: retenerIva ? "#eff6ff" : "#f8fafc",
+              border: `1px solid ${retenerIva ? "#60a5fa" : "#cbd5e1"}`, borderRadius: 6,
+              fontSize: 12, color: retenerIva ? "#1e40af" : "#475569", fontWeight: 600,
+              width: "fit-content",
+            }}>
+              <input type="checkbox" checked={retenerIva}
+                onChange={(e) => setRetenerIva(e.target.checked)} />
+              Retener IVA 16% (caso CFE / gobierno retiene a PF)
+            </label>
+          )}
           {items.length > 0 && (
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
               {modo === "VENTA" ? (

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 480
+    jwt_expire_minutes: int = 10080  # 7 dias (antes 480 = 8 horas)
 
     # Facturama
     facturama_api_url: str = "https://api.facturama.mx"

@@ -14,8 +14,12 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err.response?.status === 401) {
+      // Evitar bucle en /login y mensaje claro al usuario
       localStorage.removeItem("token");
-      window.location.href = "/login";
+      if (!window.location.pathname.startsWith("/login")) {
+        alert("Tu sesion caduco. Vuelve a iniciar sesion para continuar.");
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(err);
   }
