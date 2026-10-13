@@ -481,10 +481,10 @@ export default function VentaNueva() {
           <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>TIPO DE DOCUMENTO</div>
           <select value={tipoSel} onChange={(e) => setTipoSel(e.target.value as any)}
             style={{ padding: "6px 8px", fontSize: 13, border: "1px solid #cbd5e1", fontWeight: 700 }}>
-            <option value="TICKET">Ticket (contado)</option>
-            <option value="REMISION">Remisión (crédito)</option>
-            <option value="FACTURA_PUE">Factura PUE</option>
-            <option value="FACTURA_PPD">Factura PPD</option>
+            <option value="TICKET">🎫 Ticket contado</option>
+            <option value="FACTURA_PUE">🧾 Factura PUE contado</option>
+            <option value="FACTURA_PPD">💳 Factura PPD crédito</option>
+            <option value="REMISION">📋 Remisión crédito (sin CFDI)</option>
           </select>
         </div>
 
