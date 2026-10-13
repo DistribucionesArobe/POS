@@ -208,15 +208,28 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto: proxPago = fechaPago + 1 mes cuando cambia fechaPago
+  // Auto: calcula proximo pago segun regla del deporte
+  // - futbol: SNAP a dia 15 (todos los formalizados vencen el 15)
+  // - otros: +1 mes manteniendo el dia
   useEffect(() => {
     if (!fechaPago) return;
     const d = new Date(fechaPago + "T00:00:00");
-    d.setMonth(d.getMonth() + 1);
-    const iso = d.toISOString().slice(0, 10);
+    let prox: Date;
+    if (deporte === "futbol") {
+      // Si pagas <= dia 15, vence 15 del mismo mes; si >15, vence 15 del siguiente
+      if (d.getDate() <= 15) {
+        prox = new Date(d.getFullYear(), d.getMonth(), 15);
+      } else {
+        prox = new Date(d.getFullYear(), d.getMonth() + 1, 15);
+      }
+    } else {
+      prox = new Date(d);
+      prox.setMonth(prox.getMonth() + 1);
+    }
+    const iso = prox.toISOString().slice(0, 10);
     // Solo autofill si el user no lo cambio explicito
     if (!pago || proxPago === "") setProxPago(iso);
-  }, [fechaPago]);
+  }, [fechaPago, deporte]);
 
   async function guardar() {
     if (!alumno.trim()) { setError("Nombre del alumno es obligatorio"); return; }
@@ -251,7 +264,14 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
             <input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} style={inp} />
           </div>
           <div>
-            <label style={lbl}>Próximo pago (auto)</label>
+            <label style={lbl}>
+              Próximo pago (auto)
+              {deporte === "futbol" && (
+                <span style={{ marginLeft: 6, fontSize: 10, color: "#059669", fontWeight: 700 }}>
+                  ⚽ Futbol: siempre dia 15
+                </span>
+              )}
+            </label>
             <input type="date" value={proxPago} onChange={(e) => setProxPago(e.target.value)} style={inp} />
           </div>
           <div style={{ gridColumn: "span 2" }}>

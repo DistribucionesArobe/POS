@@ -22,6 +22,27 @@ def _sumar_mes(d: date) -> date:
     return date(y, m, min(d.day, ultimo))
 
 
+def _siguiente_dia_15(d: date) -> date:
+    """Regla Futbol: todos los alumnos formalizados vencen el DIA 15.
+    - Si pagas antes o en el dia 15 -> vence el 15 del MISMO mes
+    - Si pagas despues del 15 -> vence el 15 del SIGUIENTE mes
+    Garantiza que todos los vencimientos de la academia caen en la misma fecha."""
+    if d.day <= 15:
+        return date(d.year, d.month, 15)
+    m = d.month + 1
+    y = d.year
+    if m > 12:
+        m = 1; y += 1
+    return date(y, m, 15)
+
+
+def _calcular_proximo_pago(fecha_pago: date, deporte: str) -> date:
+    """Para futbol formalizado, snap a dia 15. Para los demas, +1 mes."""
+    if (deporte or "").strip().lower() == "futbol":
+        return _siguiente_dia_15(fecha_pago)
+    return _sumar_mes(fecha_pago)
+
+
 class PagoIn(BaseModel):
     fecha_pago: date | None = None
     alumno_nombre: str
@@ -69,7 +90,8 @@ def crear(
     db: Session = Depends(get_db),
 ):
     fecha = payload.fecha_pago or date.today()
-    prox = payload.fecha_proximo_pago or _sumar_mes(fecha)
+    deporte_norm = (payload.deporte or "futbol").strip().lower()
+    prox = payload.fecha_proximo_pago or _calcular_proximo_pago(fecha, deporte_norm)
     p = AcademiaPago(
         empresa_id=empresa_id,
         fecha_pago=fecha,
@@ -100,8 +122,9 @@ def actualizar(
 
     # Si cambio la fecha de pago y no vino proximo explicito, recalcular
     nueva_fecha = payload.fecha_pago or p.fecha_pago
+    deporte_norm = (payload.deporte or p.deporte or "futbol").strip().lower()
     if payload.fecha_pago and payload.fecha_pago != p.fecha_pago and not payload.fecha_proximo_pago:
-        p.fecha_proximo_pago = _sumar_mes(nueva_fecha)
+        p.fecha_proximo_pago = _calcular_proximo_pago(nueva_fecha, deporte_norm)
     elif payload.fecha_proximo_pago:
         p.fecha_proximo_pago = payload.fecha_proximo_pago
 
