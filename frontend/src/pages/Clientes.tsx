@@ -42,6 +42,7 @@ export default function Clientes() {
   const [form, setForm] = useState(FORM_VACIO);
   const [editId, setEditId] = useState<number | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [mostrarCompartir, setMostrarCompartir] = useState(false);
 
   async function cargar() {
     const r = await api.get("/api/clientes", { params: { q: busqueda || undefined } });
@@ -97,7 +98,19 @@ export default function Clientes() {
     <Layout
       title="Clientes"
       subtitle={`${clientes.length} clientes registrados`}
-      actions={<button className="btn" onClick={abrirNuevo}>+ Nuevo cliente</button>}
+      actions={
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setMostrarCompartir(true)}
+            style={{
+              background: "#7c3aed", color: "white", border: 0,
+              padding: "10px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}
+            title="Comparte un link para que tus clientes suban su CSF y se registren solos">
+            📱 Link de auto-registro
+          </button>
+          <button className="btn" onClick={abrirNuevo}>+ Nuevo cliente</button>
+        </div>
+      }
     >
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="toolbar" style={{ marginBottom: 0 }}>
@@ -223,6 +236,104 @@ export default function Clientes() {
           </tbody>
         </table>
       </div>
+
+      {mostrarCompartir && (
+        <CompartirRegistroModal onClose={() => setMostrarCompartir(false)} />
+      )}
     </Layout>
+  );
+}
+
+
+function CompartirRegistroModal({ onClose }: { onClose: () => void }) {
+  const empresaActiva = (() => {
+    try { return JSON.parse(localStorage.getItem("empresa_activa") || "{}"); }
+    catch { return {}; }
+  })();
+  const base = window.location.origin;
+  const url = `${base}/registro-cliente/${empresaActiva.id}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(url)}`;
+  const msgWhatsapp = encodeURIComponent(
+    `Hola! Para facturarte, por favor registra tus datos aqui subiendo tu Constancia de Situacion Fiscal:\n\n${url}\n\nSolo toma 30 segundos. Gracias!`
+  );
+  const [copiado, setCopiado] = useState(false);
+
+  function copiar() {
+    navigator.clipboard?.writeText(url);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 12,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: "white", borderRadius: 12, padding: 24,
+        width: "100%", maxWidth: 500, maxHeight: "94vh", overflow: "auto",
+      }}>
+        <h2 style={{ margin: "0 0 4px", color: "#0f172a" }}>📱 Link de auto-registro</h2>
+        <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 16px" }}>
+          Mándale esto a tu cliente por WhatsApp. Sube su CSF y queda registrado automático —
+          la IA lee los datos fiscales por ti.
+        </p>
+
+        <div style={{ textAlign: "center", margin: "0 0 14px" }}>
+          <img src={qrUrl} alt="QR" style={{
+            width: 220, height: 220, border: "4px solid #0f172a", borderRadius: 10,
+          }} />
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
+            Imprimelo en el mostrador o en tu factura
+          </div>
+        </div>
+
+        <div style={{
+          background: "#f1f5f9", padding: 10, borderRadius: 6,
+          fontSize: 13, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 10,
+        }}>
+          {url}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button onClick={copiar}
+            style={{
+              flex: 1, background: copiado ? "#059669" : "#0f172a", color: "white",
+              border: 0, padding: "10px 14px", borderRadius: 6,
+              fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}>
+            {copiado ? "✓ Copiado" : "📋 Copiar link"}
+          </button>
+          <a href={`https://wa.me/?text=${msgWhatsapp}`} target="_blank" rel="noopener noreferrer"
+            style={{
+              flex: 1, background: "#25d366", color: "white",
+              border: 0, padding: "10px 14px", borderRadius: 6,
+              fontSize: 13, fontWeight: 700, cursor: "pointer",
+              textAlign: "center", textDecoration: "none",
+            }}>
+            💬 Mandar por WhatsApp
+          </a>
+        </div>
+
+        <div style={{
+          background: "#eff6ff", border: "1px solid #93c5fd",
+          padding: 10, borderRadius: 6, fontSize: 12, color: "#1e40af",
+        }}>
+          <strong>Flujo del cliente:</strong>
+          <ol style={{ margin: "6px 0 0 18px", padding: 0 }}>
+            <li>Abre el link en su celular</li>
+            <li>Sube su Constancia (PDF o foto)</li>
+            <li>Claude Vision lee RFC, razón social, régimen, CP</li>
+            <li>Queda registrado — en su próxima compra ya lo encuentras por RFC</li>
+          </ol>
+        </div>
+
+        <button onClick={onClose}
+          style={{
+            marginTop: 14, width: "100%", background: "#e2e8f0",
+            border: 0, padding: 10, borderRadius: 6, cursor: "pointer",
+          }}>Cerrar</button>
+      </div>
+    </div>
   );
 }

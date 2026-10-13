@@ -84,6 +84,8 @@ app.include_router(cfdi.router, prefix="/api/cfdi", tags=["cfdi"])
 app.include_router(reportes.router, prefix="/api/reportes", tags=["reportes"])
 app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["whatsapp"])
 app.include_router(autofactura.router, prefix="/api/public/facturar", tags=["autofactura"])
+from app.routers import registro_publico
+app.include_router(registro_publico.router, prefix="/api")
 app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["cotizaciones"])
 app.include_router(activos.router, prefix="/api/activos", tags=["activos"])
 app.include_router(tarjetas.router, prefix="/api/tarjetas", tags=["tarjetas"])
