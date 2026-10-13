@@ -22,8 +22,8 @@ const Icon = {
 // super_admin tambien los ve todos. Siguen el orden en que aparecen aqui.
 const items = [
   { to: "/", label: "Dashboard", icon: Icon.dashboard, roles: ["admin", "cajero"] },
-  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["admin", "cajero"] },
-  { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["admin", "cajero"] },
+  { to: "/mostrador", label: "Mostrador (tablet)", icon: Icon.cart, roles: ["admin", "cajero"], simple: true },
+  { to: "/caja", label: "Caja rapida", icon: Icon.cart, roles: ["admin", "cajero"], simple: true },
   { to: "/corte", label: "Corte de caja", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/factura-global", label: "Factura global", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/cotizaciones", label: "Cotizaciones", icon: Icon.list, roles: ["admin", "cajero"] },
@@ -32,8 +32,8 @@ const items = [
 
   // Seccion INVENTARIO
   { section: "📦 INVENTARIO" },
-  { to: "/productos", label: "Catálogo productos", icon: Icon.package, roles: ["admin", "cajero"] },
-  { to: "/conteo-inventario", label: "Conteo físico", icon: Icon.list, roles: ["admin", "cajero"] },
+  { to: "/productos", label: "Catálogo productos", icon: Icon.package, roles: ["admin", "cajero"], simple: true },
+  { to: "/conteo-inventario", label: "Conteo físico", icon: Icon.list, roles: ["admin", "cajero"], simple: true },
   { to: "/entregas-pendientes", label: "Entregas pendientes", icon: Icon.package, roles: ["admin", "cajero"] },
 
   // Seccion CONTACTOS
@@ -48,13 +48,27 @@ const items = [
   { to: "/monedero", label: "Monedero", icon: Icon.dollar, roles: ["admin", "cajero"] },
   { to: "/reportes", label: "Reportes", icon: Icon.list, roles: ["admin", "cajero"] },
 
+  // Academia: visible SIEMPRE para empresa Padel (y super_admin donde quiera)
+  { to: "/academia", label: "🎾 Academia", icon: Icon.users, roles: ["admin", "cajero"], simple: true, padelOnly: true },
+
   // Secciones SOLO super_admin — van al final para separacion visual
   { to: "/importaciones", label: "Importaciones", icon: Icon.package, superAdminOnly: true },
-  { to: "/academia", label: "Academia", icon: Icon.users, superAdminOnly: true },
   { to: "/gmail-sync", label: "Gmail Sync CxP", icon: Icon.chat, superAdminOnly: true },
   { to: "/activos", label: "Activos", icon: Icon.package, superAdminOnly: true },
   { to: "/tarjetas", label: "Tarjetas crédito", icon: Icon.dollar, superAdminOnly: true },
 ];
+
+// Detecta si la empresa activa debe ver el sidebar en modo SIMPLE
+// (Padel y Cafe: solo lo esencial para operar la caja + inventario)
+function esEmpresaSimple(nombre: string | undefined): boolean {
+  if (!nombre) return false;
+  const n = nombre.toLowerCase();
+  return n.includes("padel") || n.includes("cafe") || n.includes("café");
+}
+function esEmpresaPadel(nombre: string | undefined): boolean {
+  if (!nombre) return false;
+  return nombre.toLowerCase().includes("padel");
+}
 
 interface Empresa { id: number; nombre: string; rfc: string; }
 
@@ -169,7 +183,23 @@ export default function Sidebar() {
       <nav className="sidebar-nav">
         {items.filter((it) => {
           const i = it as any;
-          if (i.section) return true;  // headers de seccion siempre
+          const simpleMode = esEmpresaSimple(empresaActiva?.nombre);
+          const esPadel = esEmpresaPadel(empresaActiva?.nombre);
+
+          // Modo simple: Padel y Cafe solo ven items marcados simple:true
+          // (super_admin ignora el modo simple y ve todo)
+          if (simpleMode && !superAdmin) {
+            if (i.section) return false;  // sin secciones en modo simple
+            if (i.superAdminOnly) return false;
+            if (i.padelOnly && !esPadel) return false;
+            if (!i.simple) return false;
+            if (!i.roles) return false;
+            return i.roles.includes(rol);
+          }
+
+          // Modo normal (Aceromax u otros)
+          if (i.padelOnly) return esPadel;  // Academia solo si es Padel
+          if (i.section) return true;
           if (i.superAdminOnly) return superAdmin;
           if (superAdmin) return true;
           if (!i.roles) return true;
