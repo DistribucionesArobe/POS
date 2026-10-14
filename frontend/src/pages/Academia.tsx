@@ -95,6 +95,35 @@ export default function Academia() {
     }
   }
 
+  // Pago rapido: usa datos del alumno existente, pone fecha=hoy, prox=hoy+30 dias
+  // y guarda en 1 click (sin modal). Para el flujo tipico del cajero.
+  async function pagarHoy(p: Pago) {
+    const hoy = new Date();
+    const fechaHoy = hoy.toISOString().slice(0, 10);
+    const prox = new Date(hoy.getTime() + 30 * 86400_000);
+    const proxIso = prox.toISOString().slice(0, 10);
+    if (!confirm(
+      `Registrar pago de ${p.alumno_nombre} HOY por ${fmtMoney(p.monto_pagado || 0)}?\n\n` +
+      `Fecha pago: ${fechaHoy}\n` +
+      `Próximo pago: ${proxIso} (+30 días)`
+    )) return;
+    try {
+      await api.post("/api/academia", {
+        fecha_pago: fechaHoy,
+        alumno_nombre: p.alumno_nombre,
+        padres_nombre: p.padres_nombre,
+        telefono: p.telefono,
+        monto_pagado: p.monto_pagado || 0,
+        fecha_proximo_pago: proxIso,
+        deporte: p.deporte,
+        notas: null,
+      });
+      cargar();
+    } catch (e: any) {
+      alert("Error: " + (e.response?.data?.detail || e.message));
+    }
+  }
+
   const totalCobrado = filtrados.reduce((s, p) => s + (p.monto_pagado || 0), 0);
   const sinPago = filtrados.filter(p => (p.monto_pagado || 0) === 0).length;
 
@@ -205,7 +234,7 @@ export default function Academia() {
                 <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleOrden("deporte")}>
                   Deporte{flecha("deporte")}
                 </th>
-                <th style={{ ...th, width: 60 }}></th>
+                <th style={{ ...th, width: 160 }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -242,8 +271,18 @@ export default function Academia() {
                         color: p.deporte === "padel" ? "#1e40af" : "#065f46",
                       }}>{p.deporte.toUpperCase()}</span>
                     </td>
-                    <td style={td}>
-                      <button onClick={(e) => { e.stopPropagation(); borrar(p.id, p.alumno_nombre); }}
+                    <td style={{ ...td, display: "flex", gap: 4, alignItems: "center" }}
+                      onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => pagarHoy(p)}
+                        style={{
+                          background: "#059669", color: "white", border: 0,
+                          padding: "6px 12px", borderRadius: 6, cursor: "pointer",
+                          fontSize: 12, fontWeight: 700,
+                        }}
+                        title="Registrar pago de HOY (+30 días de vigencia)">
+                        💵 Pagar hoy
+                      </button>
+                      <button onClick={() => borrar(p.id, p.alumno_nombre)}
                         style={{ background: "transparent", border: 0, color: "#dc2626",
                           cursor: "pointer", fontSize: 18 }}>×</button>
                     </td>
