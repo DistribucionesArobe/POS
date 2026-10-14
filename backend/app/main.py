@@ -93,6 +93,8 @@ app.include_router(monedero.router, prefix="/api/monedero", tags=["monedero"])
 app.include_router(inbox.router, prefix="/api/inbox", tags=["inbox"])
 app.include_router(importaciones.router, prefix="/api")
 app.include_router(academia.router, prefix="/api")
+from app.routers import fiestas
+app.include_router(fiestas.router, prefix="/api")
 app.include_router(gmail_sync.router, prefix="/api")
 app.include_router(salidas_mercancia.router, prefix="/api")
 app.include_router(conteo_inventario.router, prefix="/api")
