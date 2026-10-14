@@ -20,6 +20,8 @@ class FiestaIn(BaseModel):
     incluye_padel: bool = False
     incluye_futbol: bool = False
     incluye_comida: bool = False
+    n_platillos: int = 0
+    costo_platillo: float = 80
     monto: float = 0
     anticipo: float = 0
     estatus: str = "PENDIENTE"
@@ -28,6 +30,8 @@ class FiestaIn(BaseModel):
 
 def _serialize(f: Fiesta) -> dict:
     dias_sem = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
+    n_pl = int(getattr(f, "n_platillos", 0) or 0)
+    costo_pl = float(getattr(f, "costo_platillo", 80) or 80)
     return {
         "id": f.id,
         "fecha": f.fecha.isoformat() if f.fecha else None,
@@ -37,6 +41,9 @@ def _serialize(f: Fiesta) -> dict:
         "incluye_padel": bool(f.incluye_padel),
         "incluye_futbol": bool(f.incluye_futbol),
         "incluye_comida": bool(f.incluye_comida),
+        "n_platillos": n_pl,
+        "costo_platillo": costo_pl,
+        "costo_comida_total": round(n_pl * costo_pl, 2) if f.incluye_comida else 0,
         "monto": float(f.monto or 0),
         "anticipo": float(f.anticipo or 0),
         "saldo": float(f.monto or 0) - float(f.anticipo or 0),
@@ -89,6 +96,8 @@ def crear(
         incluye_padel=payload.incluye_padel,
         incluye_futbol=payload.incluye_futbol,
         incluye_comida=payload.incluye_comida,
+        n_platillos=max(0, int(payload.n_platillos or 0)),
+        costo_platillo=float(payload.costo_platillo or 80),
         monto=payload.monto or 0,
         anticipo=payload.anticipo or 0,
         estatus=payload.estatus.upper(),
@@ -119,6 +128,8 @@ def actualizar(
     f.incluye_padel = payload.incluye_padel
     f.incluye_futbol = payload.incluye_futbol
     f.incluye_comida = payload.incluye_comida
+    f.n_platillos = max(0, int(payload.n_platillos or 0))
+    f.costo_platillo = float(payload.costo_platillo or 80)
     f.monto = payload.monto or 0
     f.anticipo = payload.anticipo or 0
     f.estatus = payload.estatus.upper()

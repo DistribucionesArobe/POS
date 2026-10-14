@@ -11,6 +11,9 @@ type Fiesta = {
   incluye_padel: boolean;
   incluye_futbol: boolean;
   incluye_comida: boolean;
+  n_platillos: number;
+  costo_platillo: number;
+  costo_comida_total: number;
   monto: number;
   anticipo: number;
   saldo: number;
@@ -99,7 +102,11 @@ export default function Fiestas() {
     const total = filtradas.reduce((s, f) => s + f.monto, 0);
     const anticipos = filtradas.reduce((s, f) => s + f.anticipo, 0);
     const saldos = filtradas.reduce((s, f) => s + f.saldo, 0);
-    return { total, anticipos, saldos };
+    const platillos = filtradas.reduce((s, f) =>
+      s + (f.incluye_comida ? (f.n_platillos || 0) : 0), 0);
+    const cafeteria = filtradas.reduce((s, f) =>
+      s + (f.incluye_comida ? (f.costo_comida_total || 0) : 0), 0);
+    return { total, anticipos, saldos, platillos, cafeteria };
   }, [filtradas]);
 
   return (
@@ -150,11 +157,16 @@ export default function Fiestas() {
       </div>
 
       {/* Resumen */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
-        <MiniCard label="Fiestas en lista" valor={filtradas.length.toString()} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
+        <MiniCard label="Fiestas" valor={filtradas.length.toString()} />
         <MiniCard label="Monto total" valor={fmtMoney(totales.total)} color="#0f172a" />
-        <MiniCard label="Anticipos cobrados" valor={fmtMoney(totales.anticipos)} color="#059669" />
-        <MiniCard label="Saldo por cobrar" valor={fmtMoney(totales.saldos)} color={totales.saldos > 0 ? "#dc2626" : "#059669"} />
+        <MiniCard label="Anticipos" valor={fmtMoney(totales.anticipos)} color="#059669" />
+        <MiniCard label="Saldo x cobrar" valor={fmtMoney(totales.saldos)} color={totales.saldos > 0 ? "#dc2626" : "#059669"} />
+        <MiniCard
+          label={`🍔 Debes cafetería (${totales.platillos})`}
+          valor={fmtMoney(totales.cafeteria)}
+          color={totales.cafeteria > 0 ? "#b45309" : "#64748b"}
+        />
       </div>
 
       {loading ? (
@@ -204,7 +216,16 @@ export default function Fiestas() {
                         </span>
                       )}
                     </td>
-                    <td style={td}>{f.incluye_comida ? "🍔 Sí" : "—"}</td>
+                    <td style={td}>
+                      {f.incluye_comida ? (
+                        <span title={`${f.n_platillos} platillos × ${fmtMoney(f.costo_platillo)}`}>
+                          🍔 {f.n_platillos || 0}
+                          <div style={{ fontSize: 10, color: "#b45309" }}>
+                            {fmtMoney(f.costo_comida_total)}
+                          </div>
+                        </span>
+                      ) : "—"}
+                    </td>
                     <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{fmtMoney(f.monto)}</td>
                     <td style={{ ...td, textAlign: "right", color: "#059669" }}>{f.anticipo > 0 ? fmtMoney(f.anticipo) : "—"}</td>
                     <td style={{ ...td, textAlign: "right", fontWeight: 700,
@@ -263,6 +284,8 @@ function FiestaModal({ fiesta, onClose, onSaved }: {
   const [incluyePadel, setIncluyePadel] = useState(fiesta?.incluye_padel ?? true);
   const [incluyeFutbol, setIncluyeFutbol] = useState(fiesta?.incluye_futbol ?? true);
   const [incluyeComida, setIncluyeComida] = useState(fiesta?.incluye_comida ?? false);
+  const [nPlatillos, setNPlatillos] = useState<number>(fiesta?.n_platillos || 0);
+  const [costoPlatillo, setCostoPlatillo] = useState<number>(fiesta?.costo_platillo || 80);
   const [monto, setMonto] = useState<number>(fiesta?.monto || 0);
   const [anticipo, setAnticipo] = useState<number>(fiesta?.anticipo || 0);
   const [estatus, setEstatus] = useState(fiesta?.estatus || "PENDIENTE");
@@ -281,6 +304,8 @@ function FiestaModal({ fiesta, onClose, onSaved }: {
         incluye_padel: incluyePadel,
         incluye_futbol: incluyeFutbol,
         incluye_comida: incluyeComida,
+        n_platillos: incluyeComida ? Math.max(0, +nPlatillos || 0) : 0,
+        costo_platillo: +costoPlatillo || 80,
         monto: +monto || 0,
         anticipo: +anticipo || 0,
         estatus,
@@ -356,6 +381,28 @@ function FiestaModal({ fiesta, onClose, onSaved }: {
               🍔 Incluye comida
             </label>
           </div>
+          {incluyeComida && (
+            <>
+              <div>
+                <label style={lbl}># platillos</label>
+                <input type="number" min="0" value={nPlatillos}
+                  onChange={(e) => setNPlatillos(+e.target.value)}
+                  style={inp} />
+              </div>
+              <div>
+                <label style={lbl}>Costo por platillo</label>
+                <input type="number" step="0.01" min="0" value={costoPlatillo}
+                  onChange={(e) => setCostoPlatillo(+e.target.value)}
+                  style={inp} />
+              </div>
+              <div style={{ gridColumn: "span 2", background: "#fff7ed", padding: 10, borderRadius: 6,
+                border: "1px solid #fdba74", display: "flex", justifyContent: "space-between",
+                fontSize: 13, color: "#9a3412" }}>
+                <strong>🍔 Debe a cafetería:</strong>
+                <strong>{fmtMoney(nPlatillos * costoPlatillo)}</strong>
+              </div>
+            </>
+          )}
           <div>
             <label style={lbl}>Monto total</label>
             <input type="number" step="0.01" value={monto}

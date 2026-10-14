@@ -18,6 +18,9 @@ class Fiesta(Base):
     incluye_padel = Column(Boolean, nullable=False, default=False)
     incluye_futbol = Column(Boolean, nullable=False, default=False)
     incluye_comida = Column(Boolean, nullable=False, default=False)
+    # Si incluye_comida: cuantos platillos y cuanto cuesta cada uno (para pagar a cafeteria)
+    n_platillos = Column(Integer, nullable=False, default=0)
+    costo_platillo = Column(Numeric(10, 2), nullable=False, default=80)
     monto = Column(Numeric(10, 2), nullable=False, default=0)
     anticipo = Column(Numeric(10, 2), nullable=False, default=0)
     # Estados: PENDIENTE | CONFIRMADA | REALIZADA | CANCELADA
