@@ -292,22 +292,14 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
   // existente y cambiar la fecha, el proximo se quedaba con el valor viejo.
   const [proxManual, setProxManual] = useState(false);
 
-  // Auto: calcula proximo pago segun regla del deporte
-  // - futbol: SIEMPRE dia 15 del MES SIGUIENTE a la fecha de pago
-  //   (una mensualidad por mes, todos vencen el 15)
-  // - otros: +1 mes manteniendo el dia
+  // Auto: proximo pago = fecha_pago + 30 dias (todos los deportes).
+  // Simple y previsible. Cada alumno conserva su ciclo propio.
+  // Si tocas manual el input, no sobrescribe.
   useEffect(() => {
     if (!fechaPago) return;
-    if (proxManual) return;  // user ya lo edito a mano, no tocar
+    if (proxManual) return;
     const d = new Date(fechaPago + "T00:00:00");
-    let prox: Date;
-    if (deporte === "futbol") {
-      // 15 del mes SIGUIENTE a fecha de pago (una mensualidad por mes)
-      prox = new Date(d.getFullYear(), d.getMonth() + 1, 15);
-    } else {
-      prox = new Date(d);
-      prox.setMonth(prox.getMonth() + 1);
-    }
+    const prox = new Date(d.getTime() + 30 * 86400_000);
     const iso = prox.toISOString().slice(0, 10);
     setProxPago(iso);
   }, [fechaPago, deporte, proxManual]);
@@ -347,11 +339,9 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
           <div>
             <label style={lbl}>
               Próximo pago (auto)
-              {deporte === "futbol" && (
-                <span style={{ marginLeft: 6, fontSize: 10, color: "#059669", fontWeight: 700 }}>
-                  ⚽ Futbol: siempre dia 15
-                </span>
-              )}
+              <span style={{ marginLeft: 6, fontSize: 10, color: "#64748b", fontWeight: 500 }}>
+                (+30 días)
+              </span>
             </label>
             <input type="date" value={proxPago}
               onChange={(e) => { setProxPago(e.target.value); setProxManual(true); }}

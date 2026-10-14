@@ -14,12 +14,19 @@ router = APIRouter(prefix="/academia", tags=["academia"])
 
 
 def _sumar_mes(d: date) -> date:
+    """DEPRECATED: deja +1 mes como helper legacy, pero por default usamos +30 dias."""
     m = d.month + 1
     y = d.year
     if m > 12:
         m = 1; y += 1
     ultimo = monthrange(y, m)[1]
     return date(y, m, min(d.day, ultimo))
+
+
+def _sumar_30_dias(d: date) -> date:
+    """Regla simple y uniforme: proximo pago = fecha_pago + 30 dias."""
+    from datetime import timedelta
+    return d + timedelta(days=30)
 
 
 def _siguiente_dia_15(d: date) -> date:
@@ -38,10 +45,12 @@ def _siguiente_dia_15(d: date) -> date:
 
 
 def _calcular_proximo_pago(fecha_pago: date, deporte: str) -> date:
-    """Para futbol formalizado, snap a dia 15. Para los demas, +1 mes."""
-    if (deporte or "").strip().lower() == "futbol":
-        return _siguiente_dia_15(fecha_pago)
-    return _sumar_mes(fecha_pago)
+    """Regla por default (todos los deportes): fecha_pago + 30 dias.
+    Simple y previsible. Si entra un alumno el dia 10, su proximo pago sale 9 nov.
+    Si entra el 15, sale 14 nov. Cada alumno conserva su ciclo propio.
+    El super_admin puede estandarizar al dia 15 con el boton Snap al 15 si lo necesita.
+    """
+    return _sumar_30_dias(fecha_pago)
 
 
 class PagoIn(BaseModel):
