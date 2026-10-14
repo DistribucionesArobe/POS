@@ -23,12 +23,13 @@ def _sumar_mes(d: date) -> date:
 
 
 def _siguiente_dia_15(d: date) -> date:
-    """Regla Futbol: todos los alumnos formalizados vencen el DIA 15.
-    - Si pagas antes o en el dia 15 -> vence el 15 del MISMO mes
-    - Si pagas despues del 15 -> vence el 15 del SIGUIENTE mes
-    Garantiza que todos los vencimientos de la academia caen en la misma fecha."""
-    if d.day <= 15:
-        return date(d.year, d.month, 15)
+    """Regla Futbol: todos los alumnos formalizados vencen el DIA 15 de cada mes.
+    Al registrar un pago, el PROXIMO pago es el dia 15 del MES SIGUIENTE
+    (una mensualidad por mes).
+      - Pago 15 oct -> proximo 15 nov
+      - Pago 1 oct  -> proximo 15 nov
+      - Pago 20 oct -> proximo 15 nov
+    """
     m = d.month + 1
     y = d.year
     if m > 12:

@@ -293,7 +293,8 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
   const [proxManual, setProxManual] = useState(false);
 
   // Auto: calcula proximo pago segun regla del deporte
-  // - futbol: SNAP a dia 15 (todos los formalizados vencen el 15)
+  // - futbol: SIEMPRE dia 15 del MES SIGUIENTE a la fecha de pago
+  //   (una mensualidad por mes, todos vencen el 15)
   // - otros: +1 mes manteniendo el dia
   useEffect(() => {
     if (!fechaPago) return;
@@ -301,11 +302,8 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
     const d = new Date(fechaPago + "T00:00:00");
     let prox: Date;
     if (deporte === "futbol") {
-      if (d.getDate() <= 15) {
-        prox = new Date(d.getFullYear(), d.getMonth(), 15);
-      } else {
-        prox = new Date(d.getFullYear(), d.getMonth() + 1, 15);
-      }
+      // 15 del mes SIGUIENTE a fecha de pago (una mensualidad por mes)
+      prox = new Date(d.getFullYear(), d.getMonth() + 1, 15);
     } else {
       prox = new Date(d);
       prox.setMonth(prox.getMonth() + 1);
