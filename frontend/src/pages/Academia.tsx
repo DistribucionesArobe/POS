@@ -24,6 +24,8 @@ function diasHasta(fecha: string | null): number | null {
   return Math.floor((f.getTime() - hoy.getTime()) / (86400_000));
 }
 
+type OrdenCol = "fecha_pago" | "alumno" | "monto" | "prox_pago" | "deporte";
+
 export default function Academia() {
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,9 @@ export default function Academia() {
   const [busqueda, setBusqueda] = useState("");
   const [editando, setEditando] = useState<Pago | null>(null);
   const [mostrarNuevo, setMostrarNuevo] = useState(false);
+  const [ordenCol, setOrdenCol] = useState<OrdenCol>("prox_pago");
+  const [ordenDir, setOrdenDir] = useState<"asc" | "desc">("asc");
+  const esSuperAdmin = localStorage.getItem("super_admin") === "true";
 
   async function cargar() {
     setLoading(true); setError(null);
@@ -46,14 +51,39 @@ export default function Academia() {
   useEffect(() => { cargar(); }, [filtroDeporte]);
 
   const filtrados = useMemo(() => {
-    if (!busqueda.trim()) return pagos;
-    const q = busqueda.toLowerCase();
-    return pagos.filter(p =>
-      p.alumno_nombre.toLowerCase().includes(q) ||
-      (p.padres_nombre || "").toLowerCase().includes(q) ||
-      (p.telefono || "").includes(q)
-    );
-  }, [pagos, busqueda]);
+    let lista = pagos;
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      lista = lista.filter(p =>
+        p.alumno_nombre.toLowerCase().includes(q) ||
+        (p.padres_nombre || "").toLowerCase().includes(q) ||
+        (p.telefono || "").includes(q)
+      );
+    }
+    const dir = ordenDir === "asc" ? 1 : -1;
+    lista = [...lista].sort((a, b) => {
+      switch (ordenCol) {
+        case "alumno":  return dir * a.alumno_nombre.localeCompare(b.alumno_nombre);
+        case "monto":   return dir * ((a.monto_pagado || 0) - (b.monto_pagado || 0));
+        case "deporte": return dir * (a.deporte || "").localeCompare(b.deporte || "");
+        case "fecha_pago": return dir * (new Date(a.fecha_pago).getTime() - new Date(b.fecha_pago).getTime());
+        case "prox_pago":
+        default: {
+          const ta = a.fecha_proximo_pago ? new Date(a.fecha_proximo_pago).getTime() : Infinity;
+          const tb = b.fecha_proximo_pago ? new Date(b.fecha_proximo_pago).getTime() : Infinity;
+          return dir * (ta - tb);
+        }
+      }
+    });
+    return lista;
+  }, [pagos, busqueda, ordenCol, ordenDir]);
+
+  function toggleOrden(col: OrdenCol) {
+    if (ordenCol === col) setOrdenDir(d => d === "asc" ? "desc" : "asc");
+    else { setOrdenCol(col); setOrdenDir("asc"); }
+  }
+  const flecha = (col: OrdenCol) =>
+    ordenCol === col ? (ordenDir === "asc" ? " ↑" : " ↓") : "";
 
   async function borrar(id: number, alumno: string) {
     if (!confirm(`Eliminar el pago de "${alumno}"?`)) return;
@@ -72,6 +102,7 @@ export default function Academia() {
     <Layout title="Academia" subtitle="Registro de pagos de alumnos"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          {esSuperAdmin && (<>
           <button onClick={async () => {
             const fecha = prompt(
               "Fecha en que TODOS los alumnos de FUTBOL pagaron (YYYY-MM-DD):\n\n" +
@@ -108,6 +139,7 @@ export default function Academia() {
               padding: "10px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
             🔄 Snap al 15
           </button>
+          </>)}
           <button onClick={() => setMostrarNuevo(true)}
             style={{ background: "#059669", color: "white", border: 0,
               padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
@@ -156,13 +188,23 @@ export default function Academia() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", textAlign: "left" }}>
-                <th style={th}>Fecha pago</th>
-                <th style={th}>Alumno</th>
+                <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleOrden("fecha_pago")}>
+                  Fecha pago{flecha("fecha_pago")}
+                </th>
+                <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleOrden("alumno")}>
+                  Alumno{flecha("alumno")}
+                </th>
                 <th style={th}>Padre / Madre</th>
                 <th style={th}>Teléfono</th>
-                <th style={{ ...th, textAlign: "right" }}>Monto</th>
-                <th style={th}>Próximo pago</th>
-                <th style={th}>Deporte</th>
+                <th style={{ ...th, textAlign: "right", cursor: "pointer" }} onClick={() => toggleOrden("monto")}>
+                  Monto{flecha("monto")}
+                </th>
+                <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleOrden("prox_pago")}>
+                  Próximo pago{flecha("prox_pago")}
+                </th>
+                <th style={{ ...th, cursor: "pointer" }} onClick={() => toggleOrden("deporte")}>
+                  Deporte{flecha("deporte")}
+                </th>
                 <th style={{ ...th, width: 60 }}></th>
               </tr>
             </thead>
@@ -245,16 +287,20 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
   const [notas, setNotas] = useState(pago?.notas || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Si el usuario cambia manualmente el input "proximo pago" lo marcamos tocado
+  // para no sobre-escribirlo. Sin esta bandera, el bug era que al editar un pago
+  // existente y cambiar la fecha, el proximo se quedaba con el valor viejo.
+  const [proxManual, setProxManual] = useState(false);
 
   // Auto: calcula proximo pago segun regla del deporte
   // - futbol: SNAP a dia 15 (todos los formalizados vencen el 15)
   // - otros: +1 mes manteniendo el dia
   useEffect(() => {
     if (!fechaPago) return;
+    if (proxManual) return;  // user ya lo edito a mano, no tocar
     const d = new Date(fechaPago + "T00:00:00");
     let prox: Date;
     if (deporte === "futbol") {
-      // Si pagas <= dia 15, vence 15 del mismo mes; si >15, vence 15 del siguiente
       if (d.getDate() <= 15) {
         prox = new Date(d.getFullYear(), d.getMonth(), 15);
       } else {
@@ -265,9 +311,8 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
       prox.setMonth(prox.getMonth() + 1);
     }
     const iso = prox.toISOString().slice(0, 10);
-    // Solo autofill si el user no lo cambio explicito
-    if (!pago || proxPago === "") setProxPago(iso);
-  }, [fechaPago, deporte]);
+    setProxPago(iso);
+  }, [fechaPago, deporte, proxManual]);
 
   async function guardar() {
     if (!alumno.trim()) { setError("Nombre del alumno es obligatorio"); return; }
@@ -310,7 +355,16 @@ function PagoModal({ pago, onClose, onSaved }: { pago?: Pago; onClose: () => voi
                 </span>
               )}
             </label>
-            <input type="date" value={proxPago} onChange={(e) => setProxPago(e.target.value)} style={inp} />
+            <input type="date" value={proxPago}
+              onChange={(e) => { setProxPago(e.target.value); setProxManual(true); }}
+              style={inp} />
+            {proxManual && (
+              <button type="button" onClick={() => setProxManual(false)}
+                style={{ background: "transparent", border: 0, color: "#1e40af",
+                  fontSize: 10, cursor: "pointer", padding: 2, marginTop: 2 }}>
+                ↺ Volver al cálculo automático
+              </button>
+            )}
           </div>
           <div style={{ gridColumn: "span 2" }}>
             <label style={lbl}>Alumno *</label>
