@@ -29,6 +29,7 @@ export default function Cartera() {
     return params.get("folio") || "";
   });
   const [vista, setVista] = useState<Vista>("TODAS");
+  const [mostrarMultiComp, setMostrarMultiComp] = useState(false);
 
   function cargar() {
     api.get("/api/cxc/cartera").then((r) => setRows(r.data)).catch(() => {});
@@ -71,7 +72,18 @@ export default function Cartera() {
 
   return (
     <Layout title="Cartera por cobrar" subtitle={`${filtradas.length} de ${rows.length} documentos — Saldo mostrado ${fmt(total)}`}
-      actions={<button className="btn-icon" onClick={exportar}>Exportar XLSX</button>}>
+      actions={
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setMostrarMultiComp(true)}
+            style={{
+              background: "#7c3aed", color: "white", border: 0,
+              padding: "8px 14px", borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}>
+            💳 Complemento múltiple
+          </button>
+          <button className="btn-icon" onClick={exportar}>Exportar XLSX</button>
+        </div>
+      }>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input className="input"
@@ -179,6 +191,14 @@ export default function Cartera() {
       )}
       {verAbonos && (
         <HistorialModal row={verAbonos} onClose={() => setVerAbonos(null)} />
+      )}
+
+      {mostrarMultiComp && (
+        <ComplementoMultipleModal
+          rowsCartera={rows}
+          onClose={() => setMostrarMultiComp(false)}
+          onSaved={() => { setMostrarMultiComp(false); cargar(); }}
+        />
       )}
     </Layout>
   );
@@ -374,6 +394,199 @@ function HistorialModal({ row, onClose }: { row: CxCRow; onClose: () => void }) 
     </div>
   );
 }
+
+function ComplementoMultipleModal({ rowsCartera, onClose, onSaved }: {
+  rowsCartera: CxCRow[]; onClose: () => void; onSaved: () => void;
+}) {
+  // Solo facturas PPD con saldo > 0 son candidatas (el backend valida de nuevo)
+  const candidatas = useMemo(() =>
+    rowsCartera.filter(r => r.es_ppd && r.saldo > 0),
+    [rowsCartera]);
+
+  const clientesUnicos = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of candidatas) m.set(r.cliente_id, r.cliente);
+    return Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [candidatas]);
+
+  const [clienteId, setClienteId] = useState<number | null>(null);
+  const [seleccion, setSeleccion] = useState<Record<number, number>>({});  // cxc_id -> monto
+  const [formaPago, setFormaPago] = useState("TRANSFERENCIA");
+  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [referencia, setReferencia] = useState("");
+  const [notas, setNotas] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const facturasCliente = useMemo(() =>
+    clienteId ? candidatas.filter(r => r.cliente_id === clienteId) : [],
+    [clienteId, candidatas]);
+
+  const totalPago = Object.values(seleccion).reduce((a, m) => a + (+m || 0), 0);
+  const nSeleccionadas = Object.values(seleccion).filter(m => +m > 0).length;
+
+  function toggle(r: CxCRow) {
+    const s = { ...seleccion };
+    if (s[r.cxc_id] !== undefined) {
+      delete s[r.cxc_id];
+    } else {
+      s[r.cxc_id] = r.saldo;  // sugiere pagar completo
+    }
+    setSeleccion(s);
+  }
+
+  function setMonto(cxc_id: number, val: number) {
+    const s = { ...seleccion };
+    s[cxc_id] = Math.max(0, val);
+    setSeleccion(s);
+  }
+
+  async function emitir() {
+    const items = Object.entries(seleccion)
+      .filter(([, m]) => +m > 0)
+      .map(([id, m]) => ({ cxc_id: +id, monto: +m }));
+    if (items.length === 0) return alert("Marca al menos una factura");
+    if (!confirm(
+      `Timbrar UN complemento de pago por ${items.length} factura(s)?\n\n` +
+      `Total: $${totalPago.toLocaleString("es-MX", { minimumFractionDigits: 2 })}\n` +
+      `Forma: ${formaPago}\nFecha: ${fecha}`
+    )) return;
+    setBusy(true);
+    try {
+      const fechaIso = new Date(fecha + "T12:00:00").toISOString();
+      const r = await api.post("/api/cxc/complemento-multiple", {
+        facturas: items,
+        forma_pago: formaPago,
+        fecha: fechaIso,
+        referencia: referencia || null,
+        notas: notas || null,
+      });
+      alert(
+        `✓ Complemento timbrado\nUUID: ${r.data.uuid}\n\n` +
+        r.data.facturas.map((f: any) =>
+          `${f.folio}: aplicado $${f.monto_aplicado.toFixed(2)}, saldo ${f.saldo_restante.toFixed(2)}${f.pagada ? " ✓ LIQUIDADA" : ""}`
+        ).join("\n")
+      );
+      onSaved();
+    } catch (err: any) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={modalBg} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ ...modalCard, maxWidth: 760 }}>
+        <h3 style={{ margin: "0 0 4px" }}>💳 Complemento de pago múltiple</h3>
+        <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--color-text-secondary)" }}>
+          Un solo CFDI tipo P que ampara pagos a varias facturas PPD del MISMO cliente.
+        </p>
+
+        <label>Cliente</label>
+        <select className="input" value={clienteId || ""}
+          onChange={(e) => { setClienteId(+e.target.value || null); setSeleccion({}); }}
+          style={{ marginBottom: 10 }}>
+          <option value="">— Elige cliente —</option>
+          {clientesUnicos.map(([id, n]) => {
+            const nFact = candidatas.filter(r => r.cliente_id === id).length;
+            return <option key={id} value={id}>{n} ({nFact} fact.)</option>;
+          })}
+        </select>
+
+        {clienteId && (
+          <>
+            <div style={{ marginBottom: 10, maxHeight: 240, overflowY: "auto",
+              border: "1px solid #cbd5e1", borderRadius: 6 }}>
+              <table style={{ fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f1f5f9" }}>
+                    <th>✓</th><th>Folio</th>
+                    <th style={{ textAlign: "right" }}>Saldo</th>
+                    <th style={{ textAlign: "right" }}>Pagar ahora</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {facturasCliente.map(r => {
+                    const marcada = seleccion[r.cxc_id] !== undefined;
+                    return (
+                      <tr key={r.cxc_id} style={marcada ? { background: "#eff6ff" } : undefined}>
+                        <td style={{ textAlign: "center" }}>
+                          <input type="checkbox" checked={marcada} onChange={() => toggle(r)} />
+                        </td>
+                        <td><code>{r.documento_folio}</code></td>
+                        <td style={{ textAlign: "right" }}>{fmt(r.saldo)}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <input type="number" step="0.01" disabled={!marcada}
+                            value={marcada ? seleccion[r.cxc_id] : ""}
+                            max={r.saldo}
+                            onChange={(e) => setMonto(r.cxc_id, +e.target.value)}
+                            style={{ width: 110, padding: 4, textAlign: "right",
+                              border: "1px solid #cbd5e1", borderRadius: 4 }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {nSeleccionadas > 0 && (
+              <div style={{ background: "#dcfce7", padding: 10, borderRadius: 6,
+                marginBottom: 10, display: "flex", justifyContent: "space-between" }}>
+                <strong>{nSeleccionadas} factura(s) seleccionada(s)</strong>
+                <strong>Total: {fmt(totalPago)}</strong>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div>
+            <label>Fecha pago *</label>
+            <input type="date" className="input" value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)} />
+          </div>
+          <div>
+            <label>Forma pago</label>
+            <select className="input" value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>
+              <option value="EFECTIVO">Efectivo (01)</option>
+              <option value="TRANSFERENCIA">Transferencia (03)</option>
+              <option value="TARJETA_CREDITO">Tarjeta crédito (04)</option>
+              <option value="TARJETA_DEBITO">Tarjeta débito (28)</option>
+              <option value="CHEQUE">Cheque (02)</option>
+            </select>
+          </div>
+          <div>
+            <label>Referencia</label>
+            <input className="input" value={referencia} onChange={(e) => setReferencia(e.target.value)}
+              placeholder="Folio SPEI, cheque..." />
+          </div>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label>Notas</label>
+          <input className="input" value={notas} onChange={(e) => setNotas(e.target.value)} />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} disabled={busy}
+            style={{ padding: "10px 16px", background: "transparent",
+              border: "1px solid #cbd5e1", borderRadius: 6, cursor: "pointer" }}>
+            Cancelar
+          </button>
+          <button onClick={emitir} disabled={busy || nSeleccionadas === 0}
+            style={{
+              flex: 1, padding: "10px 16px",
+              background: busy || nSeleccionadas === 0 ? "#94a3b8" : "#7c3aed",
+              color: "white", border: 0, borderRadius: 6,
+              fontWeight: 700, cursor: busy || nSeleccionadas === 0 ? "not-allowed" : "pointer",
+            }}>
+            {busy ? "Timbrando..." : `✓ Timbrar complemento (${fmt(totalPago)})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 const modalBg: React.CSSProperties = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",

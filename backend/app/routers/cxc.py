@@ -1,6 +1,7 @@
 """Cuentas por Cobrar - filtrado por empresa."""
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -91,6 +92,36 @@ def emitir_complemento(
     Requiere que la factura sea PPD y este timbrada."""
     try:
         return cfdi_service.emitir_complemento_pago(db, abono_id, empresa_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class ComplementoMultipleIn(BaseModel):
+    facturas: list[dict]  # [{cxc_id: int, monto: float}]
+    forma_pago: str = "TRANSFERENCIA"
+    fecha: datetime | None = None
+    referencia: str | None = None
+    notas: str | None = None
+
+
+@router.post("/complemento-multiple")
+def emitir_complemento_multiple(
+    payload: ComplementoMultipleIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Un SOLO CFDI tipo P que ampara pagos a MULTIPLES facturas PPD del
+    mismo cliente. Crea un abono por factura y timbra un unico complemento."""
+    try:
+        return cfdi_service.emitir_complemento_pago_multiple(
+            db=db,
+            cxc_montos=payload.facturas,
+            forma_pago=payload.forma_pago,
+            fecha_pago=payload.fecha,
+            referencia=payload.referencia,
+            notas=payload.notas,
+            empresa_id=empresa_id,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
 
