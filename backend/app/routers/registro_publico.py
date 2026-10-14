@@ -46,6 +46,9 @@ async def subir_csf_publico(
     file: UploadFile = File(...),
     whatsapp: str | None = Form(None),
     correo: str | None = Form(None),
+    uso_cfdi: str | None = Form(None),       # G03, G01, etc.
+    metodo_pago: str | None = Form(None),    # PUE | PPD
+    forma_pago: str | None = Form(None),     # 01, 03, etc.
     db: Session = Depends(get_db),
 ):
     """Portal publico: cliente sube su CSF y el sistema crea su registro.
@@ -119,6 +122,13 @@ async def subir_csf_publico(
             else "Ya estabas registrado con nosotros.",
         }
 
+    # Validar y aplicar preferencias (o defaults)
+    uso_cfdi_final = (uso_cfdi or "G03").strip().upper()
+    metodo_pago_final = (metodo_pago or "PUE").strip().upper()
+    if metodo_pago_final not in ("PUE", "PPD"):
+        metodo_pago_final = "PUE"
+    forma_pago_final = (forma_pago or ("99" if metodo_pago_final == "PPD" else "03")).strip()
+
     # Crear nuevo cliente
     nuevo = Cliente(
         empresa_id=empresa_id,
@@ -127,9 +137,9 @@ async def subir_csf_publico(
         rfc=rfc,
         regimen_fiscal=regimen,
         codigo_postal=cp or None,
-        uso_cfdi_default="G03",
-        metodo_pago_default="PUE",
-        forma_pago_default="03",
+        uso_cfdi_default=uso_cfdi_final,
+        metodo_pago_default=metodo_pago_final,
+        forma_pago_default=forma_pago_final,
         whatsapp=whatsapp_limpio,
         correo=correo_limpio,
         activo=True,
@@ -150,5 +160,8 @@ async def subir_csf_publico(
         "cliente_id": nuevo.id,
         "rfc": rfc, "razon_social": razon_social,
         "regimen_fiscal": regimen, "codigo_postal": cp,
+        "uso_cfdi": uso_cfdi_final,
+        "metodo_pago": metodo_pago_final,
+        "forma_pago": forma_pago_final,
         "mensaje": "¡Listo! Ya estas registrado. En tu proxima compra solo di tu RFC y podemos facturarte.",
     }

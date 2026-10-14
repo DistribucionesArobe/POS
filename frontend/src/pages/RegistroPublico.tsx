@@ -14,10 +14,24 @@ export default function RegistroPublico() {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [whatsapp, setWhatsapp] = useState("");
   const [correo, setCorreo] = useState("");
+  const [usoCfdi, setUsoCfdi] = useState("G03");
+  const [metodoPago, setMetodoPago] = useState("PUE");
+  const [formaPago, setFormaPago] = useState("03");
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputFileRef = useRef<HTMLInputElement>(null);
+
+  function resetFormulario() {
+    setArchivo(null);
+    setWhatsapp("");
+    setCorreo("");
+    setUsoCfdi("G03");
+    setMetodoPago("PUE");
+    setFormaPago("03");
+    setResultado(null);
+    setError(null);
+  }
 
   useEffect(() => {
     if (!empresaId) return;
@@ -38,6 +52,10 @@ export default function RegistroPublico() {
       fd.append("file", archivo);
       if (whatsapp.trim()) fd.append("whatsapp", whatsapp.trim());
       if (correo.trim()) fd.append("correo", correo.trim());
+      fd.append("uso_cfdi", usoCfdi);
+      fd.append("metodo_pago", metodoPago);
+      // Si eligio PPD, la forma de pago fiscal es 99 "por definir"
+      fd.append("forma_pago", metodoPago === "PPD" ? "99" : formaPago);
       const r = await publicApi.post(
         `/api/public/registro-cliente/${empresaId}/subir-csf`,
         fd,
@@ -89,9 +107,29 @@ export default function RegistroPublico() {
                 <div><strong>CP:</strong> {resultado.codigo_postal}</div>
               )}
             </div>
+            {(resultado.uso_cfdi || resultado.metodo_pago) && (
+              <div style={{
+                background: "#eff6ff", padding: 10, borderRadius: 6,
+                marginTop: 10, fontSize: 12, color: "#1e40af", textAlign: "left",
+              }}>
+                <strong>Tus preferencias guardadas:</strong>
+                <div>Uso CFDI: <code>{resultado.uso_cfdi}</code></div>
+                <div>Método de pago: <code>{resultado.metodo_pago}</code></div>
+              </div>
+            )}
             <p style={{ color: "#64748b", fontSize: 12, marginTop: 20 }}>
               La próxima vez que compres, solo di tu RFC y podrán facturarte sin tener que llenar nada.
             </p>
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button onClick={resetFormulario}
+                style={{
+                  flex: 1, background: "#0f172a", color: "white",
+                  border: 0, padding: "12px 18px", borderRadius: 8,
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                }}>
+                ➕ Registrar otro cliente
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -172,6 +210,82 @@ export default function RegistroPublico() {
           placeholder="tucorreo@ejemplo.com"
           style={{ width: "100%", padding: "10px 12px", fontSize: 15,
             border: "1px solid #cbd5e1", borderRadius: 6, marginBottom: 16 }} />
+
+        {/* Preferencias de facturacion */}
+        <details style={{
+          marginBottom: 16, background: "#f8fafc", padding: 12, borderRadius: 8,
+          border: "1px solid #e2e8f0",
+        }}>
+          <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+            ⚙ Preferencias de facturación (opcional)
+          </summary>
+          <div style={{ marginTop: 10 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 4, color: "#334155" }}>
+              Uso del CFDI
+            </label>
+            <select value={usoCfdi} onChange={(e) => setUsoCfdi(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 14,
+                border: "1px solid #cbd5e1", borderRadius: 6, marginBottom: 10 }}>
+              <option value="G01">G01 - Adquisición de mercancías</option>
+              <option value="G02">G02 - Devoluciones / descuentos</option>
+              <option value="G03">G03 - Gastos en general</option>
+              <option value="I01">I01 - Construcciones</option>
+              <option value="I02">I02 - Mobiliario y equipo</option>
+              <option value="I03">I03 - Equipo de transporte</option>
+              <option value="I04">I04 - Equipo de cómputo</option>
+              <option value="I08">I08 - Otra maquinaria</option>
+              <option value="D01">D01 - Honorarios médicos</option>
+              <option value="D10">D10 - Pagos por servicios educativos</option>
+              <option value="S01">S01 - Sin efectos fiscales</option>
+              <option value="CP01">CP01 - Pagos</option>
+              <option value="P01">P01 - Por definir</option>
+            </select>
+
+            <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 4, color: "#334155" }}>
+              Método de pago preferido
+            </label>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button type="button" onClick={() => setMetodoPago("PUE")}
+                style={{
+                  flex: 1, padding: "10px", border: 0, borderRadius: 6, cursor: "pointer",
+                  fontSize: 13, fontWeight: 700,
+                  background: metodoPago === "PUE" ? "#059669" : "#e2e8f0",
+                  color: metodoPago === "PUE" ? "white" : "#334155",
+                }}>
+                PUE - Contado
+              </button>
+              <button type="button" onClick={() => setMetodoPago("PPD")}
+                style={{
+                  flex: 1, padding: "10px", border: 0, borderRadius: 6, cursor: "pointer",
+                  fontSize: 13, fontWeight: 700,
+                  background: metodoPago === "PPD" ? "#f59e0b" : "#e2e8f0",
+                  color: metodoPago === "PPD" ? "white" : "#334155",
+                }}>
+                PPD - Crédito
+              </button>
+            </div>
+
+            {metodoPago === "PUE" && (
+              <>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 4, color: "#334155" }}>
+                  Forma de pago
+                </label>
+                <select value={formaPago} onChange={(e) => setFormaPago(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", fontSize: 14,
+                    border: "1px solid #cbd5e1", borderRadius: 6 }}>
+                  <option value="01">01 - Efectivo</option>
+                  <option value="03">03 - Transferencia</option>
+                  <option value="04">04 - Tarjeta de crédito</option>
+                  <option value="28">28 - Tarjeta de débito</option>
+                  <option value="02">02 - Cheque</option>
+                </select>
+              </>
+            )}
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 6 }}>
+              Estos valores se usarán al facturarte. Puedes cambiarlos luego pidiéndolo al vendedor.
+            </div>
+          </div>
+        </details>
 
         {error && (
           <div style={{
