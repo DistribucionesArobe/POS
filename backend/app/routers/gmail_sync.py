@@ -134,7 +134,7 @@ def _get_valid_access_token(conn: GmailConexion, db: Session) -> str:
 @router.post("/sync")
 def sync_manual(
     dias_atras: int = 30,
-    max_mensajes: int = 10,
+    max_mensajes: int = 5,
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):

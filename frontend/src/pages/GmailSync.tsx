@@ -110,31 +110,35 @@ export default function GmailSync() {
     }
   }
 
-  async function sincronizar() {
-    setBusy(true); setError(null); setMsg(null);
+  async function sincronizar(intentoNum = 1) {
+    setBusy(true); setError(null);
+    if (intentoNum === 1) setMsg(null);
     try {
+      // Lote pequeno (5) para que entre con margen aunque haya cold start
       const r = await api.post("/api/gmail/sync", null, {
-        params: { dias_atras: dias, max_mensajes: 10 },
+        params: { dias_atras: dias, max_mensajes: 5 },
         timeout: 180000,  // 3 minutos
       });
       const s = r.data.stats;
-      let m = `✅ Sync lote: ${s.buscados} correos encontrados · ${s.guardados_pendientes} nuevos pendientes · ${s.descartados} descartados · ${s.ya_procesados} ya procesados`;
+      let m = `✅ Lote ${intentoNum}: ${s.buscados} correos vistos · ${s.guardados_pendientes} nuevos · ${s.descartados} descartados · ${s.ya_procesados} ya estaban`;
       if (s.pendientes_restantes > 0) {
-        m += `\n⚠ Aun quedan ${s.pendientes_restantes} correos por procesar. Haz click en Sincronizar de nuevo para seguir.`;
+        m += `\n⚠ Aun quedan ${s.pendientes_restantes} correos. Click Sincronizar otra vez.`;
       }
       setMsg(m);
       await cargarStatus();
       await cargarLista();
     } catch (e: any) {
-      // "Network Error" sin response = timeout o proxy corto
       const detalle = e.response?.data?.detail;
-      if (detalle) {
-        setError(detalle);
-      } else if (e.code === "ECONNABORTED") {
-        setError("La sincronizacion tardo mas de 3 minutos. Reduce 'dias atras' o vuelve a intentar; los correos ya procesados no se repiten.");
-      } else {
-        setError(`${e.message}. Puede ser timeout del servidor; vuelve a intentar — los ya procesados no se duplican.`);
+      const esNetwork = !e.response && (e.message === "Network Error" || e.code === "ERR_NETWORK");
+      // Retry automatico UNA vez si fue Network Error (seguramente cold start)
+      if (esNetwork && intentoNum < 2) {
+        setMsg(`⏳ Servidor despertando, reintentando en 8s...`);
+        await new Promise(r => setTimeout(r, 8000));
+        return sincronizar(intentoNum + 1);
       }
+      if (detalle) setError(detalle);
+      else if (e.code === "ECONNABORTED") setError("Tardo mas de 3 minutos. Vuelve a intentar; los ya procesados no se repiten.");
+      else setError(`${e.message}. Vuelve a intentar en unos segundos — los procesados no se duplican.`);
     } finally {
       setBusy(false);
     }
@@ -220,7 +224,7 @@ export default function GmailSync() {
                         📌 Sugerido: {diasSugeridos()}d
                       </button>
                     )}
-                    <button onClick={sincronizar} disabled={busy}
+                    <button onClick={() => sincronizar()} disabled={busy}
                       style={{ background: busy ? "#94a3b8" : "#059669", color: "white", border: 0,
                         padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                       {busy ? "Sincronizando..." : "🔄 Sincronizar ahora"}
