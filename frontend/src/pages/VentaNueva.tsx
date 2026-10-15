@@ -1243,21 +1243,21 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
               <button type="button"
                 onClick={() => {
                   if (!lineas) return;
-                  if (!confirm("Formatear descripciones estilo gobierno?\n\nFormato: 'DESCRIPCION\\nOBSERVACIONES\\n<detalle>'\n\nAplicara el formato a TODAS las lineas usando su descripcion actual como base.")) return;
+                  if (!confirm("Formatear descripciones estilo gobierno?\n\nFormato: 'NOMBRE CORTO\\n<detalle>'  (todo MAYUSCULAS)\n\nAplicara a TODAS las lineas usando su descripcion actual como base.")) return;
                   const nuevas = lineas.map(l => {
-                    // Split heuristic: primera parte antes de la primera coma = nombre corto, resto = detalle
-                    const texto = l.descripcion || "";
+                    const texto = (l.descripcion || "").trim();
                     let corto = texto, detalle = "";
                     if (texto.includes(",")) {
                       const idx = texto.indexOf(",");
                       corto = texto.slice(0, idx).trim();
                       detalle = texto.slice(idx + 1).trim();
                     } else {
-                      // Si no hay coma, parte en el primer "de" o guion
                       corto = texto;
-                      detalle = texto;
+                      detalle = "";
                     }
-                    const descCfdi = `${corto.toUpperCase()}\nOBSERVACIONES\n${detalle.toUpperCase()}`;
+                    const descCfdi = detalle
+                      ? `${corto.toUpperCase()}\n${detalle.toUpperCase()}`
+                      : corto.toUpperCase();
                     return { ...l, descripcion_cfdi: descCfdi };
                   });
                   setLineas(nuevas);
@@ -1266,7 +1266,7 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                   padding: "6px 12px", background: "#fbbf24", border: 0, borderRadius: 6,
                   cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#78350f",
                 }}>
-                🏛 Formato gobierno (NOMBRE\nOBSERVACIONES\n detalle) a todas
+                🏛 Formato gobierno (NOMBRE / detalle MAYÚSCULAS) a todas
               </button>
             </div>
             <table style={{ width: "100%", fontSize: 12 }}>
@@ -1315,7 +1315,7 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                             const actual = l.descripcion_cfdi || l.descripcion;
                             const nuevo = window.prompt(
                               "Descripcion exacta para el CFDI (puedes usar varias lineas):\n\n" +
-                              "Ejemplo gobierno:\nPAQ DE AGUA\nOBSERVACIONES\nPURIFICADA ENVASE 355 ML C/40 PZ",
+                              "Ejemplo gobierno:\nPAQ DE AGUA\nPURIFICADA ENVASE 355 ML C/40 PZ",
                               actual
                             );
                             if (nuevo === null) return;
