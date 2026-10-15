@@ -230,6 +230,73 @@ REGLAS:
         return _json.loads(text)
 
 
+    def clasificar_iva_ieps(self, nombres: list[str]) -> list[dict]:
+        """Dado un lote de nombres de producto en Mexico, clasifica cada uno con:
+          - tasa_iva: 0 (basicos) o 0.16 (general) o 0.08 (frontera; dejar 0.16 por default)
+          - tasa_ieps: 0, 0.08, 0.25, 0.265, 0.30, 0.53 segun categoria
+          - clave_prod_serv_sat sugerida (8 digitos del catalogo)
+          - razon corta
+        Si duda, elige 16% IVA y 0% IEPS (default general).
+        """
+        import json as _json
+        if not nombres:
+            return []
+        items_txt = "\n".join(f"{i+1}. {n}" for i, n in enumerate(nombres))
+        prompt = f"""Eres experto fiscal mexicano (Ley IVA + Ley IEPS). Clasifica cada producto:
+
+{items_txt}
+
+REGLAS SAT:
+IVA 0% (alimentos basicos NO procesados ni saborizados, LIFTE Art 2-A):
+  - Agua natural embotellada <10L
+  - Leche sin saborizar, huevos
+  - Pan, tortillas, galletas simples sin cobertura/saborizante
+  - Azucar, sal, cafe tostado puro (NO cafe instantaneo preparado)
+  - Carne, pescado, verduras, frutas sin procesar
+  - Harinas basicas, aceites comestibles
+  - Alimento para mascotas (si es mascota)
+
+IVA 16% (general):
+  - Bebidas gaseosas, jugos, energeticos, aguas saborizadas
+  - Dulces, chocolates, confiteria
+  - Comida preparada (restaurant)
+  - Alcohol, cerveza, licores (ADEMAS llevan IEPS)
+  - Articulos no alimenticios
+
+IEPS adicional (sobre IVA 16%):
+  - Refresco con azucar: 0.08 (8%) [cuota IEPS variable]
+  - Refresco con bajo azucar/light: 0 (no causa IEPS, pero si IVA)
+  - Cerveza: 0.265 (aprox, variable por grados)
+  - Vino de mesa: 0.265
+  - Bebidas destiladas (whisky/vodka/tequila): 0.53
+  - Cigarros: 0.16 cuota ad valorem (variable)
+  - Chatarra alta densidad calorica (galletas, chocolates, botanas con >=275kcal/100g): 0.08
+  - Combustibles: cuota fija, pon 0 aqui
+
+Responde SOLO JSON array sin markdown, un objeto por producto en el MISMO orden:
+[
+  {{"i": 1, "tasa_iva": 0, "tasa_ieps": 0, "clave_prod_serv_sat": "50202306", "razon": "Agua embotellada - basico"}},
+  ...
+]
+
+Donde:
+  i = numero de item (1-based)
+  tasa_iva = 0 | 0.16 (nunca otro valor)
+  tasa_ieps = 0 | 0.08 | 0.265 | 0.30 | 0.53
+  clave_prod_serv_sat = 8 digitos del catalogo c_ClaveProdServ SAT, lo mejor que puedas
+  razon = <=15 palabras explicando
+"""
+        msg = self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.strip("`").lstrip("json").strip()
+        return _json.loads(text)
+
+
     def parsear_csf(self, file_bytes: bytes, mime_type: str = "application/pdf") -> dict:
         """Vision: extrae datos fiscales de una Constancia de Situacion Fiscal del SAT."""
         b64 = base64.b64encode(file_bytes).decode()

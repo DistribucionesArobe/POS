@@ -401,9 +401,11 @@ class BulkItemIn(BaseModel):
     nombre: str
     precio: float = 0
     cantidad: float = 1
-    tasa_iva: float = 0.16
+    tasa_iva: float | None = None   # si None y auto_clasificar => IA decide
+    tasa_ieps: float = 0
     categoria: str | None = None
     unidad: str = "PZA"
+    clave_prod_serv_sat: str | None = None
 
 
 class BulkCrearIn(BaseModel):
@@ -411,6 +413,7 @@ class BulkCrearIn(BaseModel):
     clave_sat_default: str = "01010101"
     clave_unidad_sat: str = "H87"
     tasa_iva_default: float = 0.16
+    auto_clasificar: bool = False   # si True, usa Claude para IVA/IEPS/clave SAT
 
 
 @router.post("/bulk-crear")
@@ -419,13 +422,28 @@ def bulk_crear(
     empresa_id: int = Depends(get_active_empresa_id),
     db: Session = Depends(get_db),
 ):
-    """Crea en lote N productos (con sus variantes). Para importar desde Excel.
-    Si el nombre ya existe en el catalogo lo omite."""
+    """Crea en lote N productos. Si auto_clasificar=True usa Claude para
+    detectar tasa IVA (0/16), tasa IEPS y clave SAT a partir del nombre."""
     import logging, re, time
     logger = logging.getLogger(__name__)
+
+    # Clasificar con IA si pediste
+    clasif_map: dict[int, dict] = {}
+    if payload.auto_clasificar and payload.items:
+        try:
+            from app.integrations.anthropic_client import ClaudeClient
+            nombres = [it.nombre.strip() for it in payload.items]
+            resultados = ClaudeClient().clasificar_iva_ieps(nombres)
+            for r in resultados:
+                idx = int(r.get("i", 0)) - 1
+                if 0 <= idx < len(payload.items):
+                    clasif_map[idx] = r
+        except Exception as e:
+            logger.warning("Clasificacion IA fallo, continuo con defaults: %s", e)
+
     creados = []
     omitidos = []
-    for item in payload.items:
+    for idx, item in enumerate(payload.items):
         nombre = (item.nombre or "").strip()
         if not nombre:
             continue
@@ -440,11 +458,20 @@ def bulk_crear(
             continue
         slug = re.sub(r"[^A-Za-z0-9]+", "-", nombre.upper())[:30].strip("-") or "ITEM"
         sku_candidato = f"{slug}-{int(time.time() * 1000) % 100000}"
+        # Aplicar sugerencia IA si hubo
+        sug = clasif_map.get(idx) or {}
+        tasa_iva_final = (sug.get("tasa_iva") if sug else None)
+        if tasa_iva_final is None:
+            tasa_iva_final = item.tasa_iva if item.tasa_iva is not None else payload.tasa_iva_default
+        tasa_ieps_final = float(sug.get("tasa_ieps", item.tasa_ieps or 0) or 0)
+        clave_sat_final = (item.clave_prod_serv_sat or sug.get("clave_prod_serv_sat")
+                           or payload.clave_sat_default)
+        razon_ia = sug.get("razon") if sug else None
         try:
             p = Producto(
                 empresa_id=empresa_id, nombre=nombre[:255],
                 categoria=(item.categoria or None),
-                clave_prod_serv_sat=payload.clave_sat_default,
+                clave_prod_serv_sat=clave_sat_final[:8],
             )
             db.add(p); db.flush()
             v = VarianteProducto(
@@ -453,13 +480,16 @@ def bulk_crear(
                 clave_unidad_sat=payload.clave_unidad_sat,
                 precio_publico=float(item.precio or 0),
                 costo_promedio=0, stock_minimo=0,
-                tasa_iva=float(item.tasa_iva if item.tasa_iva is not None else payload.tasa_iva_default),
+                tasa_iva=float(tasa_iva_final),
+                tasa_ieps=float(tasa_ieps_final),
             )
             db.add(v); db.commit()
             creados.append({
                 "producto_id": p.id, "variante_id": v.id, "sku": v.sku,
                 "nombre": nombre, "precio": float(v.precio_publico),
-                "tasa_iva": float(v.tasa_iva),
+                "tasa_iva": float(v.tasa_iva), "tasa_ieps": float(v.tasa_ieps or 0),
+                "clave_prod_serv_sat": clave_sat_final,
+                "razon_ia": razon_ia,
             })
         except Exception as e:
             db.rollback()

@@ -68,5 +68,8 @@ class VarianteProducto(Base):
     # Tasa de IVA aplicable por variante. 0.16 general, 0.08 frontera, 0 exento.
     # Se respeta al vender: cada linea del CFDI usa esta tasa.
     tasa_iva: Mapped[float] = mapped_column(Numeric(6, 4), default=0.16)
+    # IEPS (impuesto especial): refrescos, cerveza, cigarros, bebidas, etc.
+    # 0 default. Catalogo SAT: 0.08, 0.25, 0.265, 0.30, 0.53
+    tasa_ieps: Mapped[float] = mapped_column(Numeric(6, 4), default=0, nullable=True)
 
     producto: Mapped[Producto] = relationship(back_populates="variantes")

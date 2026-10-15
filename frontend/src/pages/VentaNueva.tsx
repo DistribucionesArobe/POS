@@ -1069,23 +1069,31 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
 
   const matchedCount = (lineas || []).filter(l => l.match_variante_id).length;
 
-  async function crearFaltantes(tasaIva: number) {
+  async function crearFaltantes(tasaIva: number | "ia") {
     if (!lineas) return;
     const faltantes = lineas.filter(l => !l.match_variante_id);
     if (faltantes.length === 0) return;
-    if (!confirm(`Crear ${faltantes.length} productos nuevos en el catálogo con IVA ${(tasaIva * 100).toFixed(0)}%?\n\nSe generan SKUs automáticos y clave SAT comodín. Puedes editarlos después en Catálogo.`)) return;
+    const usaIa = tasaIva === "ia";
+    const label = usaIa
+      ? `con 🤖 CLASIFICACIÓN IA (detecta IVA 0/16 y IEPS por nombre)`
+      : `con IVA ${((tasaIva as number) * 100).toFixed(0)}%`;
+    if (!confirm(`Crear ${faltantes.length} productos nuevos en el catálogo ${label}?\n\nSKUs automáticos y clave SAT ${usaIa ? "sugerida por IA" : "comodín"}. Puedes editarlos después.`)) return;
     try {
+      const tasaDefault = usaIa ? 0.16 : (tasaIva as number);
       const payload = {
         items: faltantes.map(l => ({
           nombre: l.descripcion.slice(0, 200),
-          precio: entradaConIva ? +(l.precio / (1 + tasaIva)).toFixed(2) : l.precio,
+          precio: entradaConIva ? +(l.precio / (1 + tasaDefault)).toFixed(2) : l.precio,
           cantidad: l.cantidad,
-          tasa_iva: tasaIva,
+          tasa_iva: usaIa ? null : tasaDefault,
           unidad: "PZA",
         })),
-        tasa_iva_default: tasaIva,
+        tasa_iva_default: tasaDefault,
+        auto_clasificar: usaIa,
       };
-      const r = await api.post("/api/productos/bulk-crear", payload);
+      const r = await api.post("/api/productos/bulk-crear", payload, {
+        timeout: 90000,
+      });
       // Actualizar las lineas con los nuevos match_variante_id
       const creadosByNombre: Record<string, any> = {};
       for (const c of r.data.creados) creadosByNombre[c.nombre.toLowerCase()] = c;
@@ -1104,7 +1112,15 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
         return l;
       });
       setLineas(nuevasLineas);
-      alert(`✅ Creados: ${r.data.n_creados}\n⚠ Omitidos: ${r.data.n_omitidos}${r.data.n_omitidos > 0 ? " (ya existían o error)" : ""}\n\nAhora puedes agregar al carrito.`);
+      let msg = `✅ Creados: ${r.data.n_creados}\n⚠ Omitidos: ${r.data.n_omitidos}${r.data.n_omitidos > 0 ? " (ya existían o error)" : ""}`;
+      if (usaIa && r.data.creados?.length) {
+        msg += "\n\n🤖 Clasificación IA:\n" + r.data.creados.slice(0, 10).map((c: any) =>
+          `· ${c.nombre.slice(0, 40)} → IVA ${((c.tasa_iva || 0) * 100).toFixed(0)}%${c.tasa_ieps > 0 ? ` + IEPS ${((c.tasa_ieps) * 100).toFixed(1)}%` : ""}`
+        ).join("\n");
+        if (r.data.creados.length > 10) msg += `\n...y ${r.data.creados.length - 10} más`;
+      }
+      msg += "\n\nAhora puedes agregar al carrito.";
+      alert(msg);
     } catch (e: any) {
       alert("Error: " + (e.response?.data?.detail || e.message));
     }
@@ -1257,22 +1273,30 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
               }}>
                 <div style={{ marginBottom: 6 }}>
                   <strong>{lineas.filter(l => !l.match_variante_id).length} productos</strong> no están en tu catálogo.
-                  Elige la tasa de IVA y los creamos automáticamente:
+                  Elige cómo crearlos:
                 </div>
+                <button onClick={() => crearFaltantes("ia")}
+                  style={{
+                    width: "100%", marginBottom: 6,
+                    background: "#7c3aed", color: "white", border: 0,
+                    padding: "10px 12px", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 800,
+                  }}>
+                  🤖 Crear con CLASIFICACIÓN IA (detecta IVA 0/16 y IEPS por nombre) ← recomendado
+                </button>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button onClick={() => crearFaltantes(0)}
                     style={{
                       flex: 1, background: "#059669", color: "white", border: 0,
                       padding: "8px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
                     }}>
-                    ➕ Crear como alimentos básicos (IVA 0%)
+                    IVA 0% (alimentos básicos)
                   </button>
                   <button onClick={() => crearFaltantes(0.16)}
                     style={{
                       flex: 1, background: "#1e40af", color: "white", border: 0,
                       padding: "8px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
                     }}>
-                    ➕ Crear con IVA 16% (refrescos, etc.)
+                    IVA 16% (todos)
                   </button>
                 </div>
               </div>
