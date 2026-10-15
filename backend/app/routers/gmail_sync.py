@@ -122,15 +122,17 @@ def _get_valid_access_token(conn: GmailConexion, db: Session) -> str:
     if conn.access_token and conn.access_token_expira_en and \
        datetime.utcnow() < conn.access_token_expira_en:
         return conn.access_token
-    # Refresh
+    # Refresh — usamos 400 (no 401) porque el 401 lo interpreta el frontend
+    # como "sesion de USUARIO caducada" y saca al cajero. Aqui el token caducado
+    # es el de Google OAuth, no el JWT de la app.
     try:
         refresh = svc.desencriptar_token(conn.refresh_token_encrypted)
         tokens = svc.refresh_access_token(refresh)
     except Exception as e:
         raise HTTPException(
-            401,
-            f"No pude refrescar el access_token de Gmail: {e}. "
-            "Entra a /gmail-sync, Desconecta y vuelve a Conectar."
+            400,
+            f"OAuth Gmail expirado o revocado: {e}. "
+            "Entra a Gmail Sync, Desconecta y vuelve a Conectar la cuenta."
         )
     conn.access_token = tokens["access_token"]
     conn.access_token_expira_en = datetime.utcnow() + timedelta(seconds=tokens.get("expires_in", 3600) - 60)
