@@ -1209,6 +1209,7 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                   <th style={{ padding: 4, textAlign: "right", width: 55 }}>Cant</th>
                   <th style={{ padding: 4, textAlign: "left", width: 55 }}>UnidSAT</th>
                   <th style={{ padding: 4, textAlign: "right", width: 90 }}>Precio</th>
+                  <th style={{ padding: 4, textAlign: "center", width: 70 }}>IVA</th>
                   <th style={{ padding: 4, textAlign: "right", width: 90 }}>Importe</th>
                 </tr>
               </thead>
@@ -1244,11 +1245,23 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                         style={{ width: 85, padding: "3px 5px", fontSize: 11, textAlign: "right",
                           border: "1px solid #cbd5e1", borderRadius: 3 }} />
                     </td>
+                    <td style={{ padding: 3, textAlign: "center" }}>
+                      <select value={(c.tasa_iva ?? 0.16).toString()}
+                        onChange={(e) => cambiarConcepto(i, { tasa_iva: +e.target.value })}
+                        style={{
+                          padding: "3px 5px", fontSize: 11,
+                          border: "1px solid #cbd5e1", borderRadius: 3,
+                          background: c.tasa_iva === 0 ? "#dbeafe" : "white",
+                          color: c.tasa_iva === 0 ? "#1e40af" : "#0f172a",
+                          fontWeight: 700,
+                        }}>
+                        <option value="0">0%</option>
+                        <option value="0.08">8%</option>
+                        <option value="0.16">16%</option>
+                      </select>
+                    </td>
                     <td style={{ padding: 3, textAlign: "right", fontWeight: 700 }}>
                       {fmt(c.importe)}
-                      {c.tasa_iva === 0 && (
-                        <div style={{ fontSize: 9, color: "#1e40af", fontWeight: 700 }}>0% IVA</div>
-                      )}
                     </td>
                   </tr>
                 ))}
