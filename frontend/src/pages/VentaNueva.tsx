@@ -1069,6 +1069,47 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
 
   const matchedCount = (lineas || []).filter(l => l.match_variante_id).length;
 
+  async function crearFaltantes(tasaIva: number) {
+    if (!lineas) return;
+    const faltantes = lineas.filter(l => !l.match_variante_id);
+    if (faltantes.length === 0) return;
+    if (!confirm(`Crear ${faltantes.length} productos nuevos en el catálogo con IVA ${(tasaIva * 100).toFixed(0)}%?\n\nSe generan SKUs automáticos y clave SAT comodín. Puedes editarlos después en Catálogo.`)) return;
+    try {
+      const payload = {
+        items: faltantes.map(l => ({
+          nombre: l.descripcion.slice(0, 200),
+          precio: entradaConIva ? +(l.precio / (1 + tasaIva)).toFixed(2) : l.precio,
+          cantidad: l.cantidad,
+          tasa_iva: tasaIva,
+          unidad: "PZA",
+        })),
+        tasa_iva_default: tasaIva,
+      };
+      const r = await api.post("/api/productos/bulk-crear", payload);
+      // Actualizar las lineas con los nuevos match_variante_id
+      const creadosByNombre: Record<string, any> = {};
+      for (const c of r.data.creados) creadosByNombre[c.nombre.toLowerCase()] = c;
+      const nuevasLineas = lineas.map(l => {
+        if (l.match_variante_id) return l;
+        const c = creadosByNombre[l.descripcion.toLowerCase().slice(0, 200).toLowerCase()];
+        if (c) {
+          return {
+            ...l,
+            match_variante_id: c.variante_id,
+            sku: c.sku,
+            nombre: c.nombre,
+            tasa_iva: c.tasa_iva,
+          };
+        }
+        return l;
+      });
+      setLineas(nuevasLineas);
+      alert(`✅ Creados: ${r.data.n_creados}\n⚠ Omitidos: ${r.data.n_omitidos}${r.data.n_omitidos > 0 ? " (ya existían o error)" : ""}\n\nAhora puedes agregar al carrito.`);
+    } catch (e: any) {
+      alert("Error: " + (e.response?.data?.detail || e.message));
+    }
+  }
+
   return (
     <div onClick={onClose} style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
@@ -1208,6 +1249,35 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                 })}
               </tbody>
             </table>
+            {/* Boton para crear automatico los que no matchearon */}
+            {lineas.some(l => !l.match_variante_id) && (
+              <div style={{
+                background: "#fff7ed", border: "1px solid #fdba74",
+                padding: 10, borderRadius: 6, marginTop: 10, fontSize: 12, color: "#9a3412",
+              }}>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>{lineas.filter(l => !l.match_variante_id).length} productos</strong> no están en tu catálogo.
+                  Elige la tasa de IVA y los creamos automáticamente:
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => crearFaltantes(0)}
+                    style={{
+                      flex: 1, background: "#059669", color: "white", border: 0,
+                      padding: "8px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                    }}>
+                    ➕ Crear como alimentos básicos (IVA 0%)
+                  </button>
+                  <button onClick={() => crearFaltantes(0.16)}
+                    style={{
+                      flex: 1, background: "#1e40af", color: "white", border: 0,
+                      padding: "8px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                    }}>
+                    ➕ Crear con IVA 16% (refrescos, etc.)
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => { setLineas(null); setArchivo(null); setTextoPegado(""); }}
                 style={{

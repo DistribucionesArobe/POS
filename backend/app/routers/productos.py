@@ -397,6 +397,78 @@ def crear_producto_simple(
         raise HTTPException(500, f"No se pudo crear producto: {type(e).__name__}: {e}")
 
 
+class BulkItemIn(BaseModel):
+    nombre: str
+    precio: float = 0
+    cantidad: float = 1
+    tasa_iva: float = 0.16
+    categoria: str | None = None
+    unidad: str = "PZA"
+
+
+class BulkCrearIn(BaseModel):
+    items: list[BulkItemIn]
+    clave_sat_default: str = "01010101"
+    clave_unidad_sat: str = "H87"
+    tasa_iva_default: float = 0.16
+
+
+@router.post("/bulk-crear")
+def bulk_crear(
+    payload: BulkCrearIn,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Crea en lote N productos (con sus variantes). Para importar desde Excel.
+    Si el nombre ya existe en el catalogo lo omite."""
+    import logging, re, time
+    logger = logging.getLogger(__name__)
+    creados = []
+    omitidos = []
+    for item in payload.items:
+        nombre = (item.nombre or "").strip()
+        if not nombre:
+            continue
+        existente = (
+            db.query(Producto)
+            .filter(Producto.empresa_id == empresa_id)
+            .filter(Producto.nombre.ilike(nombre))
+            .first()
+        )
+        if existente:
+            omitidos.append({"nombre": nombre, "razon": "ya existia", "producto_id": existente.id})
+            continue
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", nombre.upper())[:30].strip("-") or "ITEM"
+        sku_candidato = f"{slug}-{int(time.time() * 1000) % 100000}"
+        try:
+            p = Producto(
+                empresa_id=empresa_id, nombre=nombre[:255],
+                categoria=(item.categoria or None),
+                clave_prod_serv_sat=payload.clave_sat_default,
+            )
+            db.add(p); db.flush()
+            v = VarianteProducto(
+                producto_id=p.id, sku=sku_candidato[:64],
+                presentacion="Default", unidad=(item.unidad or "PZA")[:32],
+                clave_unidad_sat=payload.clave_unidad_sat,
+                precio_publico=float(item.precio or 0),
+                costo_promedio=0, stock_minimo=0,
+                tasa_iva=float(item.tasa_iva if item.tasa_iva is not None else payload.tasa_iva_default),
+            )
+            db.add(v); db.commit()
+            creados.append({
+                "producto_id": p.id, "variante_id": v.id, "sku": v.sku,
+                "nombre": nombre, "precio": float(v.precio_publico),
+                "tasa_iva": float(v.tasa_iva),
+            })
+        except Exception as e:
+            db.rollback()
+            logger.error("Bulk crear fallo en '%s': %s", nombre, e)
+            omitidos.append({"nombre": nombre, "razon": str(e)})
+    return {"creados": creados, "omitidos": omitidos,
+            "n_creados": len(creados), "n_omitidos": len(omitidos)}
+
+
 @router.post("")
 def crear_producto(
     payload: ProductoIn,
