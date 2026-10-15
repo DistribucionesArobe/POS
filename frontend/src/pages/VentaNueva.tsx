@@ -992,7 +992,11 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
       const parsed: LineaImportada[] = [];
       for (const linea of texto.split(/\r?\n/)) {
         if (!linea.trim()) continue;
-        const cols = linea.split(/\t|  +|,/);
+        // Separador PREFERIDO: tab (Excel pega siempre con tabs).
+        // Si no hay tabs, fallback a 2+ espacios. NUNCA comas porque muchas
+        // descripciones las tienen (ej. "Agua purificada, 500 ml, paquete...").
+        const sep = linea.includes("\t") ? "\t" : null;
+        const cols = sep ? linea.split(sep) : linea.split(/ {2,}/);
         if (cols.length < 2) continue;
         const desc = (cols[0] || "").trim();
         if (!desc) continue;
@@ -1190,7 +1194,8 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
             ) : (
               <div>
                 <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 8px" }}>
-                  Pega las filas de Excel (columnas: <code>descripcion | cantidad | precio | monto</code>). Tab o coma separa columnas.
+                  Pega las filas de Excel (columnas: <code>descripción | cantidad | precio | monto</code>). <br />
+                  Separador: <strong>TAB</strong> (Excel lo pone automático al copiar). Las comas en la descripción están permitidas.
                 </p>
                 <textarea value={textoPegado} onChange={(e) => setTextoPegado(e.target.value)}
                   placeholder={"Varilla 3/8\t10\t95.00\t950.00\nCemento 50kg\t5\t280.00\t1400.00"}
