@@ -8,6 +8,9 @@ type Item = {
   variante_id: number; sku: string; nombre: string;
   cantidad: number; precio: number;  // SIN IVA siempre (base)
   tasa_iva: number;
+  // Descripcion custom para CFDI (compras de gobierno con texto exacto).
+  // Si viene set, override al descripcion default del producto al timbrar.
+  descripcion_cfdi?: string;
 };
 type PagoRow = { forma_pago_sat: string; monto: number };
 
@@ -257,6 +260,7 @@ export default function VentaNueva() {
       oculto_del_corte: esSuperAdmin && modoAlejandro,
       conceptos: items.map((i) => ({
         variante_id: i.variante_id, cantidad: i.cantidad, precio_unitario: i.precio,
+        descripcion: i.descripcion_cfdi || undefined,
       })),
     };
     if (!esCredito) {
@@ -945,6 +949,8 @@ type LineaImportada = {
   sku?: string;
   nombre?: string;
   tasa_iva?: number;
+  // Descripcion exacta para el CFDI (compras de gobierno)
+  descripcion_cfdi?: string;
 };
 
 function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
@@ -1062,6 +1068,10 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
         cantidad: l.cantidad,
         precio: precioBase,
         tasa_iva: tasa,
+        // Prioridad: descripcion_cfdi (si user la editó manual) > descripcion
+        // (si vino del archivo y es distinta del nombre catalogo) > nada.
+        descripcion_cfdi: l.descripcion_cfdi
+          || (l.descripcion && l.descripcion !== l.nombre ? l.descripcion : undefined),
       });
     }
     if (paraAgregar.length === 0) {
@@ -1229,6 +1239,36 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                 Los precios del archivo YA incluyen IVA
               </label>
             </div>
+            <div style={{ marginBottom: 8 }}>
+              <button type="button"
+                onClick={() => {
+                  if (!lineas) return;
+                  if (!confirm("Formatear descripciones estilo gobierno?\n\nFormato: 'DESCRIPCION\\nOBSERVACIONES\\n<detalle>'\n\nAplicara el formato a TODAS las lineas usando su descripcion actual como base.")) return;
+                  const nuevas = lineas.map(l => {
+                    // Split heuristic: primera parte antes de la primera coma = nombre corto, resto = detalle
+                    const texto = l.descripcion || "";
+                    let corto = texto, detalle = "";
+                    if (texto.includes(",")) {
+                      const idx = texto.indexOf(",");
+                      corto = texto.slice(0, idx).trim();
+                      detalle = texto.slice(idx + 1).trim();
+                    } else {
+                      // Si no hay coma, parte en el primer "de" o guion
+                      corto = texto;
+                      detalle = texto;
+                    }
+                    const descCfdi = `${corto.toUpperCase()}\nOBSERVACIONES\n${detalle.toUpperCase()}`;
+                    return { ...l, descripcion_cfdi: descCfdi };
+                  });
+                  setLineas(nuevas);
+                }}
+                style={{
+                  padding: "6px 12px", background: "#fbbf24", border: 0, borderRadius: 6,
+                  cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#78350f",
+                }}>
+                🏛 Formato gobierno (NOMBRE\nOBSERVACIONES\n detalle) a todas
+              </button>
+            </div>
             <table style={{ width: "100%", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f1f5f9" }}>
@@ -1237,6 +1277,7 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                   <th style={{ padding: 6, textAlign: "left" }}>Match</th>
                   <th style={{ padding: 6, textAlign: "right" }}>Cant.</th>
                   <th style={{ padding: 6, textAlign: "right" }}>Precio</th>
+                  <th style={{ padding: 6, textAlign: "center" }}>CFDI</th>
                 </tr>
               </thead>
               <tbody>
@@ -1265,6 +1306,34 @@ function ImportarCotModal({ onClose, onAgregar, preciosEntradaConIva }: {
                       </td>
                       <td style={{ padding: 6, textAlign: "right" }}>{l.cantidad}</td>
                       <td style={{ padding: 6, textAlign: "right" }}>${l.precio.toFixed(2)}</td>
+                      <td style={{ padding: 6, textAlign: "center" }}>
+                        <button type="button"
+                          title={l.descripcion_cfdi
+                            ? "Descripcion CFDI custom:\n\n" + l.descripcion_cfdi
+                            : "Click para editar descripcion exacta del CFDI"}
+                          onClick={() => {
+                            const actual = l.descripcion_cfdi || l.descripcion;
+                            const nuevo = window.prompt(
+                              "Descripcion exacta para el CFDI (puedes usar varias lineas):\n\n" +
+                              "Ejemplo gobierno:\nPAQ DE AGUA\nOBSERVACIONES\nPURIFICADA ENVASE 355 ML C/40 PZ",
+                              actual
+                            );
+                            if (nuevo === null) return;
+                            const nuevas = lineas!.map((lin, k) =>
+                              k === i ? { ...lin, descripcion_cfdi: nuevo || undefined } : lin
+                            );
+                            setLineas(nuevas);
+                          }}
+                          style={{
+                            background: l.descripcion_cfdi ? "#059669" : "transparent",
+                            color: l.descripcion_cfdi ? "white" : "#64748b",
+                            border: "1px solid " + (l.descripcion_cfdi ? "#059669" : "#cbd5e1"),
+                            padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+                            fontSize: 10, fontWeight: 700,
+                          }}>
+                          {l.descripcion_cfdi ? "✎ custom" : "✎ edit"}
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
