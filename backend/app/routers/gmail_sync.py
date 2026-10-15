@@ -123,12 +123,72 @@ def _get_valid_access_token(conn: GmailConexion, db: Session) -> str:
        datetime.utcnow() < conn.access_token_expira_en:
         return conn.access_token
     # Refresh
-    refresh = svc.desencriptar_token(conn.refresh_token_encrypted)
-    tokens = svc.refresh_access_token(refresh)
+    try:
+        refresh = svc.desencriptar_token(conn.refresh_token_encrypted)
+        tokens = svc.refresh_access_token(refresh)
+    except Exception as e:
+        raise HTTPException(
+            401,
+            f"No pude refrescar el access_token de Gmail: {e}. "
+            "Entra a /gmail-sync, Desconecta y vuelve a Conectar."
+        )
     conn.access_token = tokens["access_token"]
     conn.access_token_expira_en = datetime.utcnow() + timedelta(seconds=tokens.get("expires_in", 3600) - 60)
     db.commit()
     return conn.access_token
+
+
+@router.get("/diagnostico")
+def diagnostico_sync(
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Prueba paso-a-paso la conexion Gmail y devuelve donde falla."""
+    pasos = []
+    try:
+        pasos.append("1️⃣ Buscando conexion Gmail...")
+        conn = db.query(GmailConexion).filter(GmailConexion.empresa_id == empresa_id).first()
+        if not conn:
+            return {"ok": False, "pasos": pasos, "error": "❌ No hay conexion Gmail. Entra y conecta."}
+        pasos.append(f"✅ Conexion encontrada: {conn.email_cuenta} (modo={conn.modo}, activo={conn.activo})")
+        if not conn.activo:
+            return {"ok": False, "pasos": pasos, "error": "❌ Conexion esta DESACTIVADA. Reactivala."}
+
+        pasos.append("2️⃣ Refrescando access_token...")
+        try:
+            token = _get_valid_access_token(conn, db)
+            pasos.append(f"✅ Token valido (expira {conn.access_token_expira_en})")
+        except HTTPException as e:
+            return {"ok": False, "pasos": pasos, "error": f"❌ Token: {e.detail}"}
+
+        pasos.append("3️⃣ Buscando correos en Gmail (ultimos 7 dias)...")
+        try:
+            msgs = svc.buscar_mensajes_con_xml(token, dias_atras=7, max_mensajes=5)
+            pasos.append(f"✅ Gmail respondio: {len(msgs)} correos con XML en 7 dias")
+        except Exception as e:
+            return {"ok": False, "pasos": pasos, "error": f"❌ Gmail API: {e}"}
+
+        pasos.append("4️⃣ Validando primer mensaje (si hay)...")
+        if msgs:
+            try:
+                m = svc.obtener_mensaje(token, msgs[0]["id"])
+                hdrs = svc.extraer_headers(m)
+                adj = svc.encontrar_adjuntos_xml(m)
+                pasos.append(f"✅ Mensaje OK: de={hdrs.get('from', '')[:40]} adj_xml={len(adj)}")
+            except Exception as e:
+                return {"ok": False, "pasos": pasos, "error": f"❌ No pude leer mensaje: {e}"}
+        else:
+            pasos.append("⚠ No hay correos XML en 7 dias (prueba ampliar dias_atras)")
+
+        pasos.append("5️⃣ Verificando empresa y RFC receptor...")
+        emp = db.get(Empresa, empresa_id)
+        if not emp or not emp.rfc:
+            return {"ok": False, "pasos": pasos, "error": "❌ La empresa no tiene RFC configurado"}
+        pasos.append(f"✅ Empresa {emp.nombre} RFC={emp.rfc}")
+
+        return {"ok": True, "pasos": pasos, "mensaje": "Todo bien, el sync deberia funcionar."}
+    except Exception as e:
+        return {"ok": False, "pasos": pasos, "error": f"❌ Error inesperado: {type(e).__name__}: {e}"}
 
 
 @router.post("/sync")

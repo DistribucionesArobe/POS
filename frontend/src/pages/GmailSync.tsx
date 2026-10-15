@@ -229,6 +229,21 @@ export default function GmailSync() {
                         padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                       {busy ? "Sincronizando..." : "🔄 Sincronizar ahora"}
                     </button>
+                    <button onClick={async () => {
+                      setBusy(true); setError(null); setMsg(null);
+                      try {
+                        const r = await api.get("/api/gmail/diagnostico");
+                        const d = r.data;
+                        const texto = d.pasos.join("\n") + "\n\n" + (d.error || d.mensaje || "");
+                        alert(texto);
+                      } catch (e: any) {
+                        alert("Error: " + (e.response?.data?.detail || e.message));
+                      } finally { setBusy(false); }
+                    }} disabled={busy}
+                      style={{ background: "#f59e0b", color: "white", border: 0,
+                        padding: "10px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                      🩺 Diagnosticar
+                    </button>
                     <button onClick={desconectar}
                       style={{ background: "#fee2e2", color: "#991b1b", border: 0,
                         padding: "10px 14px", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
