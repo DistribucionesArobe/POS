@@ -1054,6 +1054,33 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
   const ivaRetenido = retencionActiva ? +(subtotal * 0.16).toFixed(2) : 0;
   const total = +(subtotal + iva - ivaRetenido).toFixed(2);
 
+  async function guardarSinTimbrar() {
+    if (!detalle) return;
+    setBusy(true);
+    try {
+      await api.patch(`/api/ventas/${venta.id}/preparar-timbre`, {
+        observaciones: observaciones,
+        uso_cfdi: usoCfdi,
+        metodo_pago_sat: metodo,
+        forma_pago_sat: metodo === "PPD" ? "99" : formaPago,
+        iva_retenido_pct: retencionActiva ? 0.16 : 0,
+        isr_retenido_pct: 0,
+        conceptos: conceptos.map(c => ({
+          id: c.id, descripcion: c.descripcion,
+          cantidad: c.cantidad, precio_unitario: c.precio_unitario,
+          clave_prod_serv_sat: c.clave_prod_serv_sat || undefined,
+          clave_unidad_sat: c.clave_unidad_sat || undefined,
+          tasa_iva: c.tasa_iva,
+        })),
+      });
+      alert("💾 Cambios guardados.\n\nLa factura NO se timbró todavía. Al volver a abrir la previa veras los mismos valores. Timbra cuando el cliente apruebe.");
+    } catch (err: any) {
+      if (err.response?.status !== 401) {
+        alert("Error: " + (err.response?.data?.detail || err.message));
+      }
+    } finally { setBusy(false); }
+  }
+
   async function guardarYTimbrar() {
     if (!detalle) return;
     setBusy(true);
@@ -1207,7 +1234,7 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                   <th style={{ padding: 4, textAlign: "left" }}>Descripcion</th>
                   <th style={{ padding: 4, textAlign: "left", width: 80 }}>Clave SAT</th>
                   <th style={{ padding: 4, textAlign: "right", width: 55 }}>Cant</th>
-                  <th style={{ padding: 4, textAlign: "left", width: 55 }}>UnidSAT</th>
+                  <th style={{ padding: 4, textAlign: "left", width: 115 }}>UnidSAT</th>
                   <th style={{ padding: 4, textAlign: "right", width: 90 }}>Precio</th>
                   <th style={{ padding: 4, textAlign: "center", width: 70 }}>IVA</th>
                   <th style={{ padding: 4, textAlign: "right", width: 90 }}>Importe</th>
@@ -1234,10 +1261,33 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                           border: "1px solid #cbd5e1", borderRadius: 3 }} />
                     </td>
                     <td style={{ padding: 3 }}>
-                      <input type="text" value={c.clave_unidad_sat || ""} maxLength={3}
+                      <select value={c.clave_unidad_sat || "H87"}
                         onChange={(e) => cambiarConcepto(i, { clave_unidad_sat: e.target.value })}
-                        style={{ width: 50, padding: "3px 5px", fontSize: 11, fontFamily: "monospace",
-                          border: "1px solid #cbd5e1", borderRadius: 3 }} />
+                        style={{ width: 110, padding: "3px 4px", fontSize: 11,
+                          border: "1px solid #cbd5e1", borderRadius: 3 }}>
+                        <option value="H87">H87 · Pieza</option>
+                        <option value="XPK">XPK · Paquete</option>
+                        <option value="XBX">XBX · Caja</option>
+                        <option value="KGM">KGM · Kilogramo</option>
+                        <option value="GRM">GRM · Gramo</option>
+                        <option value="LTR">LTR · Litro</option>
+                        <option value="MLT">MLT · Mililitro</option>
+                        <option value="MTR">MTR · Metro</option>
+                        <option value="MTK">MTK · M²</option>
+                        <option value="MTQ">MTQ · M³</option>
+                        <option value="TNE">TNE · Tonelada</option>
+                        <option value="PR">PR · Par</option>
+                        <option value="SET">SET · Juego</option>
+                        <option value="ROL">ROL · Rollo</option>
+                        <option value="BAG">BAG · Bolsa</option>
+                        <option value="CT">CT · Cartón</option>
+                        <option value="ACT">ACT · Actividad</option>
+                        <option value="E48">E48 · Servicio</option>
+                        <option value="HUR">HUR · Hora</option>
+                        <option value="DAY">DAY · Día</option>
+                        <option value="MON">MON · Mes</option>
+                        <option value="DPC">DPC · Docena pzas</option>
+                      </select>
                     </td>
                     <td style={{ padding: 3 }}>
                       <input type="number" min="0" step="0.01" value={c.precio_unitario}
@@ -1335,6 +1385,14 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                 cursor: busy ? "wait" : "pointer" }}
               title="Abre ventana nueva con la previa: puedes imprimir o guardar como PDF sin timbrar">
               🖨 Imprimir/Guardar PDF
+            </button>
+            <button onClick={guardarSinTimbrar} disabled={busy || cargando}
+              style={{ padding: "10px 16px", background: "white",
+                color: "#1e40af", border: "1px solid #1e40af",
+                borderRadius: 6, fontWeight: 700, fontSize: 13,
+                cursor: busy ? "wait" : "pointer" }}
+              title="Guarda los cambios en la base pero NO timbra. Puedes seguir despues.">
+              💾 Guardar sin timbrar
             </button>
             <button onClick={guardarYTimbrar} disabled={busy || cargando}
               style={{ padding: "10px 22px", background: busy ? "#94a3b8" : "#10b981",
