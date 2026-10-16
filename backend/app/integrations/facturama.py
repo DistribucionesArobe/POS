@@ -13,6 +13,48 @@ class FacturamaError(Exception):
     pass
 
 
+# Mapeo ClaveUnidadSAT -> nombre descriptivo (campo "Unidad" texto en CFDI)
+_UNIT_NAME_MAP = {
+    "H87": "Pieza",
+    "EA": "Elemento",
+    "XPK": "Paquete",
+    "XBX": "Caja",
+    "KGM": "Kilogramo",
+    "GRM": "Gramo",
+    "MGM": "Miligramo",
+    "LTR": "Litro",
+    "MLT": "Mililitro",
+    "MTR": "Metro",
+    "CMT": "Centimetro",
+    "MMT": "Milimetro",
+    "MTK": "Metro cuadrado",
+    "MTQ": "Metro cubico",
+    "TNE": "Tonelada",
+    "ACT": "Actividad",
+    "E48": "Servicio",
+    "H64": "Pale",
+    "PR": "Par",
+    "DPC": "Docena de piezas",
+    "HUR": "Hora",
+    "DAY": "Dia",
+    "MON": "Mes",
+    "ANN": "Ano",
+    "SET": "Juego",
+    "ROL": "Rollo",
+    "BAG": "Bolsa",
+    "TU": "Tubo",
+    "CT": "Carton",
+}
+
+
+def _unit_name(clave_unidad: str | None) -> str:
+    """Nombre descriptivo de la unidad SAT para el atributo Unidad del CFDI.
+    Si la clave no esta en el mapa, devuelve 'Pieza' como default seguro."""
+    if not clave_unidad:
+        return "Pieza"
+    return _UNIT_NAME_MAP.get(clave_unidad.upper().strip(), "Pieza")
+
+
 # Catalogo SAT c_TasaOCuota — valores EXACTOS aceptados para RETENCION.
 # Si la tasa calculada esta cerca de alguno, se "snapea" al valor del catalogo.
 _SAT_TASAS_RETENCION = [
@@ -120,12 +162,13 @@ class FacturamaClient:
             # Sin retenciones: Item.Total = Subtotal + IVA = importe + iva_calc
             # Con retencion: Item.Total = importe + iva_calc - iva_ret - isr_ret
             item_total = round(importe + iva_calc - iva_ret_concepto - isr_ret_concepto, 2)
+            clave_unidad = c.clave_unidad_sat or "H87"
             items.append({
                 "ProductCode": c.clave_prod_serv_sat or "01010101",
                 "IdentificationNumber": str(c.variante_id),
                 "Description": c.descripcion,
-                "Unit": "Pieza",
-                "UnitCode": c.clave_unidad_sat or "H87",
+                "Unit": _unit_name(clave_unidad),  # texto legible: Paquete, Caja, Kilogramo
+                "UnitCode": clave_unidad,            # codigo SAT: XPK, XBX, KGM
                 "UnitPrice": float(c.precio_unitario),
                 "Quantity": float(c.cantidad),
                 "Subtotal": importe,
@@ -217,7 +260,7 @@ class FacturamaClient:
                 "ProductCode": "01010101",   # comodin SAT
                 "IdentificationNumber": str(t.id),
                 "Description": f"Venta mostrador folio {t.folio} del {t.fecha.strftime('%d/%m/%Y')}",
-                "Unit": "Pieza",
+                "Unit": _unit_name("ACT"),
                 "UnitCode": "ACT",             # ACT = Actividad
                 "UnitPrice": importe,
                 "Quantity": 1,
