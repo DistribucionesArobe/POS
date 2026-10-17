@@ -8,6 +8,8 @@ type Variante = {
   costo_promedio: number; stock_actual: number; stock_minimo: number;
   activo: boolean;
   favorito_caja?: boolean;
+  mostrar_en_web?: boolean;
+  imagen_url?: string | null;
   tasa_iva?: number;
 };
 type ProductoT = {
@@ -257,6 +259,39 @@ export default function Productos() {
       await api.patch(`/api/productos/variantes/${v.id}/favorito`, { favorito: nuevo });
     } catch (err: any) {
       alert("No se pudo actualizar favorito: " + (err.response?.data?.detail || err.message));
+      cargar();
+    }
+  }
+
+  async function toggleWeb(v: Variante) {
+    const nuevo = !v.mostrar_en_web;
+    let imagen_url: string | null | undefined = undefined;
+    if (nuevo) {
+      // Al activarlo le pedimos (opcional) URL de imagen externa
+      const url = prompt(
+        "URL de imagen (opcional) — pega el link de la foto de la pala.\n" +
+        "Puedes dejar en blanco si en la web usas tu propia imagen.",
+        v.imagen_url || ""
+      );
+      if (url === null) return; // canceló
+      imagen_url = url.trim() || null;
+    }
+    setProductos((prev) =>
+      prev.map((p) => ({
+        ...p,
+        variantes: p.variantes.map((vv) =>
+          vv.id === v.id
+            ? { ...vv, mostrar_en_web: nuevo, imagen_url: imagen_url !== undefined ? imagen_url : vv.imagen_url }
+            : vv
+        ),
+      }))
+    );
+    try {
+      const payload: any = { mostrar: nuevo };
+      if (imagen_url !== undefined) payload.imagen_url = imagen_url;
+      await api.patch(`/api/productos/variantes/${v.id}/mostrar-web`, payload);
+    } catch (err: any) {
+      alert("No se pudo actualizar: " + (err.response?.data?.detail || err.message));
       cargar();
     }
   }
@@ -646,6 +681,22 @@ export default function Productos() {
                                   }}
                                 >
                                   {v.favorito_caja ? "★" : "☆"}
+                                </button>
+                                <button
+                                  className="btn-icon"
+                                  onClick={() => toggleWeb(v)}
+                                  title={v.mostrar_en_web ? "Visible en el sitio web" : "Mostrar en el sitio web"}
+                                  style={{
+                                    fontSize: 15,
+                                    marginLeft: 4,
+                                    color: v.mostrar_en_web ? "#0ea5e9" : "#ccc",
+                                    background: "transparent",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                  }}
+                                >
+                                  {v.mostrar_en_web ? "🌐" : "○"}
                                 </button>
                               </td>
                               <td>

@@ -65,6 +65,10 @@ class VarianteProducto(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     # Marcado para mostrarse como boton rapido en Caja
     favorito_caja: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Marcado para exponer precio y stock al sitio publico (ej. somoscpv.com)
+    mostrar_en_web: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # URL de imagen externa opcional (para la web). El sitio puede usarla o ignorarla.
+    imagen_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Tasa de IVA aplicable por variante. 0.16 general, 0.08 frontera, 0 exento.
     # Se respeta al vender: cada linea del CFDI usa esta tasa.
     tasa_iva: Mapped[float] = mapped_column(Numeric(6, 4), default=0.16)

@@ -29,6 +29,7 @@ from app.routers import (
     salidas_mercancia,
     conteo_inventario,
     factura_global,
+    catalogo_web,
 )
 
 settings = get_settings()
@@ -99,3 +100,4 @@ app.include_router(gmail_sync.router, prefix="/api")
 app.include_router(salidas_mercancia.router, prefix="/api")
 app.include_router(conteo_inventario.router, prefix="/api")
 app.include_router(factura_global.router, prefix="/api")
+app.include_router(catalogo_web.router, prefix="/api")

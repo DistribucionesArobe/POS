@@ -256,6 +256,8 @@ def listar_productos(
                     "stock_minimo": float(v.stock_minimo),
                     "activo": v.activo,
                     "favorito_caja": v.favorito_caja,
+                    "mostrar_en_web": bool(getattr(v, "mostrar_en_web", False)),
+                    "imagen_url": getattr(v, "imagen_url", None),
                     "tasa_iva": float(v.tasa_iva) if v.tasa_iva is not None else 0.16,
                 }
                 for v in p.variantes
@@ -591,6 +593,28 @@ def toggle_favorito(
     v.favorito_caja = bool(payload.get("favorito", False))
     db.commit()
     return {"ok": True, "favorito": v.favorito_caja}
+
+
+@router.patch("/variantes/{variante_id}/mostrar-web")
+def toggle_mostrar_web(
+    variante_id: int,
+    payload: dict,
+    empresa_id: int = Depends(get_active_empresa_id),
+    db: Session = Depends(get_db),
+):
+    """Marca o desmarca una variante para aparecer en el sitio publico."""
+    v = db.get(VarianteProducto, variante_id)
+    if not v:
+        raise HTTPException(404, "Variante no existe")
+    producto = db.get(Producto, v.producto_id)
+    if producto.empresa_id != empresa_id:
+        raise HTTPException(403, "Variante de otra empresa")
+    v.mostrar_en_web = bool(payload.get("mostrar", False))
+    if "imagen_url" in payload:
+        url = (payload.get("imagen_url") or "").strip() or None
+        v.imagen_url = url
+    db.commit()
+    return {"ok": True, "mostrar_en_web": v.mostrar_en_web, "imagen_url": v.imagen_url}
 
 
 @router.patch("/variantes/{variante_id}/precio")
