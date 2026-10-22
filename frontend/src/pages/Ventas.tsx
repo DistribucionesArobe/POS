@@ -1278,7 +1278,7 @@ function PreviaTimbreModal({ venta, onClose, onTimbrado }: {
                         <option value="TNE">TNE · Tonelada</option>
                         <option value="PR">PR · Par</option>
                         <option value="SET">SET · Juego</option>
-                        <option value="ROL">ROL · Rollo</option>
+                        <option value="XRO">XRO · Rollo</option>
                         <option value="BAG">BAG · Bolsa</option>
                         <option value="CT">CT · Cartón</option>
                         <option value="ACT">ACT · Actividad</option>

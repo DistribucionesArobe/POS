@@ -41,6 +41,7 @@ _UNIT_NAME_MAP = {
     "ANN": "Ano",
     "SET": "Juego",
     "ROL": "Rollo",
+    "XRO": "Rollo",
     "BAG": "Bolsa",
     "TU": "Tubo",
     "CT": "Carton",
