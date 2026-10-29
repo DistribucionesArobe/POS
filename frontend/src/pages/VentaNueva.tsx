@@ -99,14 +99,34 @@ export default function VentaNueva() {
   const [vigenciaDias, setVigenciaDias] = useState<number>(15);
   const [guardandoCot, setGuardandoCot] = useState(false);
 
+  // Empresas donde SIEMPRE se asume precios netos (c/IVA incluido). Son operaciones
+  // internas (Padel, Cafe) donde los cajeros no deben estar pensando en IVA.
+  // La config vive en la empresa (campo precios_netos_siempre). Por default fallback a
+  // una lista blanca por id para no bloquear si el campo no existe aun.
+  const empresaActivaMemo = (() => {
+    try { return JSON.parse(localStorage.getItem("empresa_activa") || "{}"); }
+    catch { return {}; }
+  })();
+  const empresaId: number | undefined = empresaActivaMemo?.id;
+  const empresaForzaNeto: boolean =
+    !!empresaActivaMemo?.precios_netos_siempre ||
+    [3, 5].includes(empresaId as number); // Cafe=3, Padel=5
+
   // Default: precios YA incluyen IVA (NETO). Es como estan subidos en la BD.
   const [preciosConIva, setPreciosConIva] = useState<boolean>(() => {
-    const v = localStorage.getItem("venta_precios_con_iva");
+    if (empresaForzaNeto) return true;
+    const v = localStorage.getItem(`venta_precios_con_iva_${empresaId || 0}`);
     return v === null ? true : v === "1";
   });
   useEffect(() => {
-    localStorage.setItem("venta_precios_con_iva", preciosConIva ? "1" : "0");
-  }, [preciosConIva]);
+    if (empresaForzaNeto) return; // no persistir, siempre on
+    localStorage.setItem(`venta_precios_con_iva_${empresaId || 0}`, preciosConIva ? "1" : "0");
+  }, [preciosConIva, empresaForzaNeto, empresaId]);
+  // Si cambia la empresa a una forzada, aseguramos que quede en true.
+  useEffect(() => {
+    if (empresaForzaNeto && !preciosConIva) setPreciosConIva(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaForzaNeto]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<number | null>(null);
@@ -277,7 +297,10 @@ export default function VentaNueva() {
       setPagos([{ forma_pago_sat: "01", monto: 0 }]);
       setMostrarPago(false);
     } catch (err: any) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      // 401 lo maneja el interceptor global (alert + redirect a login)
+      if (err.response?.status !== 401) {
+        alert("Error: " + (err.response?.data?.detail || err.message));
+      }
     }
   }
 
@@ -616,9 +639,12 @@ export default function VentaNueva() {
           border: 0, fontWeight: 700, fontSize: 12, userSelect: "none", whiteSpace: "nowrap",
         }} title="Marca si tus precios YA incluyen IVA (NETO). Desmarca si son precios base s/IVA que debe sumarse al cobrar.">
           <input type="checkbox" checked={preciosConIva}
+            disabled={empresaForzaNeto}
             onChange={(e) => setPreciosConIva(e.target.checked)}
-            style={{ width: 16, height: 16, cursor: "pointer" }} />
-          {preciosConIva ? "✓ PRECIOS NETO (c/IVA incluido)" : "⚠ PRECIOS SIN IVA (se suma al cobrar)"}
+            style={{ width: 16, height: 16, cursor: empresaForzaNeto ? "not-allowed" : "pointer" }} />
+          {empresaForzaNeto
+            ? "🔒 PRECIOS NETO (fijo para esta empresa)"
+            : (preciosConIva ? "✓ PRECIOS NETO (c/IVA incluido)" : "⚠ PRECIOS SIN IVA (se suma al cobrar)")}
         </label>
       </div>
 
