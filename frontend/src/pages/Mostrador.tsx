@@ -108,10 +108,26 @@ export default function Mostrador() {
     setUltimoCambio(0);
   }
 
-  const subtotal = items.reduce((a, i) => a + i.cantidad * i.precio, 0);
+  // Empresas internas (Padel=5, Cafe=3): el precio de catalogo YA incluye IVA.
+  // Se despeja hacia atras: subtotal = precio / (1+tasa), iva = diferencia, total = precio.
+  // Asi el cajero cobra EXACTO lo que ve en la tarjeta ($20 = $20 al cliente).
+  const _empresaMostrador = (() => {
+    try { return JSON.parse(localStorage.getItem("empresa_activa") || "{}"); }
+    catch { return {}; }
+  })();
+  const _preciosYaConIva: boolean =
+    !!_empresaMostrador?.precios_netos_siempre ||
+    [3, 5].includes(_empresaMostrador?.id as number);
+
+  const subtotal = items.reduce((a, i) => {
+    const t = i.tasa_iva !== undefined ? i.tasa_iva : 0.16;
+    const base = _preciosYaConIva ? i.precio / (1 + t) : i.precio;
+    return a + i.cantidad * base;
+  }, 0);
   const iva = items.reduce((a, i) => {
     const t = i.tasa_iva !== undefined ? i.tasa_iva : 0.16;
-    return a + i.cantidad * i.precio * t;
+    const base = _preciosYaConIva ? i.precio / (1 + t) : i.precio;
+    return a + i.cantidad * base * t;
   }, 0);
   const total = subtotal + iva;
 
@@ -136,11 +152,19 @@ export default function Mostrador() {
         cliente_id: clienteId,
         forma_pago_sat: formaSat,
         metodo_pago_sat: "PUE",
-        conceptos: items.map(i => ({
-          variante_id: i.variante_id,
-          cantidad: i.cantidad,
-          precio_unitario: i.precio,
-        })),
+        conceptos: items.map(i => {
+          const t = i.tasa_iva !== undefined ? i.tasa_iva : 0.16;
+          // Si la empresa tiene precios ya con IVA, el backend espera precio BASE (sin IVA)
+          // para que al sumar IVA de nuevo el total coincida con lo cobrado.
+          const precioBase = _preciosYaConIva
+            ? +(i.precio / (1 + t)).toFixed(6)
+            : i.precio;
+          return {
+            variante_id: i.variante_id,
+            cantidad: i.cantidad,
+            precio_unitario: precioBase,
+          };
+        }),
         pagos: [{ forma_pago_sat: formaSat, monto: total }],
       });
       setUltimaVenta(r.data);
